@@ -55,12 +55,28 @@ function findPackageRoot(fromFile: string): string | undefined {
   return undefined
 }
 
+/** Find a dependency's package.json inside pnpm's virtual store (node_modules/.pnpm/node_modules/<name>). */
+function pnpmStorePackageJson(name: string): string | undefined {
+  let dir = PLUGIN_ROOT
+  for (let i = 0; i < 12; i++) {
+    const candidate = path.join(dir, 'node_modules', '.pnpm', 'node_modules', name, 'package.json')
+    if (fs.existsSync(candidate)) return candidate
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return undefined
+}
+
 /**
- * Resolve a dependency's package.json: plugin-local first, global npm second.
- * Packages that do NOT export `./package.json` (e.g. @jackwener/opencli) are
- * resolved via their main entry and then walked up to the package root.
+ * Resolve a dependency's package.json: pnpm virtual store -> plugin-local ->
+ * global npm. Packages that do NOT export `./package.json`
+ * (e.g. @jackwener/opencli) are resolved via their main entry and then walked
+ * up to the package root.
  */
 function resolvePkgJson(name: string): string {
+  const storePkg = pnpmStorePackageJson(name)
+  if (storePkg) return storePkg
   const anchors = [
     path.join(PLUGIN_ROOT, 'package.json'),
     path.join(globalNpmRoot(), name, 'package.json'),
@@ -74,7 +90,7 @@ function resolvePkgJson(name: string): string {
       if (root) return root
     } catch { /* not found at this anchor */ }
   }
-  throw new Error('dsh-browser: ' + name + ' not found in plugin node_modules or global npm. Run `npm install` in ' + PLUGIN_ROOT + ' (or install ' + name + ' globally).')
+  throw new Error('dsh-browser: ' + name + ' not found in pnpm store, plugin node_modules, or global npm. Run `npm install` in ' + PLUGIN_ROOT + ' (or install ' + name + ' globally).')
 }
 
 function pkgDir(name: string): string {
