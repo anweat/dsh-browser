@@ -1,0 +1,15 @@
+# dsh-browser bundle patch — installs the browser runtime as one more row over
+# the active profile. Install with:
+#   dsh plugin --profile <name> add dsh-browser
+# then boot the profile (the web profile has HMR disabled, so a restart applies it).
+#
+# Login state: set `storageStatePath` to a Playwright storageState JSON (see
+# README) to reuse an already-logged-in browser session.
+- insert:
+    - id: browser
+      name: dsh-browser
+      config:
+        channel: chromium
+        headless: true
+        opencliEnabled: true
+        verbose: false
