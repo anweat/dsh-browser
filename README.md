@@ -7,7 +7,7 @@
 ## 安装
 
 ```bash
-dsh plugin --profile web add dsh-browser
+dsh plugin --profile web add @anweat/dsh-browser
 # 或本地目录 / tarball：
 dsh plugin --profile web add ./dsh-browser
 # 重启（web profile 关闭了 HMR）：
@@ -61,7 +61,7 @@ export function apply(ctx: Context) {
 ```yaml
 - insert:
     - id: browser
-      name: dsh-browser
+      name: '@anweat/dsh-browser'
       config:
         channel: chromium        # 'chromium'（打包内核）| 'msedge'（系统 Edge）
         headless: true
