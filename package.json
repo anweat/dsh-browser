@@ -47,5 +47,9 @@
       "patch": "./cordis.patch.yml"
     }
   },
-  "packageManager": "pnpm@9.15.9"
+  "packageManager": "pnpm@9.15.9",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anweat/dsh-browser.git"
+  }
 }
