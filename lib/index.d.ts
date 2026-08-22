@@ -13,4 +13,6 @@ export declare const inject: string[];
 export { Config };
 export type { Config as BrowserConfig } from './config.ts';
 export type { BrowserService, RenderRule, RenderResult, SnapshotResult, PlatformSpec, SearchItem, InteractiveState } from './browser-service.ts';
+export type { AuthProfileConfig, ResolvedAuthProfile } from './auth-profiles.ts';
+export type { RulePackConfig, RuleStep, ResolvedRulePack } from './rule-packs.ts';
 export declare function apply(ctx: Context, config: Config): void;

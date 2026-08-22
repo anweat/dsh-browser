@@ -24,6 +24,8 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { loadPlaywright, runOpencli, runNode, playwrightCliPath, type CliResult } from './deps.ts'
 import type { ResolvedConfig } from './config.ts'
+import { AuthProfileStore, type ResolvedAuthProfile } from './auth-profiles.ts'
+import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
 
 export interface RenderRule {
   hostname: string
@@ -140,8 +142,13 @@ export class BrowserService {
   private launching?: Promise<any>
   private activeContext: any
   private activePage: any
+  private activeProfile?: ResolvedAuthProfile
+  private activeRulePack?: ResolvedRulePack
+  private readonly authProfiles: AuthProfileStore
 
-  constructor(private readonly config: ResolvedConfig) {}
+  constructor(private readonly config: ResolvedConfig) {
+    this.authProfiles = new AuthProfileStore(config.authProfiles)
+  }
 
   available(): boolean {
     return this.config.enabled
@@ -184,9 +191,35 @@ export class BrowserService {
     return runNode(playwrightCliPath(), ['install', 'chromium'], { timeoutMs: 600_000, signal: undefined, maxOutput: 256 * 1024 })
   }
 
-  private async transientContext(): Promise<any> {
+  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack }> {
     const browser = await this.ensure()
-    return browser.newContext(this.config.storageStatePath ? { storageState: this.config.storageStatePath } : {})
+    const profileId = opts.authProfile ?? this.config.defaultAuthProfile
+    const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
+    const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
+    const context = await browser.newContext(profile?.storageStatePath
+      ? { storageState: profile.storageStatePath }
+      : (this.config.storageStatePath ? { storageState: this.config.storageStatePath } : {}))
+    try {
+      if (rulePack?.initScriptPath) await context.addInitScript({ path: rulePack.initScriptPath })
+    } catch (error) {
+      await context.close().catch(() => {})
+      throw error
+    }
+    return { context, ...profile ? { profile } : {}, ...rulePack ? { rulePack } : {} }
+  }
+
+  private async persistAndClose(session: { context: any; profile?: ResolvedAuthProfile }): Promise<void> {
+    try {
+      if (session.profile?.persistState) {
+        const state = await session.context.storageState()
+        fs.mkdirSync(path.dirname(session.profile.storageStatePath), { recursive: true })
+        const temporary = session.profile.storageStatePath + '.tmp-' + uid().slice(0, 8)
+        fs.writeFileSync(temporary, JSON.stringify(state, null, 2), { encoding: 'utf8', mode: 0o600 })
+        fs.renameSync(temporary, session.profile.storageStatePath)
+      }
+    } finally {
+      await session.context.close().catch(() => {})
+    }
   }
 
   // ── render / snapshot / searchResults (web-search-pro contract) ──────────
@@ -194,9 +227,10 @@ export class BrowserService {
   async render(
     url: string,
     rules: readonly RenderRule[],
-    opts: { signal?: AbortSignal; maxChars?: number; waitMs?: number } = {},
+    opts: { signal?: AbortSignal; maxChars?: number; waitMs?: number; authProfile?: string; rulePack?: string } = {},
   ): Promise<RenderResult> {
-    const context = await this.transientContext()
+    const session = await this.transientContext(url, opts)
+    const { context } = session
     const page = await context.newPage()
     const signal = opts.signal
     const onAbort = () => void page.close().catch(() => {})
@@ -206,6 +240,7 @@ export class BrowserService {
       page.setDefaultTimeout(20_000)
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25_000 })
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
+      await applyRuleSteps(page, session.rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
       const data = await evaluateExtractor(page, rules)
       return {
@@ -218,16 +253,17 @@ export class BrowserService {
       throw new Error('browser render failed for ' + url + ': ' + String(error).slice(0, 300))
     } finally {
       signal?.removeEventListener('abort', onAbort)
-      await context.close().catch(() => {})
+      await this.persistAndClose(session)
     }
   }
 
   async snapshot(
     url: string,
     rules: readonly RenderRule[],
-    opts: { signal?: AbortSignal; outDir: string; maxChars?: number },
+    opts: { signal?: AbortSignal; outDir: string; maxChars?: number; authProfile?: string; rulePack?: string },
   ): Promise<SnapshotResult> {
-    const context = await this.transientContext()
+    const session = await this.transientContext(url, opts)
+    const { context } = session
     const page = await context.newPage()
     const signal = opts.signal
     const onAbort = () => void page.close().catch(() => {})
@@ -241,6 +277,7 @@ export class BrowserService {
       page.setDefaultTimeout(25_000)
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
       await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
+      await applyRuleSteps(page, session.rulePack)
       await page.screenshot({ path: screenshotPath, fullPage: true })
       const html = await page.content()
       fs.writeFileSync(htmlPath, html, 'utf8')
@@ -256,16 +293,17 @@ export class BrowserService {
       throw new Error('browser snapshot failed for ' + url + ': ' + String(error).slice(0, 300))
     } finally {
       signal?.removeEventListener('abort', onAbort)
-      await context.close().catch(() => {})
+      await this.persistAndClose(session)
     }
   }
 
   async searchResults(
     url: string,
     spec: PlatformSpec,
-    opts: { signal?: AbortSignal; count?: number; waitMs?: number; cookies?: { name: string; value: string; domain: string; path: string }[] } = {},
+    opts: { signal?: AbortSignal; count?: number; waitMs?: number; cookies?: { name: string; value: string; domain: string; path: string }[]; authProfile?: string; rulePack?: string } = {},
   ): Promise<SearchItem[]> {
-    const context = await this.transientContext()
+    const session = await this.transientContext(url, opts)
+    const { context } = session
     if (opts.cookies?.length) await context.addCookies(opts.cookies).catch(() => {})
     const page = await context.newPage()
     const signal = opts.signal
@@ -276,6 +314,7 @@ export class BrowserService {
       page.setDefaultTimeout(25_000)
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
+      await applyRuleSteps(page, session.rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
       await page.mouse?.wheel(0, 2000).catch(() => {})
       await page.waitForTimeout(800)
@@ -290,7 +329,7 @@ export class BrowserService {
       throw new Error('browser platform search failed for ' + url + ': ' + String(error).slice(0, 300))
     } finally {
       signal?.removeEventListener('abort', onAbort)
-      await context.close().catch(() => {})
+      await this.persistAndClose(session)
     }
   }
 
@@ -306,10 +345,25 @@ export class BrowserService {
 
   // ── interactive surface (one persistent context + page) ──────────────────
 
-  private async ensureActivePage(): Promise<any> {
-    if (this.activePage && !this.activePage.isClosed()) return this.activePage
-    const browser = await this.ensure()
-    this.activeContext = await browser.newContext(this.config.storageStatePath ? { storageState: this.config.storageStatePath } : {})
+  private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string } = {}): Promise<any> {
+    if (this.activePage && !this.activePage.isClosed()) {
+      if (!targetUrl) return this.activePage
+      if ((opts.authProfile ?? this.config.defaultAuthProfile) === this.activeProfile?.id && opts.rulePack === this.activeRulePack?.id) {
+        if (this.activeProfile) this.authProfiles.resolve(this.activeProfile.id, targetUrl)
+        if (this.activeRulePack) resolveRulePack(this.config.rulePacks, this.activeRulePack.id, targetUrl)
+        return this.activePage
+      }
+      await this.closePage()
+    }
+    if (targetUrl) {
+      const session = await this.transientContext(targetUrl, opts)
+      this.activeContext = session.context
+      this.activeProfile = session.profile
+      this.activeRulePack = session.rulePack
+    } else {
+      const browser = await this.ensure()
+      this.activeContext = await browser.newContext(this.config.storageStatePath ? { storageState: this.config.storageStatePath } : {})
+    }
     this.activePage = await this.activeContext.newPage()
     return this.activePage
   }
@@ -332,11 +386,12 @@ export class BrowserService {
     return state
   }
 
-  async open(url: string, opts: { waitMs?: number } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(url, opts)
     page.setDefaultTimeout(30_000)
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
+    await applyRuleSteps(page, this.activeRulePack)
     if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
     return this.readState(page, true)
   }
@@ -377,11 +432,13 @@ export class BrowserService {
   async closePage(): Promise<void> {
     if (this.activePage) { await this.activePage.close().catch(() => {}) }
     this.activePage = undefined
-    if (this.activeContext) { await this.activeContext.close().catch(() => {}) }
+    if (this.activeContext) await this.persistAndClose({ context: this.activeContext, ...this.activeProfile ? { profile: this.activeProfile } : {} })
     this.activeContext = undefined
+    this.activeProfile = undefined
+    this.activeRulePack = undefined
   }
 
-  async status(): Promise<{ enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; chromiumInstalled: boolean; activeUrl?: string }> {
+  async status(): Promise<{ enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; chromiumInstalled: boolean; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; activeUrl?: string; activeAuthProfile?: string }> {
     let chromiumInstalled = false
     try {
       const pw = loadPlaywright()
@@ -393,7 +450,10 @@ export class BrowserService {
       headless: this.config.headless,
       opencliEnabled: this.config.opencliEnabled,
       chromiumInstalled,
+      authProfiles: this.authProfiles.list(),
+      rulePacks: Object.keys(this.config.rulePacks).sort(),
       ...(this.activePage && !this.activePage.isClosed() ? { activeUrl: this.activePage.url() } : {}),
+      ...this.activeProfile ? { activeAuthProfile: this.activeProfile.id } : {},
     }
   }
 

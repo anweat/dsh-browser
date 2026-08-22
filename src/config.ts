@@ -6,6 +6,8 @@
 import path from 'node:path'
 import os from 'node:os'
 import z from '@deepseek-ai/schemastery'
+import type { AuthProfileConfig } from './auth-profiles.ts'
+import type { RulePackConfig } from './rule-packs.ts'
 
 export interface Config {
   /** Whether the browser service is active. */
@@ -15,6 +17,12 @@ export interface Config {
   headless: boolean
   /** Path to a Playwright storageState JSON (persisted login state). */
   storageStatePath?: string
+  /** Named, domain-scoped reusable login states. */
+  authProfiles?: Record<string, AuthProfileConfig>
+  /** Optional named profile used when a caller does not select one. */
+  defaultAuthProfile?: string
+  /** Domain-scoped, hash-pinned browser enhancement packs. */
+  rulePacks?: Record<string, RulePackConfig>
   /** Explicit browser executable path override (rare). */
   executablePath?: string
   /** Whether the bundled OpenCLI is enabled. */
@@ -31,18 +39,41 @@ export const Config: z<Config> = z.object({
   channel: z.string().default('chromium'),
   headless: z.boolean().default(true),
   storageStatePath: z.string(),
+  authProfiles: z.dict(z.object({
+    storageStatePath: z.string(),
+    allowedDomains: z.array(z.string()).default([]),
+    persistState: z.boolean().default(false),
+  })),
+  defaultAuthProfile: z.string(),
+  rulePacks: z.dict(z.object({
+    matches: z.array(z.string()).default([]),
+    initScriptPath: z.string(),
+    initScriptSha256: z.string(),
+    steps: z.array(z.object({
+      type: z.string(),
+      selector: z.string(),
+      timeoutMs: z.number(),
+      optional: z.boolean(),
+      deltaY: z.number(),
+      repeat: z.number(),
+      waitMs: z.number(),
+    })).default([]),
+  })),
   executablePath: z.string(),
   opencliEnabled: z.boolean().default(true),
   autoInstall: z.boolean().default(false),
   snapshotDir: z.string(),
   verbose: z.boolean().default(false),
-})
+}) as z<Config>
 
 export interface ResolvedConfig {
   enabled: boolean
   channel: string
   headless: boolean
   storageStatePath?: string
+  authProfiles: Record<string, AuthProfileConfig>
+  defaultAuthProfile?: string
+  rulePacks: Record<string, RulePackConfig>
   executablePath?: string
   opencliEnabled: boolean
   autoInstall: boolean
@@ -65,6 +96,9 @@ export function resolveConfig(config: Config): ResolvedConfig {
     autoInstall: config.autoInstall ?? false,
     snapshotDir,
     verbose: config.verbose ?? false,
+    authProfiles: config.authProfiles ?? {},
+    rulePacks: config.rulePacks ?? {},
+    ...config.defaultAuthProfile ? { defaultAuthProfile: config.defaultAuthProfile } : {},
     ...config.storageStatePath !== undefined && config.storageStatePath !== '' ? { storageStatePath: config.storageStatePath } : {},
     ...config.executablePath !== undefined && config.executablePath !== '' ? { executablePath: config.executablePath } : {},
   }

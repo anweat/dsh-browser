@@ -3,8 +3,8 @@
 #   dsh plugin --profile <name> add @anweat/dsh-browser
 # then boot the profile (the web profile has HMR disabled, so a restart applies it).
 #
-# Login state: set `storageStatePath` to a Playwright storageState JSON (see
-# README) to reuse an already-logged-in browser session.
+# Login state: prefer named `authProfiles` with explicit `allowedDomains` (see
+# README). `storageStatePath` remains as a legacy global fallback.
 - insert:
     - id: browser
       name: '@anweat/dsh-browser'
