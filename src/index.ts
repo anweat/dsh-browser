@@ -14,21 +14,34 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { Config, resolveConfig, type ResolvedConfig } from './config.ts'
 import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
+import { browserPolicyDecision } from './approval-policy.ts'
 
 export const name = 'dsh-browser'
 export const inject = ['tools']
 
 export { Config }
 export type { Config as BrowserConfig } from './config.ts'
-export type { BrowserService, RenderRule, RenderResult, SnapshotResult, PlatformSpec, SearchItem, InteractiveState } from './browser-service.ts'
+export type { BrowserService, RenderRule, RenderResult, SnapshotResult, PlatformSpec, SearchItem, InteractiveState, RecipeRunResult, ScriptRunResult } from './browser-service.ts'
 export type { AuthProfileConfig, ResolvedAuthProfile } from './auth-profiles.ts'
 export type { RulePackConfig, RuleStep, ResolvedRulePack } from './rule-packs.ts'
+export type { BrowserRecipeStep, RecipeStepResult } from './automation.ts'
+export type { UserscriptMetadata, UserscriptValidation, BuiltinScript } from './scripts.ts'
+export { BUILTIN_SCRIPTS, validateUserscript } from './scripts.ts'
 
 export function apply(ctx: Context, config: Config): void {
   const resolved: ResolvedConfig = resolveConfig(config)
   fs.mkdirSync(resolved.snapshotDir, { recursive: true })
 
   const service = new BrowserService(resolved)
+
+  // Arbitrary userscripts, general OpenCLI commands, and mutating multi-step
+  // recipes must pass through the harness' native one-shot approval flow. The
+  // policy fails closed when no approval service or calling agent is present.
+  ctx.on('tools/pre-execute', async (exec, next) => {
+    const downstream = await next()
+    if (downstream.kind !== 'allow') return downstream
+    return browserPolicyDecision(exec.name, exec.arguments)
+  })
 
   // Provide the `browser` service so consumers (web-search-pro) can inject it.
   // ctx.provide is scoped to this plugin's fiber; the browser instance itself

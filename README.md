@@ -29,7 +29,10 @@ dsh --profile web
 | 表单、分页、懒加载 | `browser_click` / `browser_type` / `browser_scroll` | 选择器由调用方明确提供 |
 | 登录后站点 | `authProfile` | 必须配置 `allowedDomains`；默认不回写 Cookie |
 | 固定站点增强 | `rulePack` | 只允许有界步骤；本地 init script 必须 SHA-256 固定且 ≤64KB |
-| Reddit/小红书等 OpenCLI 平台 | `browser` 服务的 `opencli()` | Chrome 扩展与目标站点登录态必须在线 |
+| 模型生成的多步操作 | `browser_recipe_run` | 声明式步骤；包含页面写操作时触发 DSH 原生一次性审批 |
+| 默认只读脚本 | `browser_script_catalog` → `browser_script_run_builtin` | 内置 article/links/JSON-LD/forms，不执行外来代码 |
+| 外部模型生成 UserScript | `browser_script_validate` → `browser_userscript_run` | 必须 `@match` + `@grant none`；执行前原生审批 |
+| Reddit/小红书等 OpenCLI 平台 | `browser_opencli_status` / `browser_opencli_run` | 通用调用始终审批；Chrome 扩展与目标站点登录态必须在线 |
 
 DSH 会话示例：
 
@@ -55,13 +58,14 @@ DSH 会话示例：
 export const inject = ['tools', 'browser']
 export function apply(ctx: Context) {
   const browser = ctx.get('browser') as BrowserService
-  // browser.render / snapshot / searchResults / opencli / open / click / type / scroll / read / screenshot / close
+  // browser.render / snapshot / searchResults / opencli / recipe /
+  // runBuiltinScript / runUserscript / open / click / type / scroll / read / screenshot / close
 }
 ```
 
 服务接口（结构性，无需共享类型包）见 `src/browser-service.ts`。
 
-## 工具（9 个）
+## 工具（16 个）
 
 | 工具 | 作用 |
 |---|---|
@@ -74,6 +78,67 @@ export function apply(ctx: Context) {
 | `browser_close` | 关闭当前页（下次 open 全新） |
 | `browser_status` | 运行时状态（channel/headless/chromium 是否就绪/opencli 是否启用/当前页） |
 | `browser_install` | 安装 playwright chromium（`browser_status` 报缺失时执行一次） |
+| `browser_script_catalog` | 列出内置只读脚本及其 SHA-256 |
+| `browser_script_validate` | 解析外部 UserScript 的元数据、域名、grant、能力与哈希，不执行 |
+| `browser_script_run_builtin` | 在独立 Playwright context 中运行内置只读脚本 |
+| `browser_userscript_run` | 运行外部 UserScript；强制域名匹配和 DSH 原生一次性审批 |
+| `browser_recipe_run` | 最多 25 步 Playwright Recipe；支持等待、定位、表单、键盘、提取、断言和截图 |
+| `browser_opencli_status` | 实际运行 OpenCLI doctor，报告 daemon/extension/profile 连通性 |
+| `browser_opencli_run` | 通用 OpenCLI argv 网关；始终触发 DSH 原生一次性审批 |
+
+## 外部模型脚本：推荐流程
+
+外部模型可以输出 Tampermonkey/UserScript 格式源码，但不要直接执行。让当前 DSH Agent 先调用
+`browser_script_validate`，展示名称、`@match`、SHA-256 和能力，再调用
+`browser_userscript_run`。执行调用会进入 Harness 的 `tools/pre-execute → approval` 原生流程；用户拒绝、
+没有 approval 服务或调用不属于 Agent 时都不会运行。
+
+最小脚本示例：
+
+```js
+// ==UserScript==
+// @name Read Search Cards
+// @match https://example.com/search*
+// @grant none
+// ==/UserScript==
+return [...document.querySelectorAll('.result')].slice(0, 20).map(card => ({
+  title: card.querySelector('h2')?.textContent?.trim() || '',
+  url: card.querySelector('a')?.href || '',
+}))
+```
+
+当前兼容的是 UserScript 元数据和页面脚本执行模型，不模拟完整 Tampermonkey：
+
+- 只支持 `@grant none`；`GM_cookie`、`GM_xmlhttpRequest`、`unsafeWindow` 等不提供。
+- 不支持 `@require`，避免审批过的源码在运行时再拉取未审查代码。
+- 源码 ≤64KB、结果 ≤100,000 字符、单次运行最长 30 秒。
+- 使用显式 URL，新建独立 Playwright context；需要登录态时只能选已限域的 `authProfile`。
+- 审批代表允许该脚本以当前站点登录身份操作页面；静态能力报告只用于解释，不是沙箱。
+
+常见读取任务优先用内置脚本：`article-clean`、`links`、`jsonld`、`forms`。它们不返回表单当前值，
+也不触发点击或网络写操作。
+
+## Playwright Recipe
+
+Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 JavaScript：
+
+```json
+{
+  "url": "https://example.com/search",
+  "steps": [
+    { "type": "wait", "condition": "selector", "value": "#query" },
+    { "type": "fill", "selector": "#query", "value": "DeepSeek Harness" },
+    { "type": "press", "selector": "#query", "key": "Enter" },
+    { "type": "wait", "condition": "load" },
+    { "type": "extract", "selector": "main", "mode": "links", "limit": 30 },
+    { "type": "screenshot" }
+  ]
+}
+```
+
+支持的步骤为：`wait`、`click`、`fill`、`type`、`press`、`select`、`check`、`hover`、
+`scroll`、`extract`、`assert`、`screenshot`。纯读取步骤直接执行；出现点击、输入、键盘、选择、
+勾选、悬停或滚动时，整个 Recipe 只询问一次审批，批准后顺序执行。
 
 ## 配置（cordis.yml / patch config）
 
@@ -108,7 +173,7 @@ export function apply(ctx: Context) {
 - `channel: chromium` + `storageStatePath` 指向一份 storageState JSON，即可用你已登录的身份抓受限页面。
 - 新配置优先使用 `authProfiles`：按名称复用全局登录态，但必须用 `allowedDomains` 限域；默认只读，避免一次搜索意外改写 Cookie Vault。
 - `browser_open` 和 web-search-pro 的平台搜索可选择 `authProfile` / `rulePack`。`browser_status` 只显示 profile 名称、域名和回写状态，不显示文件路径或 Cookie。
-- RulePack 只允许有界动作；init script 必须是本地、SHA-256 固定且不超过 64KB，不提供“模型直接执行任意 JS”的入口。
+- RulePack 仍只允许有界动作；init script 必须是本地、SHA-256 固定且不超过 64KB。外部模型 JavaScript 使用独立的 UserScript 工具，并强制一次性审批，不能冒充 RulePack。
 - 生成登录态：`npx playwright codegen --save-storage=storageState.json`（或复用 `dsh-web-search-pro` 的 `scripts/save-login.mjs`），把产物路径填进 `storageStatePath`。
 - opencli 的社交平台后端（小红书/推特/Reddit/IG/FB）仍需浏览器扩展 + 登录态在线，即使 opencli 已打包为依赖也绕不开扩展。
 
@@ -123,6 +188,30 @@ opencli doctor
 ```
 
 健康状态应同时包含 daemon running、extension connected 和一个 connected Chrome profile。仅安装 npm 包不等于 Browser Bridge 可用；Chrome 扩展断开时，OpenCLI 社区搜索会明确失败，而普通 Playwright 浏览器工具不受影响。
+
+插件内先调用 `browser_opencli_status`，不要只看 `browser_status.opencliEnabled`。后者表示配置开关，
+前者才是真实连接。通用调用以 argv 数组传入，不经过 shell，也不会自行拼接引号：
+
+```json
+{
+  "profile": "chrome",
+  "args": ["reddit", "search", "DeepSeek Harness", "-f", "json"]
+}
+```
+
+优先级建议：已有站点 adapter（`opencli <site> <command>`）→ `opencli web read` / `extract` →
+`browser network` → DOM state/find/action → 最后才是只读 `eval`。`opencli browser` 必须包含显式 session：
+
+```text
+["browser", "research", "open", "https://example.com"]
+["browser", "research", "state"]
+["browser", "research", "network", "--filter", "title,url"]
+["browser", "research", "extract", "--selector", "main"]
+["browser", "research", "close"]
+```
+
+`browser_opencli_run` 是通用高级入口，可能调用发布、删除、发帖等 adapter，因此无论命令看起来是否只读，
+都要求原生一次性审批。常规搜索仍优先走 `dsh-web-search-pro` 的只读工具。
 
 ## 发布 / 构建
 

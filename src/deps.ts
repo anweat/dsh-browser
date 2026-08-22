@@ -118,13 +118,6 @@ export function opencliEntryPath(): string {
   return path.join(dir, bin)
 }
 
-function quoteArg(arg: string): string {
-  if (/[^\w@%+=:,./-]/.test(arg)) {
-    return '"' + arg.replace(/"/g, '\\"') + '"'
-  }
-  return arg
-}
-
 /**
  * Run a Node.js script with piped stdio capture (bundled opencli / playwright
  * CLI). Mirrors web-search-pro's runCli contract.
@@ -154,7 +147,9 @@ export function runNode(
       finish(-1, false)
     }
     timer = opts.timeoutMs ? setTimeout(() => finish(-1, true), opts.timeoutMs) : undefined
-    child = spawn(process.execPath, [script, ...args.map(quoteArg)], {
+    // spawn() is used without a shell, so argv must be passed verbatim. Adding
+    // shell quotes here would make those quote characters part of the value.
+    child = spawn(process.execPath, [script, ...args], {
       env: { ...process.env, ...opts.env },
       cwd: opts.cwd,
       windowsHide: true,
