@@ -3,6 +3,8 @@
  * @module dsh-browser/config
  */
 import z from '@deepseek-ai/schemastery';
+import type { AuthProfileConfig } from './auth-profiles.ts';
+import type { RulePackConfig } from './rule-packs.ts';
 export interface Config {
     /** Whether the browser service is active. */
     enabled: boolean;
@@ -11,6 +13,12 @@ export interface Config {
     headless: boolean;
     /** Path to a Playwright storageState JSON (persisted login state). */
     storageStatePath?: string;
+    /** Named, domain-scoped reusable login states. */
+    authProfiles?: Record<string, AuthProfileConfig>;
+    /** Optional named profile used when a caller does not select one. */
+    defaultAuthProfile?: string;
+    /** Domain-scoped, hash-pinned browser enhancement packs. */
+    rulePacks?: Record<string, RulePackConfig>;
     /** Explicit browser executable path override (rare). */
     executablePath?: string;
     /** Whether the bundled OpenCLI is enabled. */
@@ -27,6 +35,9 @@ export interface ResolvedConfig {
     channel: string;
     headless: boolean;
     storageStatePath?: string;
+    authProfiles: Record<string, AuthProfileConfig>;
+    defaultAuthProfile?: string;
+    rulePacks: Record<string, RulePackConfig>;
     executablePath?: string;
     opencliEnabled: boolean;
     autoInstall: boolean;

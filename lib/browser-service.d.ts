@@ -62,21 +62,29 @@ export declare class BrowserService {
     private launching?;
     private activeContext;
     private activePage;
+    private activeProfile?;
+    private activeRulePack?;
+    private readonly authProfiles;
     constructor(config: ResolvedConfig);
     available(): boolean;
     private ensure;
     /** Run `playwright install chromium` from the bundled playwright CLI. */
     installChromium(): Promise<CliResult>;
     private transientContext;
+    private persistAndClose;
     render(url: string, rules: readonly RenderRule[], opts?: {
         signal?: AbortSignal;
         maxChars?: number;
         waitMs?: number;
+        authProfile?: string;
+        rulePack?: string;
     }): Promise<RenderResult>;
     snapshot(url: string, rules: readonly RenderRule[], opts: {
         signal?: AbortSignal;
         outDir: string;
         maxChars?: number;
+        authProfile?: string;
+        rulePack?: string;
     }): Promise<SnapshotResult>;
     searchResults(url: string, spec: PlatformSpec, opts?: {
         signal?: AbortSignal;
@@ -88,6 +96,8 @@ export declare class BrowserService {
             domain: string;
             path: string;
         }[];
+        authProfile?: string;
+        rulePack?: string;
     }): Promise<SearchItem[]>;
     opencliAvailable(): boolean;
     opencli(args: string[], opts?: {
@@ -99,6 +109,8 @@ export declare class BrowserService {
     private readState;
     open(url: string, opts?: {
         waitMs?: number;
+        authProfile?: string;
+        rulePack?: string;
     }): Promise<InteractiveState>;
     click(selector: string, opts?: {
         timeoutMs?: number;
@@ -121,7 +133,14 @@ export declare class BrowserService {
         headless: boolean;
         opencliEnabled: boolean;
         chromiumInstalled: boolean;
+        authProfiles: {
+            id: string;
+            allowedDomains: string[];
+            persistState: boolean;
+        }[];
+        rulePacks: string[];
         activeUrl?: string;
+        activeAuthProfile?: string;
     }>;
     close(): Promise<void>;
 }

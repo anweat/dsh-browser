@@ -26,6 +26,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     parameters: {
       url: { type: 'string', required: true, description: 'The HTTP(S) URL to open.' },
       waitMs: { type: 'number', description: 'Extra settle time in ms after load.' },
+      authProfile: { type: 'string', description: 'Named, domain-scoped auth profile from dsh-browser config.' },
+      rulePack: { type: 'string', description: 'Named, domain-scoped enhancement rule pack.' },
     },
     output: {
       schema: {
@@ -43,7 +45,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     timeoutMs: 60_000,
     isConcurrencySafe: () => false,
     async execute(args) {
-      return service.open(args.url, args.waitMs !== undefined ? { waitMs: args.waitMs } : {})
+      return service.open(args.url, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {}, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {} })
     },
   }))
 
@@ -201,15 +203,21 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
           opencliEnabled: { type: 'boolean', required: true },
           chromiumInstalled: { type: 'boolean', required: true },
           activeUrl: { type: 'string' },
+          activeAuthProfile: { type: 'string' },
+          authProfiles: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', required: true }, allowedDomains: { type: 'array', required: true, items: { type: 'string' } }, persistState: { type: 'boolean', required: true } } } },
+          rulePacks: { type: 'array', required: true, items: { type: 'string' } },
         },
       },
       render: (_args, value) => {
-        const v = value as { enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; chromiumInstalled: boolean; activeUrl?: string }
+        const v = value as { enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; chromiumInstalled: boolean; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[] }
         return [{ type: 'text', text: [
           'browser: ' + (v.enabled ? 'enabled' : 'disabled'),
           'channel: ' + v.channel + (v.headless ? ' (headless)' : ' (headed)'),
           'chromium installed: ' + v.chromiumInstalled,
           'opencli (bundled): ' + (v.opencliEnabled ? 'enabled' : 'disabled'),
+          'auth profiles: ' + (v.authProfiles.map(p => p.id + '[' + p.allowedDomains.join(',') + ']' + (p.persistState ? '(writeback)' : '')).join('; ') || '-'),
+          'rule packs: ' + (v.rulePacks.join(', ') || '-'),
+          ...(v.activeAuthProfile ? ['active auth profile: ' + v.activeAuthProfile] : []),
           ...(v.activeUrl ? ['active page: ' + v.activeUrl] : []),
         ].join('\n') }]
       },
