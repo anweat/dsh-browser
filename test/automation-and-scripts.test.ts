@@ -10,6 +10,7 @@ import { browserPolicyDecision } from '../src/approval-policy.ts'
 import { runNode } from '../src/deps.ts'
 import { BrowserService } from '../src/browser-service.ts'
 import { resolveConfig } from '../src/config.ts'
+import { ALL_BROWSER_TOOL_NAMES, browserToolsForMode, resolveAutomationMode } from '../src/freedom.ts'
 
 const VALID_SCRIPT = `// ==UserScript==
 // @name Read Heading
@@ -66,6 +67,30 @@ test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating reci
   assert.equal(browserPolicyDecision('browser_userscript_run', { source: 'alert(1)', url: 'https://example.com/' }).kind, 'deny')
 })
 
+test('automation modes expose predictable tool sets and retain validation when approval is disabled', () => {
+  assert.equal(ALL_BROWSER_TOOL_NAMES.length, 16)
+  assert.equal(browserToolsForMode('read-only').length, 10)
+  assert.equal(browserToolsForMode('standard').length, 16)
+  assert.equal(browserToolsForMode('autonomous').length, 16)
+  assert.equal(browserToolsForMode('unrestricted').length, 16)
+  assert.equal(browserToolsForMode('read-only').includes('browser_userscript_run'), false)
+  assert.equal(browserToolsForMode('read-only').includes('browser_recipe_run'), true)
+
+  assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'standard').kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'autonomous').kind, 'allow')
+  assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }, 'autonomous').kind, 'allow')
+  assert.equal(browserPolicyDecision('browser_userscript_run', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_opencli_run', { args: ['browser', 'research', 'state'] }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_install', {}, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_userscript_run', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('browser_opencli_run', { args: ['browser', 'research', 'state'] }, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('browser_install', {}, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('browser_userscript_run', { source: 'alert(1)', url: 'https://example.com/' }, 'unrestricted').kind, 'deny')
+  assert.throws(() => resolveAutomationMode('anything-goes'), /automationMode/)
+})
+
 test('runNode passes argv containing spaces verbatim without shell quoting', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-argv-'))
   const script = path.join(dir, 'argv.mjs')
@@ -108,6 +133,11 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
 
     const external = await service.runUserscript(url, VALID_SCRIPT)
     assert.equal(JSON.parse(external.resultJson).heading, 'Hello DSH')
+
+    const status = await service.status()
+    assert.equal(status.automationMode, 'standard')
+    assert.equal(status.exposedTools.length, 16)
+    assert.equal(status.directInteractionPolicy, 'ask')
   } finally {
     await service.close()
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))

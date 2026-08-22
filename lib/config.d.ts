@@ -5,6 +5,7 @@
 import z from '@deepseek-ai/schemastery';
 import type { AuthProfileConfig } from './auth-profiles.ts';
 import type { RulePackConfig } from './rule-packs.ts';
+import { type AutomationMode } from './freedom.ts';
 export interface Config {
     /** Whether the browser service is active. */
     enabled: boolean;
@@ -23,6 +24,8 @@ export interface Config {
     executablePath?: string;
     /** Whether the bundled OpenCLI is enabled. */
     opencliEnabled: boolean;
+    /** Model-facing tool exposure and approval level. */
+    automationMode: AutomationMode;
     /** Lazily run `playwright install chromium` when the browser is missing. */
     autoInstall: boolean;
     /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
@@ -40,6 +43,7 @@ export interface ResolvedConfig {
     rulePacks: Record<string, RulePackConfig>;
     executablePath?: string;
     opencliEnabled: boolean;
+    automationMode: AutomationMode;
     autoInstall: boolean;
     snapshotDir: string;
     verbose: boolean;

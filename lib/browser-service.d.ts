@@ -22,6 +22,7 @@ import { type CliResult } from './deps.ts';
 import type { ResolvedConfig } from './config.ts';
 import { type BrowserRecipeStep, type RecipeStepResult } from './automation.ts';
 import { type UserscriptValidation } from './scripts.ts';
+import { type AutomationMode } from './freedom.ts';
 export interface RenderRule {
     hostname: string;
     contentSelectors: string[];
@@ -173,6 +174,12 @@ export declare class BrowserService {
         channel: string;
         headless: boolean;
         opencliEnabled: boolean;
+        automationMode: AutomationMode;
+        exposedTools: string[];
+        directInteractionPolicy: 'deny' | 'ask' | 'allow';
+        mutatingRecipePolicy: 'deny' | 'ask' | 'allow';
+        externalUserscriptPolicy: 'deny' | 'ask' | 'allow';
+        opencliRunPolicy: 'deny' | 'ask' | 'allow';
         chromiumInstalled: boolean;
         authProfiles: {
             id: string;
@@ -181,8 +188,8 @@ export declare class BrowserService {
         }[];
         rulePacks: string[];
         builtinScripts: string[];
-        externalUserscriptsRequireApproval: true;
-        mutatingRecipesRequireApproval: true;
+        externalUserscriptsRequireApproval: boolean;
+        mutatingRecipesRequireApproval: boolean;
         activeUrl?: string;
         activeAuthProfile?: string;
     }>;

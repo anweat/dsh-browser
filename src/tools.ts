@@ -10,6 +10,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './config.ts'
 import type { BrowserService, InteractiveState } from './browser-service.ts'
 import type { BrowserRecipeStep } from './automation.ts'
+import { browserToolsForMode } from './freedom.ts'
 
 function renderState(v: InteractiveState): { type: 'text'; text: string }[] {
   const parts: string[] = []
@@ -64,7 +65,12 @@ const RECIPE_STEP_SCHEMA = {
 } as const
 
 export function registerTools(ctx: Context, config: ResolvedConfig, service: BrowserService): void {
-  ctx.tools.register(defineTool({
+  const exposedTools = new Set<string>(browserToolsForMode(config.automationMode))
+  const register = (tool: any): void => {
+    if (exposedTools.has(String(tool.name))) ctx.tools.register(tool)
+  }
+
+  register(defineTool({
     name: 'browser_open',
     description: 'Open a URL in the persistent browser page and return the rendered title, readable text, and a full-page screenshot path. Use this to start a multi-step browsing session.',
     parameters: {
@@ -93,7 +99,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_click',
     description: 'Click a CSS selector on the current browser page, then return the updated page state. Use after browser_open to follow links or press buttons.',
     parameters: {
@@ -119,7 +125,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_type',
     description: 'Type text into an input/textarea (CSS selector) on the current browser page, then return the page state. Use to fill search boxes and forms.',
     parameters: {
@@ -146,7 +152,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_scroll',
     description: 'Scroll the current browser page vertically by deltaY pixels (positive = down) to trigger lazy loading, then return the page state.',
     parameters: {
@@ -172,7 +178,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_read',
     description: 'Read the current browser page state (URL, title, readable text) without taking a screenshot.',
     parameters: {},
@@ -196,7 +202,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_screenshot',
     description: 'Capture a full-page screenshot of the current browser page and return the file path.',
     parameters: {},
@@ -217,7 +223,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_close',
     description: 'Close the current browser page (and its context). The next browser_open starts a fresh page.',
     parameters: {},
@@ -232,7 +238,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_status',
     description: 'Report the browser runtime status: enabled, channel, headless, whether chromium is installed, whether the bundled OpenCLI is enabled, and the active page URL.',
     parameters: {},
@@ -245,6 +251,12 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
           channel: { type: 'string', required: true },
           headless: { type: 'boolean', required: true },
           opencliEnabled: { type: 'boolean', required: true },
+          automationMode: { type: 'string', required: true, enum: ['read-only', 'standard', 'autonomous', 'unrestricted'] },
+          exposedTools: { type: 'array', required: true, items: { type: 'string' } },
+          directInteractionPolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
+          mutatingRecipePolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
+          externalUserscriptPolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
+          opencliRunPolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
           chromiumInstalled: { type: 'boolean', required: true },
           activeUrl: { type: 'string' },
           activeAuthProfile: { type: 'string' },
@@ -256,17 +268,20 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
         },
       },
       render: (_args, value) => {
-        const v = value as { enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; chromiumInstalled: boolean; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean }
+        const v = value as { enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; automationMode: string; exposedTools: string[]; directInteractionPolicy: string; mutatingRecipePolicy: string; externalUserscriptPolicy: string; opencliRunPolicy: string; chromiumInstalled: boolean; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean }
         return [{ type: 'text', text: [
           'browser: ' + (v.enabled ? 'enabled' : 'disabled'),
           'channel: ' + v.channel + (v.headless ? ' (headless)' : ' (headed)'),
+          'automation mode: ' + v.automationMode + ' (' + v.exposedTools.length + ' tools exposed)',
+          'direct interactions: ' + v.directInteractionPolicy,
+          'mutating recipes: ' + v.mutatingRecipePolicy,
+          'external userscripts: ' + v.externalUserscriptPolicy,
+          'general opencli: ' + v.opencliRunPolicy,
           'chromium installed: ' + v.chromiumInstalled,
           'opencli (bundled): ' + (v.opencliEnabled ? 'enabled' : 'disabled'),
           'auth profiles: ' + (v.authProfiles.map(p => p.id + '[' + p.allowedDomains.join(',') + ']' + (p.persistState ? '(writeback)' : '')).join('; ') || '-'),
           'rule packs: ' + (v.rulePacks.join(', ') || '-'),
           'built-in scripts: ' + v.builtinScripts.join(', '),
-          'external userscripts: ' + (v.externalUserscriptsRequireApproval ? 'one-shot approval required' : 'unrestricted'),
-          'mutating recipes: ' + (v.mutatingRecipesRequireApproval ? 'one-shot approval required' : 'unrestricted'),
           ...(v.activeAuthProfile ? ['active auth profile: ' + v.activeAuthProfile] : []),
           ...(v.activeUrl ? ['active page: ' + v.activeUrl] : []),
         ].join('\n') }]
@@ -279,7 +294,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_install',
     description: 'Install the bundled Playwright chromium browser (downloads to the Playwright cache). Run this once if browser_status reports chromium not installed.',
     parameters: {},
@@ -307,7 +322,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_script_catalog',
     description: 'List trusted built-in read-only browser scripts. Prefer these over external JavaScript for article extraction, links, JSON-LD, and form structure.',
     parameters: {},
@@ -333,7 +348,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_script_validate',
     description: 'Validate externally supplied Tampermonkey/UserScript-style JavaScript without executing it. Parses @match/@grant, reports SHA-256 and capabilities. Only @grant none is supported.',
     parameters: {
@@ -382,7 +397,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_script_run_builtin',
     description: 'Run one trusted built-in read-only script in a fresh Playwright context and return bounded JSON. Supports named AuthProfile and RulePack selection.',
     parameters: {
@@ -405,9 +420,9 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_userscript_run',
-    description: 'Run an externally supplied Tampermonkey/UserScript-style script in a fresh Playwright context. This always requires native one-shot user approval, enforces target @match, caps source/result size, and provides no GM_* APIs.',
+    description: 'Run an externally supplied Tampermonkey/UserScript-style script in a fresh Playwright context. Approval follows automationMode (skipped only in unrestricted); target @match, source/result caps, and no-GM_* validation always apply.',
     parameters: {
       url: { type: 'string', required: true },
       source: { type: 'string', required: true, description: 'Complete userscript source. Validate first. Never embed credentials or tokens.' },
@@ -428,9 +443,9 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_recipe_run',
-    description: 'Run a bounded Playwright recipe (max 25 named steps). Read-only wait/extract/assert/screenshot recipes run directly; recipes containing click/fill/type/press/select/check/hover/scroll require native one-shot user approval.',
+    description: 'Run a bounded Playwright recipe (max 25 named steps). Read-only steps run directly; mutating steps are denied in read-only, approved once in standard, and direct in autonomous/unrestricted.',
     parameters: {
       url: { type: 'string', description: 'Open this URL first; omit only when browser_open already established an active page.' },
       authProfile: { type: 'string' },
@@ -478,7 +493,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_opencli_status',
     description: 'Run bundled OpenCLI doctor and return the real daemon, extension, profile, and Browser Bridge connectivity status.',
     parameters: {},
@@ -497,9 +512,9 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
   }))
 
-  ctx.tools.register(defineTool({
+  register(defineTool({
     name: 'browser_opencli_run',
-    description: 'Run any bundled OpenCLI adapter or browser-session command with verbatim argv. Always requires native one-shot user approval because commands may reuse logged-in Chrome state or perform writes. Prefer existing read-only search tools when available.',
+    description: 'Run any bundled OpenCLI adapter or browser-session command with verbatim argv. Approval is skipped only in unrestricted because commands may reuse logged-in Chrome state or perform writes. Prefer existing read-only search tools when available.',
     parameters: {
       args: { type: 'array', required: true, items: { type: 'string' }, description: 'Arguments after opencli, e.g. ["browser","work","state"] or ["reddit","search","dsh","-f","json"].' },
       profile: { type: 'string', description: 'Optional OpenCLI profile alias, passed as --profile.' },

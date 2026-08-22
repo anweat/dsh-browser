@@ -28,6 +28,7 @@ import { AuthProfileStore, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
 import { runRecipe, type BrowserRecipeStep, type RecipeStepResult } from './automation.ts'
 import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
+import { browserToolsForMode, type AutomationMode } from './freedom.ts'
 
 export interface RenderRule {
   hostname: string
@@ -556,7 +557,7 @@ export class BrowserService {
     this.activeRulePack = undefined
   }
 
-  async status(): Promise<{ enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; chromiumInstalled: boolean; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: true; mutatingRecipesRequireApproval: true; activeUrl?: string; activeAuthProfile?: string }> {
+  async status(): Promise<{ enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; automationMode: AutomationMode; exposedTools: string[]; directInteractionPolicy: 'deny' | 'ask' | 'allow'; mutatingRecipePolicy: 'deny' | 'ask' | 'allow'; externalUserscriptPolicy: 'deny' | 'ask' | 'allow'; opencliRunPolicy: 'deny' | 'ask' | 'allow'; chromiumInstalled: boolean; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean; activeUrl?: string; activeAuthProfile?: string }> {
     let chromiumInstalled = false
     try {
       const pw = loadPlaywright()
@@ -567,12 +568,18 @@ export class BrowserService {
       channel: this.config.channel,
       headless: this.config.headless,
       opencliEnabled: this.config.opencliEnabled,
+      automationMode: this.config.automationMode,
+      exposedTools: browserToolsForMode(this.config.automationMode),
+      directInteractionPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
+      mutatingRecipePolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
+      externalUserscriptPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      opencliRunPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
       authProfiles: this.authProfiles.list(),
       rulePacks: Object.keys(this.config.rulePacks).sort(),
       builtinScripts: BUILTIN_SCRIPTS.map(script => script.id),
-      externalUserscriptsRequireApproval: true,
-      mutatingRecipesRequireApproval: true,
+      externalUserscriptsRequireApproval: ['standard', 'autonomous'].includes(this.config.automationMode),
+      mutatingRecipesRequireApproval: this.config.automationMode === 'standard',
       ...(this.activePage && !this.activePage.isClosed() ? { activeUrl: this.activePage.url() } : {}),
       ...this.activeProfile ? { activeAuthProfile: this.activeProfile.id } : {},
     }

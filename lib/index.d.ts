@@ -18,4 +18,6 @@ export type { RulePackConfig, RuleStep, ResolvedRulePack } from './rule-packs.ts
 export type { BrowserRecipeStep, RecipeStepResult } from './automation.ts';
 export type { UserscriptMetadata, UserscriptValidation, BuiltinScript } from './scripts.ts';
 export { BUILTIN_SCRIPTS, validateUserscript } from './scripts.ts';
+export type { AutomationMode, BrowserToolName } from './freedom.ts';
+export { AUTOMATION_MODES, ALL_BROWSER_TOOL_NAMES, browserToolsForMode } from './freedom.ts';
 export declare function apply(ctx: Context, config: Config): void;

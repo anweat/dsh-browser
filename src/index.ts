@@ -27,6 +27,8 @@ export type { RulePackConfig, RuleStep, ResolvedRulePack } from './rule-packs.ts
 export type { BrowserRecipeStep, RecipeStepResult } from './automation.ts'
 export type { UserscriptMetadata, UserscriptValidation, BuiltinScript } from './scripts.ts'
 export { BUILTIN_SCRIPTS, validateUserscript } from './scripts.ts'
+export type { AutomationMode, BrowserToolName } from './freedom.ts'
+export { AUTOMATION_MODES, ALL_BROWSER_TOOL_NAMES, browserToolsForMode } from './freedom.ts'
 
 export function apply(ctx: Context, config: Config): void {
   const resolved: ResolvedConfig = resolveConfig(config)
@@ -34,13 +36,12 @@ export function apply(ctx: Context, config: Config): void {
 
   const service = new BrowserService(resolved)
 
-  // Arbitrary userscripts, general OpenCLI commands, and mutating multi-step
-  // recipes must pass through the harness' native one-shot approval flow. The
-  // policy fails closed when no approval service or calling agent is present.
+  // Apply the configured exposure/approval mode before every browser tool.
+  // Validation remains active even when unrestricted mode skips approvals.
   ctx.on('tools/pre-execute', async (exec, next) => {
     const downstream = await next()
     if (downstream.kind !== 'allow') return downstream
-    return browserPolicyDecision(exec.name, exec.arguments)
+    return browserPolicyDecision(exec.name, exec.arguments, resolved.automationMode)
   })
 
   // Provide the `browser` service so consumers (web-search-pro) can inject it.
@@ -60,10 +61,11 @@ export function apply(ctx: Context, config: Config): void {
         channel: resolved.channel,
         headless: resolved.headless,
         opencliEnabled: resolved.opencliEnabled,
+        automationMode: resolved.automationMode,
         snapshotDir: resolved.snapshotDir,
       }) + '\n', 'utf8')
     } catch { /* marker is best-effort */ }
   }
 
-  ctx.logger?.(name).info('dsh-browser loaded: channel=' + resolved.channel + ' headless=' + resolved.headless + ' opencli=' + resolved.opencliEnabled)
+  ctx.logger?.(name).info('dsh-browser loaded: channel=' + resolved.channel + ' headless=' + resolved.headless + ' opencli=' + resolved.opencliEnabled + ' automation=' + resolved.automationMode)
 }

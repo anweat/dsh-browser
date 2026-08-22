@@ -9,6 +9,7 @@
     - id: browser
       name: '@anweat/dsh-browser'
       config:
+        automationMode: standard
         channel: chromium
         headless: true
         opencliEnabled: true
