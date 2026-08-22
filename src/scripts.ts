@@ -13,7 +13,6 @@ export interface UserscriptMetadata {
   excludes: string[]
   grants: string[]
 }
-
 export interface UserscriptValidation {
   valid: boolean
   sha256: string
@@ -189,4 +188,3 @@ export async function executeUserscript(page: any, source: string, maxResultChar
   if (truncated) resultJson = resultJson.slice(0, maxResultChars) + '…'
   return { resultJson, truncated }
 }
-

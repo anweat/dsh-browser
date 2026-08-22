@@ -35,4 +35,3 @@ export function browserPolicyDecision(name: string, args: unknown): BrowserPolic
   }
   return { kind: 'allow' }
 }
-
