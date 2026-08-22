@@ -26,6 +26,8 @@ import { loadPlaywright, runOpencli, runNode, playwrightCliPath, type CliResult 
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
+import { runRecipe, type BrowserRecipeStep, type RecipeStepResult } from './automation.ts'
+import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
 
 export interface RenderRule {
   hostname: string
@@ -67,6 +69,19 @@ export interface InteractiveState {
   title: string
   text: string
   screenshotPath?: string
+}
+
+export interface RecipeRunResult extends InteractiveState {
+  steps: RecipeStepResult[]
+}
+
+export interface ScriptRunResult {
+  url: string
+  name: string
+  sha256: string
+  capabilities: string[]
+  resultJson: string
+  truncated: boolean
 }
 
 /** Rules-aware content extractor (runs in the page). */
@@ -340,7 +355,86 @@ export class BrowserService {
   }
 
   opencli(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
+    if (!this.config.opencliEnabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI is disabled', timedOut: false })
+    if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
+      return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
+    }
     return runOpencli(args, { ...opts, signal: opts.signal })
+  }
+
+  opencliDoctor(signal?: AbortSignal): Promise<CliResult> {
+    return this.opencli(['doctor'], { timeoutMs: 30_000, signal })
+  }
+
+  scriptCatalog(): { id: string; name: string; description: string; sha256: string }[] {
+    return BUILTIN_SCRIPTS.map(script => ({
+      id: script.id,
+      name: script.name,
+      description: script.description,
+      sha256: validateUserscript(script.source).sha256,
+    }))
+  }
+
+  validateUserscript(source: string, targetUrl?: string): UserscriptValidation {
+    return validateUserscript(source, targetUrl)
+  }
+
+  private async runScript(
+    url: string,
+    source: string,
+    opts: { signal?: AbortSignal; timeoutMs?: number; authProfile?: string; rulePack?: string } = {},
+  ): Promise<ScriptRunResult> {
+    const validation = validateUserscript(source, url)
+    if (!validation.valid) throw new Error('userscript validation failed: ' + validation.errors.join('; '))
+    const session = await this.transientContext(url, opts)
+    const page = await session.context.newPage()
+    const signal = opts.signal
+    const onAbort = () => void page.close().catch(() => {})
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener('abort', onAbort)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      page.setDefaultTimeout(30_000)
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
+      await applyRuleSteps(page, session.rulePack)
+      const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? 15_000, 1_000), 30_000)
+      const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          void page.close().catch(() => {})
+          reject(new Error('userscript timed out after ' + timeoutMs + 'ms'))
+        }, timeoutMs)
+      })
+      const executed = await Promise.race([executeUserscript(page, source), timeout])
+      return {
+        url: page.url(),
+        name: validation.metadata.name,
+        sha256: validation.sha256,
+        capabilities: validation.capabilities,
+        resultJson: executed.resultJson,
+        truncated: executed.truncated,
+      }
+    } finally {
+      if (timer) clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      await this.persistAndClose(session)
+    }
+  }
+
+  runBuiltinScript(
+    url: string,
+    id: string,
+    opts: { signal?: AbortSignal; timeoutMs?: number; authProfile?: string; rulePack?: string } = {},
+  ): Promise<ScriptRunResult> {
+    return this.runScript(url, builtinScript(id).source, opts)
+  }
+
+  runUserscript(
+    url: string,
+    source: string,
+    opts: { signal?: AbortSignal; timeoutMs?: number; authProfile?: string; rulePack?: string } = {},
+  ): Promise<ScriptRunResult> {
+    return this.runScript(url, source, opts)
   }
 
   // ── interactive surface (one persistent context + page) ──────────────────
@@ -429,6 +523,30 @@ export class BrowserService {
     return { path: await this.captureScreenshot(page) }
   }
 
+  async recipe(
+    steps: readonly BrowserRecipeStep[],
+    opts: { url?: string; waitMs?: number; authProfile?: string; rulePack?: string; signal?: AbortSignal } = {},
+  ): Promise<RecipeRunResult> {
+    if (!opts.url && (!this.activePage || this.activePage.isClosed())) throw new Error('browser recipe requires url or an active browser_open page')
+    const page = await this.ensureActivePage(opts.url, opts)
+    if (opts.url) {
+      page.setDefaultTimeout(30_000)
+      await page.goto(opts.url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
+      await applyRuleSteps(page, this.activeRulePack)
+      if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
+    }
+    const onAbort = () => void this.closePage()
+    if (opts.signal?.aborted) onAbort()
+    else opts.signal?.addEventListener('abort', onAbort)
+    try {
+      const results = await runRecipe(page, steps, () => this.captureScreenshot(page), opts.signal)
+      return { ...await this.readState(page, false), steps: results }
+    } finally {
+      opts.signal?.removeEventListener('abort', onAbort)
+    }
+  }
+
   async closePage(): Promise<void> {
     if (this.activePage) { await this.activePage.close().catch(() => {}) }
     this.activePage = undefined
@@ -438,7 +556,7 @@ export class BrowserService {
     this.activeRulePack = undefined
   }
 
-  async status(): Promise<{ enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; chromiumInstalled: boolean; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; activeUrl?: string; activeAuthProfile?: string }> {
+  async status(): Promise<{ enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; chromiumInstalled: boolean; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: true; mutatingRecipesRequireApproval: true; activeUrl?: string; activeAuthProfile?: string }> {
     let chromiumInstalled = false
     try {
       const pw = loadPlaywright()
@@ -452,6 +570,9 @@ export class BrowserService {
       chromiumInstalled,
       authProfiles: this.authProfiles.list(),
       rulePacks: Object.keys(this.config.rulePacks).sort(),
+      builtinScripts: BUILTIN_SCRIPTS.map(script => script.id),
+      externalUserscriptsRequireApproval: true,
+      mutatingRecipesRequireApproval: true,
       ...(this.activePage && !this.activePage.isClosed() ? { activeUrl: this.activePage.url() } : {}),
       ...this.activeProfile ? { activeAuthProfile: this.activeProfile.id } : {},
     }

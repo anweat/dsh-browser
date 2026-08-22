@@ -20,6 +20,8 @@
  */
 import { type CliResult } from './deps.ts';
 import type { ResolvedConfig } from './config.ts';
+import { type BrowserRecipeStep, type RecipeStepResult } from './automation.ts';
+import { type UserscriptValidation } from './scripts.ts';
 export interface RenderRule {
     hostname: string;
     contentSelectors: string[];
@@ -55,6 +57,17 @@ export interface InteractiveState {
     title: string;
     text: string;
     screenshotPath?: string;
+}
+export interface RecipeRunResult extends InteractiveState {
+    steps: RecipeStepResult[];
+}
+export interface ScriptRunResult {
+    url: string;
+    name: string;
+    sha256: string;
+    capabilities: string[];
+    resultJson: string;
+    truncated: boolean;
 }
 export declare class BrowserService {
     private readonly config;
@@ -104,6 +117,27 @@ export declare class BrowserService {
         timeoutMs?: number;
         signal?: AbortSignal;
     }): Promise<CliResult>;
+    opencliDoctor(signal?: AbortSignal): Promise<CliResult>;
+    scriptCatalog(): {
+        id: string;
+        name: string;
+        description: string;
+        sha256: string;
+    }[];
+    validateUserscript(source: string, targetUrl?: string): UserscriptValidation;
+    private runScript;
+    runBuiltinScript(url: string, id: string, opts?: {
+        signal?: AbortSignal;
+        timeoutMs?: number;
+        authProfile?: string;
+        rulePack?: string;
+    }): Promise<ScriptRunResult>;
+    runUserscript(url: string, source: string, opts?: {
+        signal?: AbortSignal;
+        timeoutMs?: number;
+        authProfile?: string;
+        rulePack?: string;
+    }): Promise<ScriptRunResult>;
     private ensureActivePage;
     private captureScreenshot;
     private readState;
@@ -126,6 +160,13 @@ export declare class BrowserService {
     screenshot(): Promise<{
         path: string;
     }>;
+    recipe(steps: readonly BrowserRecipeStep[], opts?: {
+        url?: string;
+        waitMs?: number;
+        authProfile?: string;
+        rulePack?: string;
+        signal?: AbortSignal;
+    }): Promise<RecipeRunResult>;
     closePage(): Promise<void>;
     status(): Promise<{
         enabled: boolean;
@@ -139,6 +180,9 @@ export declare class BrowserService {
             persistState: boolean;
         }[];
         rulePacks: string[];
+        builtinScripts: string[];
+        externalUserscriptsRequireApproval: true;
+        mutatingRecipesRequireApproval: true;
         activeUrl?: string;
         activeAuthProfile?: string;
     }>;
