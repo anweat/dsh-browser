@@ -11,7 +11,7 @@ test('browser settings card key matches the Host settings namespace', () => {
 test('browser settings panel covers every public browser configuration field', () => {
   assert.deepEqual(FIELD_SPECS.map(spec => spec.field), [
     'enabled', 'automationMode', 'browserRuntime', 'channel', 'headless', 'opencliEnabled',
-    'usagePolicy', 'autoInstall', 'storageStatePath', 'authProfiles', 'defaultAuthProfile',
+    'usagePolicy', 'automationAssets', 'autoInstall', 'storageStatePath', 'authProfiles', 'defaultAuthProfile',
     'rulePacks', 'executablePath', 'snapshotDir', 'verbose',
   ])
 })

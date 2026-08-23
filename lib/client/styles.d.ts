@@ -33,5 +33,15 @@ export declare const styles: {
     readonly actions: "dsb-actions";
     readonly primary: "dsb-primary";
     readonly secondary: "dsb-secondary";
+    readonly assetGroup: "dsb-asset-group";
+    readonly assetRow: "dsb-asset-row";
+    readonly assetToolbar: "dsb-asset-toolbar";
+    readonly assetLayout: "dsb-asset-layout";
+    readonly assetList: "dsb-asset-list";
+    readonly assetItem: "dsb-asset-item";
+    readonly assetSelected: "dsb-asset-selected";
+    readonly assetTest: "dsb-asset-test";
+    readonly assetEditor: "dsb-asset-editor";
+    readonly invalidInput: "dsb-invalid-input";
 };
 export declare function ensureStyles(): void;

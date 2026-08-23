@@ -29,7 +29,7 @@ export declare const BUILTIN_SCRIPTS: readonly BuiltinScript[];
 export declare function matchUserscriptPattern(pattern: string, targetUrl: string): boolean;
 export declare function validateUserscript(source: string, targetUrl?: string): UserscriptValidation;
 export declare function builtinScript(id: string): BuiltinScript;
-export declare function executeUserscript(page: any, source: string, maxResultChars?: number): Promise<{
+export declare function executeUserscript(page: any, source: string, maxResultChars?: number, inputs?: Record<string, string>): Promise<{
     resultJson: string;
     truncated: boolean;
 }>;

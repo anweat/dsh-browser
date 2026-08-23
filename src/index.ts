@@ -16,6 +16,8 @@ import { Config, resolveConfig, type ResolvedConfig } from './config.ts'
 import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
 import { browserPolicyDecision } from './approval-policy.ts'
+import { AutomationAssetStore } from './automation-assets.ts'
+import { registerAutomationAssetRpc } from './automation-assets-rpc.ts'
 
 export const name = 'dsh-browser'
 export const inject = ['tools']
@@ -30,6 +32,8 @@ export type { UserscriptMetadata, UserscriptValidation, BuiltinScript } from './
 export { BUILTIN_SCRIPTS, validateUserscript } from './scripts.ts'
 export type { AutomationMode, BrowserToolName } from './freedom.ts'
 export { AUTOMATION_MODES, ALL_BROWSER_TOOL_NAMES, browserToolsForMode } from './freedom.ts'
+export type { AutomationAssetPolicy, AutomationAssetPolicyInput, AutomationAsset, AutomationAssetSummary, AutomationCandidate, AutomationCandidateSummary, AssetPersistenceMode, AssetActivationMode } from './automation-assets.ts'
+export { ASSET_PERSISTENCE_MODES, ASSET_ACTIVATION_MODES, resolveAutomationAssetPolicy, AutomationAssetStore } from './automation-assets.ts'
 
 export function apply(ctx: Context, config: Config): void {
   const deployed: ResolvedConfig = resolveConfig(config)
@@ -47,6 +51,7 @@ export function apply(ctx: Context, config: Config): void {
   fs.mkdirSync(resolved.snapshotDir, { recursive: true })
 
   const service = new BrowserService(resolved)
+  const assets = new AutomationAssetStore(resolved.automationAssets)
 
   // Apply the configured exposure/approval mode before every browser tool.
   // Validation remains active even when unrestricted mode skips approvals.
@@ -62,7 +67,8 @@ export function apply(ctx: Context, config: Config): void {
   ctx.provide('browser', service)
   ctx.effect(() => () => void service.close())
 
-  registerTools(ctx, resolved, service)
+  registerTools(ctx, resolved, service, assets)
+  registerAutomationAssetRpc(ctx, assets)
 
   if (resolved.verbose) {
     try {

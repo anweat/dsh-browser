@@ -55,6 +55,11 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
       return { kind: 'ask', reason: 'Run a multi-step Playwright recipe with page mutations: ' + actions.join(', ') }
     }
   }
+  if (name === 'browser_automation_run') {
+    if (mode === 'read-only') return { kind: 'deny', reason: `Reusable automation execution is disabled by automationMode=${mode}` }
+    if (mode === 'autonomous' || mode === 'unrestricted') return { kind: 'allow' }
+    return { kind: 'ask', reason: 'Run an active reusable browser automation asset' }
+  }
   if (name === 'web_deps' && (args as { action?: unknown })?.action === 'install') {
     if (mode === 'read-only') return { kind: 'deny', reason: `Dependency installation is disabled by automationMode=${mode}` }
     if (mode === 'unrestricted') return { kind: 'allow' }

@@ -558,7 +558,7 @@ export class BrowserService {
   private async runScript(
     url: string,
     source: string,
-    opts: { signal?: AbortSignal; timeoutMs?: number; authProfile?: string; rulePack?: string } = {},
+    opts: { signal?: AbortSignal; timeoutMs?: number; authProfile?: string; rulePack?: string; inputs?: Record<string, string> } = {},
   ): Promise<ScriptRunResult> {
     const validation = validateUserscript(source, url)
     if (!validation.valid) throw new Error('userscript validation failed: ' + validation.errors.join('; '))
@@ -581,7 +581,7 @@ export class BrowserService {
           reject(new Error('userscript timed out after ' + timeoutMs + 'ms'))
         }, timeoutMs)
       })
-      const executed = await Promise.race([executeUserscript(page, source), timeout])
+      const executed = await Promise.race([executeUserscript(page, source, 100_000, opts.inputs), timeout])
       return {
         url: page.url(),
         name: validation.metadata.name,
@@ -608,7 +608,7 @@ export class BrowserService {
   runUserscript(
     url: string,
     source: string,
-    opts: { signal?: AbortSignal; timeoutMs?: number; authProfile?: string; rulePack?: string } = {},
+    opts: { signal?: AbortSignal; timeoutMs?: number; authProfile?: string; rulePack?: string; inputs?: Record<string, string> } = {},
   ): Promise<ScriptRunResult> {
     return this.runScript(url, source, opts)
   }

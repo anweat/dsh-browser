@@ -2,7 +2,7 @@ import type { SettingsScope, SnapshotStore } from '@deepseek-ai/dsh-client-runti
 
 export type SettingField =
   | 'enabled' | 'automationMode' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
-  | 'usagePolicy' | 'autoInstall' | 'storageStatePath' | 'authProfiles' | 'defaultAuthProfile'
+  | 'usagePolicy' | 'automationAssets' | 'autoInstall' | 'storageStatePath' | 'authProfiles' | 'defaultAuthProfile'
   | 'rulePacks' | 'executablePath' | 'snapshotDir' | 'verbose'
 
 export interface CardFieldState {
@@ -66,6 +66,24 @@ const POLICY_BOUNDS: Record<string, readonly [number, number]> = {
   maxDepth: [0, 5], retryLimit: [0, 5], backoffBaseMs: [1, 60_000], cooldownMs: [100, 300_000],
 }
 
+const ASSET_POLICY_KEYS = new Set([
+  'enabled', 'directory', 'persistenceMode', 'activationMode', 'minSuccessfulRuns', 'minDistinctSessions',
+  'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay',
+  'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget',
+])
+
+function validAssetPolicy(value: Record<string, unknown>): boolean {
+  if (Object.keys(value).some(key => !ASSET_POLICY_KEYS.has(key))) return false
+  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') return false
+  if (value.directory !== undefined && typeof value.directory !== 'string') return false
+  if (value.persistenceMode !== undefined && !['off', 'manual', 'suggest', 'auto-draft'].includes(String(value.persistenceMode))) return false
+  if (value.activationMode !== undefined && !['manual', 'auto-tested'].includes(String(value.activationMode))) return false
+  return Object.entries(value).every(([key, entry]) => {
+    if (!['minSuccessfulRuns', 'minDistinctSessions', 'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay', 'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget'].includes(key)) return true
+    return typeof entry === 'number' && Number.isFinite(entry) && entry >= 0
+  })
+}
+
 function validUsagePolicy(value: Record<string, unknown>): boolean {
   if (Object.keys(value).some(key => !(key in POLICY_BOUNDS))) return false
   return Object.entries(POLICY_BOUNDS).every(([key, [min, max]]) => {
@@ -82,6 +100,7 @@ export const FIELD_SPECS: readonly FieldSpec[] = [
   booleanField('headless'),
   booleanField('opencliEnabled'),
   jsonField('usagePolicy', validUsagePolicy),
+  jsonField('automationAssets', validAssetPolicy),
   booleanField('autoInstall'),
   textField('storageStatePath'),
   jsonField('authProfiles'),

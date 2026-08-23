@@ -179,8 +179,9 @@ export function builtinScript(id: string): BuiltinScript {
   return script
 }
 
-export async function executeUserscript(page: any, source: string, maxResultChars = 100_000): Promise<{ resultJson: string; truncated: boolean }> {
-  const result = await page.evaluate(`(async () => {\n${source}\n})()`)
+export async function executeUserscript(page: any, source: string, maxResultChars = 100_000, inputs: Record<string, string> = {}): Promise<{ resultJson: string; truncated: boolean }> {
+  const serializedInputs = JSON.stringify(inputs)
+  const result = await page.evaluate(`(async () => {\nconst __DSH_INPUTS__ = Object.freeze(${serializedInputs});\n${source}\n})()`)
   let resultJson: string
   try { resultJson = JSON.stringify(result ?? null) }
   catch { resultJson = JSON.stringify({ unserializable: true, text: String(result) }) }

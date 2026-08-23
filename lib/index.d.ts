@@ -20,4 +20,6 @@ export type { UserscriptMetadata, UserscriptValidation, BuiltinScript } from './
 export { BUILTIN_SCRIPTS, validateUserscript } from './scripts.ts';
 export type { AutomationMode, BrowserToolName } from './freedom.ts';
 export { AUTOMATION_MODES, ALL_BROWSER_TOOL_NAMES, browserToolsForMode } from './freedom.ts';
+export type { AutomationAssetPolicy, AutomationAssetPolicyInput, AutomationAsset, AutomationAssetSummary, AutomationCandidate, AutomationCandidateSummary, AssetPersistenceMode, AssetActivationMode } from './automation-assets.ts';
+export { ASSET_PERSISTENCE_MODES, ASSET_ACTIVATION_MODES, resolveAutomationAssetPolicy, AutomationAssetStore } from './automation-assets.ts';
 export declare function apply(ctx: Context, config: Config): void;

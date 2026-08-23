@@ -17,7 +17,7 @@ const VALID_SCRIPT = `// ==UserScript==
 // @match http://127.0.0.1/*
 // @grant none
 // ==/UserScript==
-return { heading: document.querySelector('h1')?.textContent || '' }`
+return { heading: document.querySelector('h1')?.textContent || '', input: __DSH_INPUTS__.query || '' }`
 
 test('userscript metadata is scoped, hashed, and capability-reported', () => {
   const validation = validateUserscript(VALID_SCRIPT, 'http://127.0.0.1/page')
@@ -72,19 +72,24 @@ test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating reci
 })
 
 test('automation modes expose predictable tool sets and retain validation when approval is disabled', () => {
-  assert.equal(ALL_BROWSER_TOOL_NAMES.length, 18)
-  assert.equal(browserToolsForMode('read-only').length, 12)
-  assert.equal(browserToolsForMode('standard').length, 18)
-  assert.equal(browserToolsForMode('autonomous').length, 18)
-  assert.equal(browserToolsForMode('unrestricted').length, 18)
+  assert.equal(ALL_BROWSER_TOOL_NAMES.length, 20)
+  assert.equal(browserToolsForMode('read-only').length, 13)
+  assert.equal(browserToolsForMode('standard').length, 20)
+  assert.equal(browserToolsForMode('autonomous').length, 20)
+  assert.equal(browserToolsForMode('unrestricted').length, 20)
   assert.equal(browserToolsForMode('read-only').includes('browser_userscript_run'), false)
   assert.equal(browserToolsForMode('read-only').includes('browser_recipe_run'), true)
+  assert.equal(browserToolsForMode('read-only').includes('browser_automation_search'), true)
+  assert.equal(browserToolsForMode('read-only').includes('browser_automation_run'), false)
 
   assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'read-only').kind, 'deny')
   assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'standard').kind, 'ask')
   assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'autonomous').kind, 'allow')
   assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }, 'read-only').kind, 'deny')
   assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }, 'autonomous').kind, 'allow')
+  assert.equal(browserPolicyDecision('browser_automation_run', { id: 'asset' }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('browser_automation_run', { id: 'asset' }, 'standard').kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_automation_run', { id: 'asset' }, 'autonomous').kind, 'allow')
   assert.equal(browserPolicyDecision('browser_userscript_run', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'autonomous').kind, 'ask')
   assert.equal(browserPolicyDecision('browser_opencli_run', { args: ['browser', 'research', 'state'] }, 'autonomous').kind, 'ask')
   assert.equal(browserPolicyDecision('browser_install', {}, 'autonomous').kind, 'ask')
@@ -143,8 +148,9 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     ], { url })
     assert.equal(recipe.steps[1]?.value, 'Browser automation fixture.')
 
-    const external = await service.runUserscript(url, VALID_SCRIPT)
+    const external = await service.runUserscript(url, VALID_SCRIPT, { inputs: { query: 'runtime-only' } })
     assert.equal(JSON.parse(external.resultJson).heading, 'Hello DSH')
+    assert.equal(JSON.parse(external.resultJson).input, 'runtime-only')
 
     const extracted = await service.searchResults(url, {
       item: 'main', title: 'h1', link: 'a', text: '#copy',
@@ -175,7 +181,7 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     assert.equal(status.usagePolicy.maxPagesPerRun, 20)
     assert.equal(status.usageGovernor.totalRuns > 0, true)
     assert.equal(status.automationMode, 'standard')
-    assert.equal(status.exposedTools.length, 18)
+    assert.equal(status.exposedTools.length, 20)
     assert.equal(status.directInteractionPolicy, 'ask')
   } finally {
     await service.close()

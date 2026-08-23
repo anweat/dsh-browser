@@ -204,6 +204,7 @@ export declare class BrowserService {
         timeoutMs?: number;
         authProfile?: string;
         rulePack?: string;
+        inputs?: Record<string, string>;
     }): Promise<ScriptRunResult>;
     private ensureActivePage;
     private captureScreenshot;

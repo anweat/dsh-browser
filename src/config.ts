@@ -10,6 +10,7 @@ import type { AuthProfileConfig } from './auth-profiles.ts'
 import type { RulePackConfig } from './rule-packs.ts'
 import { resolveAutomationMode, type AutomationMode } from './freedom.ts'
 import { resolveUsagePolicy, type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts'
+import { resolveAutomationAssetPolicy, type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts'
 
 export const BROWSER_RUNTIMES = ['playwright', 'patchright'] as const
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number]
@@ -46,6 +47,8 @@ export interface Config {
   automationMode: AutomationMode
   /** Approval-independent traffic buffering and bounded crawl budgets. */
   usagePolicy?: UsagePolicyInput
+  /** Reusable automation capture, review, activation, and retrieval policy. */
+  automationAssets?: AutomationAssetPolicyInput
   /** Lazily run `playwright install chromium` when the browser is missing. */
   autoInstall: boolean
   /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
@@ -92,6 +95,23 @@ export const Config: z<Config> = z.object({
     backoffBaseMs: z.number().default(1000),
     cooldownMs: z.number().default(30000),
   }),
+  automationAssets: z.object({
+    enabled: z.boolean().default(true),
+    directory: z.string(),
+    persistenceMode: z.string().default('suggest'),
+    activationMode: z.string().default('manual'),
+    minSuccessfulRuns: z.number().default(3),
+    minDistinctSessions: z.number().default(2),
+    successWindowDays: z.number().default(14),
+    minSuccessRate: z.number().default(0.8),
+    maxCandidates: z.number().default(20),
+    candidateTtlDays: z.number().default(14),
+    maxSuggestionsPerDay: z.number().default(2),
+    maxDrafts: z.number().default(10),
+    maxActiveAssets: z.number().default(50),
+    retrievalTopK: z.number().default(5),
+    catalogTokenBudget: z.number().default(800),
+  }),
   autoInstall: z.boolean().default(false),
   snapshotDir: z.string(),
   verbose: z.boolean().default(false),
@@ -110,6 +130,7 @@ export interface ResolvedConfig {
   opencliEnabled: boolean
   automationMode: AutomationMode
   usagePolicy: UsagePolicy
+  automationAssets: AutomationAssetPolicy
   autoInstall: boolean
   snapshotDir: string
   verbose: boolean
@@ -130,6 +151,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     opencliEnabled: config.opencliEnabled ?? true,
     automationMode: resolveAutomationMode(config.automationMode),
     usagePolicy: resolveUsagePolicy(config.usagePolicy),
+    automationAssets: resolveAutomationAssetPolicy(config.automationAssets),
     autoInstall: config.autoInstall ?? false,
     snapshotDir,
     verbose: config.verbose ?? false,

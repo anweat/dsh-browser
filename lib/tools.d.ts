@@ -7,4 +7,5 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { ResolvedConfig } from './config.ts';
 import type { BrowserService } from './browser-service.ts';
-export declare function registerTools(ctx: Context, config: ResolvedConfig, service: BrowserService): void;
+import type { AutomationAssetStore } from './automation-assets.ts';
+export declare function registerTools(ctx: Context, config: ResolvedConfig, service: BrowserService, assets?: AutomationAssetStore): void;

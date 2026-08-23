@@ -7,6 +7,7 @@ import type { AuthProfileConfig } from './auth-profiles.ts';
 import type { RulePackConfig } from './rule-packs.ts';
 import { type AutomationMode } from './freedom.ts';
 import { type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts';
+import { type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts';
 export declare const BROWSER_RUNTIMES: readonly ["playwright", "patchright"];
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number];
 export declare function resolveBrowserRuntime(value: unknown): BrowserRuntime;
@@ -34,6 +35,8 @@ export interface Config {
     automationMode: AutomationMode;
     /** Approval-independent traffic buffering and bounded crawl budgets. */
     usagePolicy?: UsagePolicyInput;
+    /** Reusable automation capture, review, activation, and retrieval policy. */
+    automationAssets?: AutomationAssetPolicyInput;
     /** Lazily run `playwright install chromium` when the browser is missing. */
     autoInstall: boolean;
     /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
@@ -54,6 +57,7 @@ export interface ResolvedConfig {
     opencliEnabled: boolean;
     automationMode: AutomationMode;
     usagePolicy: UsagePolicy;
+    automationAssets: AutomationAssetPolicy;
     autoInstall: boolean;
     snapshotDir: string;
     verbose: boolean;
