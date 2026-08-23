@@ -60,6 +60,13 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
     if (mode === 'autonomous' || mode === 'unrestricted') return { kind: 'allow' }
     return { kind: 'ask', reason: 'Run an active reusable browser automation asset' }
   }
+  if (name === 'browser_automation_develop') {
+    const action = String((args as { action?: unknown })?.action ?? '')
+    if (['get', 'validate'].includes(action)) return { kind: 'allow' }
+    if (mode === 'read-only') return { kind: 'deny', reason: `Automation draft writes are disabled by automationMode=${mode}` }
+    if (mode === 'standard') return { kind: 'ask', reason: 'Save a bounded local reusable automation draft' }
+    return { kind: 'allow' }
+  }
   if (name === 'web_deps' && (args as { action?: unknown })?.action === 'install') {
     if (mode === 'read-only') return { kind: 'deny', reason: `Dependency installation is disabled by automationMode=${mode}` }
     if (mode === 'unrestricted') return { kind: 'allow' }

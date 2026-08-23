@@ -11,7 +11,8 @@ import type { ResolvedConfig } from './config.ts'
 import type { BrowserService, InteractiveState } from './browser-service.ts'
 import type { BrowserRecipeStep } from './automation.ts'
 import { browserToolsForMode } from './freedom.ts'
-import type { AutomationAssetStore } from './automation-assets.ts'
+import type { AutomationAsset, AutomationAssetStore } from './automation-assets.ts'
+import { AutomationDevelopmentService } from './automation-development.ts'
 
 function sessionId(exec: unknown): string {
   const value = (exec as { agent?: { session?: { id?: unknown } } })?.agent?.session?.id
@@ -31,6 +32,11 @@ function materializeRecipe(steps: BrowserRecipeStep[], inputs: Record<string, st
     for (const key of ['value', 'text']) if (typeof copy[key] === 'string') copy[key] = materialize(copy[key], inputs)
     return copy as unknown as BrowserRecipeStep
   })
+}
+
+function developmentResult(action: string, value: unknown, asset?: AutomationAsset): { action: string; assetId?: string; status?: string; resultJson: string; truncated: boolean } {
+  const raw = JSON.stringify(value)
+  return { action, ...asset ? { assetId: asset.id, status: asset.status } : {}, resultJson: raw.slice(0, 100_000), truncated: raw.length > 100_000 }
 }
 
 function renderState(v: InteractiveState): { type: 'text'; text: string }[] {
@@ -87,6 +93,7 @@ const RECIPE_STEP_SCHEMA = {
 
 export function registerTools(ctx: Context, config: ResolvedConfig, service: BrowserService, assets?: AutomationAssetStore): void {
   const exposedTools = new Set<string>(browserToolsForMode(config.automationMode))
+  const development = assets ? new AutomationDevelopmentService(assets, config.automationAssets) : undefined
   const register = (tool: any): void => {
     if (exposedTools.has(String(tool.name))) ctx.tools.register(tool)
   }
@@ -97,6 +104,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     parameters: {
       query: { type: 'string', required: true, description: 'Short task description.' },
       domain: { type: 'string', description: 'Optional target hostname.' },
+      status: { type: 'string', enum: ['active', 'draft', 'archived', 'all'], description: 'Asset lifecycle scope. Defaults to active.' },
+      kind: { type: 'string', enum: ['recipe', 'userscript'], description: 'Optional asset kind.' },
     },
     output: {
       schema: {
@@ -112,7 +121,56 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
       render: (_args, value) => [{ type: 'text', text: value.length ? value.map(item => `${item.id} — ${item.name} [${item.kind}] domains=${item.domains.join(',') || '*'} inputs=${item.inputNames.join(',') || '-'}`).join('\n') : 'No active reusable automation matched.' }],
     },
     isConcurrencySafe: () => true,
-    async execute(args) { return assets?.search(args.query, args.domain) ?? [] },
+    async execute(args) { return assets?.search(args.query, args.domain, args.status, args.kind) ?? [] },
+  }))
+
+  register(defineTool({
+    name: 'browser_automation_develop',
+    description: 'Explicitly inspect, save, or validate one reusable automation draft. Use search first. Full recipe/source is returned only for action=get with an exact id. This tool never activates assets.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['get', 'save', 'validate'] },
+      id: { type: 'string', description: 'Exact asset id for get, update, or validate.' },
+      kind: { type: 'string', enum: ['recipe', 'userscript'], description: 'Required for save.' },
+      name: { type: 'string', description: 'Required for save.' },
+      description: { type: 'string' },
+      domains: { type: 'array', items: { type: 'string' } },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Explicit retrieval keywords, capped at 20.' },
+      inputNames: { type: 'array', items: { type: 'string' }, description: 'Declared UserScript __DSH_INPUTS__ keys. Recipe placeholders are inferred.' },
+      recipe: { type: 'array', items: RECIPE_STEP_SCHEMA, description: 'One to 25 declarative Playwright steps.' },
+      source: { type: 'string', description: 'Complete UserScript with @match and @grant none; capped by validator.' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: {
+        action: { type: 'string', required: true }, assetId: { type: 'string' }, status: { type: 'string' },
+        resultJson: { type: 'string', required: true }, truncated: { type: 'boolean', required: true },
+      } },
+      render: (_args, value) => [{ type: 'text', text: `Automation development ${value.action}${value.assetId ? ` ${value.assetId} [${value.status}]` : ''}\n${value.resultJson}${value.truncated ? '\n(result truncated)' : ''}` }],
+    },
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => false,
+    async execute(args, exec) {
+      if (!assets || !development) throw new Error('model automation development is disabled')
+      if (args.action === 'get') {
+        if (!args.id) throw new Error('automation development get requires id')
+        const asset = development.get(args.id)
+        return developmentResult('get', asset, asset)
+      }
+      if (args.action === 'validate') {
+        if (!args.id) throw new Error('automation development validate requires id')
+        const asset = development.validate(args.id)
+        return developmentResult('validate', { id: asset.id, kind: asset.kind, status: asset.status, testStatus: asset.testStatus, testMessage: asset.testMessage }, asset)
+      }
+      if (args.action !== 'save' || !args.kind || !args.name) throw new Error('automation development save requires kind and name')
+      const asset = development.save({
+        ...args.id ? { id: args.id } : {}, kind: args.kind, name: args.name,
+        ...args.description !== undefined ? { description: args.description } : {},
+        ...args.domains ? { domains: args.domains } : {}, ...args.tags ? { tags: args.tags } : {},
+        ...args.inputNames ? { inputNames: args.inputNames } : {}, ...args.recipe ? { recipe: args.recipe as BrowserRecipeStep[] } : {},
+        ...args.source !== undefined ? { source: args.source } : {},
+      }, sessionId(exec))
+      const compact = { id: asset.id, kind: asset.kind, status: asset.status, name: asset.name, domains: asset.domains, tags: asset.tags, inputNames: asset.inputNames, revision: asset.revision, testStatus: asset.testStatus }
+      return developmentResult('save', compact, asset)
+    },
   }))
 
   register(defineTool({

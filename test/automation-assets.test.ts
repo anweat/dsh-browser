@@ -78,6 +78,8 @@ test('retrieval returns only active summaries and respects top-k', () => {
   assert.equal(results.length, 1)
   assert.equal(Object.hasOwn(results[0]!, 'source'), false)
   assert.equal(Object.hasOwn(results[0]!, 'recipe'), false)
+  assert.throws(() => store.search('   '), /explicit keywords/)
+  assert.equal(store.search('issues', 'example.com', 'active', 'recipe')[0]?.kind, 'recipe')
 })
 
 test('auto-tested policy never promotes a static validation result', () => {

@@ -22,6 +22,8 @@ export interface AutomationAssetPolicyInput {
     maxActiveAssets?: number;
     retrievalTopK?: number;
     catalogTokenBudget?: number;
+    modelDevelopmentEnabled?: boolean;
+    maxModelDraftWritesPerSession?: number;
 }
 export interface AutomationAssetPolicy {
     enabled: boolean;
@@ -39,6 +41,8 @@ export interface AutomationAssetPolicy {
     maxActiveAssets: number;
     retrievalTopK: number;
     catalogTokenBudget: number;
+    modelDevelopmentEnabled: boolean;
+    maxModelDraftWritesPerSession: number;
 }
 export interface AutomationCandidate {
     id: string;
@@ -123,8 +127,9 @@ export declare class AutomationAssetStore {
     dismissCandidate(id: string): void;
     saveDraft(input: Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>): AutomationAsset;
     test(id: string): AutomationAsset;
+    validate(id: string): AutomationAsset;
     setStatus(id: string, status: AutomationAssetStatus): AutomationAsset;
-    search(query: string, domain?: string): AutomationAssetSummary[];
+    search(query: string, domain?: string, status?: AutomationAssetStatus | 'all', kind?: AutomationAssetKind): AutomationAssetSummary[];
     noteRun(id: string, ok: boolean): void;
     assertTarget(asset: AutomationAsset, url: string): void;
     private requireAsset;

@@ -111,6 +111,8 @@ export const Config: z<Config> = z.object({
     maxActiveAssets: z.number().default(50),
     retrievalTopK: z.number().default(5),
     catalogTokenBudget: z.number().default(800),
+    modelDevelopmentEnabled: z.boolean().default(true),
+    maxModelDraftWritesPerSession: z.number().default(3),
   }),
   autoInstall: z.boolean().default(false),
   snapshotDir: z.string(),

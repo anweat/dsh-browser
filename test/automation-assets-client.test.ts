@@ -16,6 +16,7 @@ const snapshot: AutomationAssetSnapshot = {
     enabled: true, persistenceMode: 'suggest', activationMode: 'manual', minSuccessfulRuns: 3, minDistinctSessions: 2,
     successWindowDays: 14, minSuccessRate: 0.8, maxCandidates: 20, candidateTtlDays: 14, maxSuggestionsPerDay: 2,
     maxDrafts: 10, maxActiveAssets: 50, retrievalTopK: 5, catalogTokenBudget: 800,
+    modelDevelopmentEnabled: true, maxModelDraftWritesPerSession: 3,
   },
   candidates: [],
   assets: [{
@@ -42,4 +43,3 @@ test('client loads summaries first and fetches source only after explicit select
   assert.equal(endpoints.filter(endpoint => endpoint === 'get').length, 1)
   controller.dispose()
 })
-

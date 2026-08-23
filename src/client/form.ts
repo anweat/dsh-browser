@@ -70,16 +70,18 @@ const ASSET_POLICY_KEYS = new Set([
   'enabled', 'directory', 'persistenceMode', 'activationMode', 'minSuccessfulRuns', 'minDistinctSessions',
   'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay',
   'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget',
+  'modelDevelopmentEnabled', 'maxModelDraftWritesPerSession',
 ])
 
 function validAssetPolicy(value: Record<string, unknown>): boolean {
   if (Object.keys(value).some(key => !ASSET_POLICY_KEYS.has(key))) return false
   if (value.enabled !== undefined && typeof value.enabled !== 'boolean') return false
   if (value.directory !== undefined && typeof value.directory !== 'string') return false
+  if (value.modelDevelopmentEnabled !== undefined && typeof value.modelDevelopmentEnabled !== 'boolean') return false
   if (value.persistenceMode !== undefined && !['off', 'manual', 'suggest', 'auto-draft'].includes(String(value.persistenceMode))) return false
   if (value.activationMode !== undefined && !['manual', 'auto-tested'].includes(String(value.activationMode))) return false
   return Object.entries(value).every(([key, entry]) => {
-    if (!['minSuccessfulRuns', 'minDistinctSessions', 'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay', 'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget'].includes(key)) return true
+    if (!['minSuccessfulRuns', 'minDistinctSessions', 'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay', 'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget', 'maxModelDraftWritesPerSession'].includes(key)) return true
     return typeof entry === 'number' && Number.isFinite(entry) && entry >= 0
   })
 }

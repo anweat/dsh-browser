@@ -30,6 +30,8 @@ export interface AutomationAssetPolicyInput {
   maxActiveAssets?: number
   retrievalTopK?: number
   catalogTokenBudget?: number
+  modelDevelopmentEnabled?: boolean
+  maxModelDraftWritesPerSession?: number
 }
 
 export interface AutomationAssetPolicy {
@@ -48,6 +50,8 @@ export interface AutomationAssetPolicy {
   maxActiveAssets: number
   retrievalTopK: number
   catalogTokenBudget: number
+  modelDevelopmentEnabled: boolean
+  maxModelDraftWritesPerSession: number
 }
 
 export interface AutomationCandidate {
@@ -164,6 +168,8 @@ export function resolveAutomationAssetPolicy(input: AutomationAssetPolicyInput =
     maxActiveAssets: boundedInteger(input.maxActiveAssets, 50, 1, 200),
     retrievalTopK: boundedInteger(input.retrievalTopK, 5, 1, 20),
     catalogTokenBudget: boundedInteger(input.catalogTokenBudget, 800, 100, 4_000),
+    modelDevelopmentEnabled: input.modelDevelopmentEnabled ?? true,
+    maxModelDraftWritesPerSession: boundedInteger(input.maxModelDraftWritesPerSession, 3, 1, 20),
   }
 }
 
@@ -385,6 +391,22 @@ export class AutomationAssetStore {
     return structuredClone(asset)
   }
 
+  validate(id: string): AutomationAsset {
+    const asset = this.requireAsset(id)
+    let message = 'Recipe structure is valid; runtime replay is still required.'
+    if (asset.kind === 'recipe') normalizeRecipeForCandidate(asset.recipe ?? [])
+    else {
+      const validation = validateUserscript(asset.source ?? '')
+      if (!validation.valid) throw new Error(validation.errors.join('; '))
+      message = `Userscript validated (${validation.sha256.slice(0, 12)}); runtime replay is still required.`
+    }
+    asset.testStatus = 'untested'
+    asset.testMessage = message
+    asset.updatedAt = nowIso()
+    this.write()
+    return structuredClone(asset)
+  }
+
   setStatus(id: string, status: AutomationAssetStatus): AutomationAsset {
     const asset = this.requireAsset(id)
     if (!['draft', 'active', 'archived'].includes(status)) throw new Error('invalid automation asset status')
@@ -399,12 +421,15 @@ export class AutomationAssetStore {
     return structuredClone(asset)
   }
 
-  search(query: string, domain?: string): AutomationAssetSummary[] {
+  search(query: string, domain?: string, status: AutomationAssetStatus | 'all' = 'active', kind?: AutomationAssetKind): AutomationAssetSummary[] {
+    if (!query.trim()) throw new Error('automation search requires explicit keywords')
+    if (!['draft', 'active', 'archived', 'all'].includes(status)) throw new Error('invalid automation search status')
     const terms = `${query} ${domain ?? ''}`.slice(0, 2_000).toLowerCase().split(/[^\p{L}\p{N}_.-]+/u).filter(Boolean).slice(0, 20)
     const normalizedDomain = domain?.toLowerCase()
-    const scored = this.state.assets.filter(item => item.status === 'active').map(asset => {
+    const scored = this.state.assets.filter(item => (status === 'all' || item.status === status) && (!kind || item.kind === kind)).map(asset => {
       const haystack = [asset.name, asset.description, ...asset.domains, ...asset.tags, ...asset.inputNames].join(' ').toLowerCase()
       let score = terms.reduce((sum, term) => sum + (haystack.includes(term) ? 4 : 0), 0)
+      score += terms.reduce((sum, term) => sum + (asset.tags.some(tag => tag.toLowerCase() === term) ? 6 : 0), 0)
       if (normalizedDomain && asset.domains.some(value => normalizedDomain === value || normalizedDomain.endsWith('.' + value))) score += 12
       score += Math.min(asset.successCount, 10) - Math.min(asset.failureCount, 5)
       return { asset, score }
