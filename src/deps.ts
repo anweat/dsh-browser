@@ -97,17 +97,38 @@ function pkgDir(name: string): string {
   return path.dirname(resolvePkgJson(name))
 }
 
-let cachedPlaywright: any
-/** Resolve the playwright module (plugin-local, then global reuse). */
+const cachedBrowserRuntimes = new Map<string, any>()
+
+export type BrowserRuntimeName = 'playwright' | 'patchright'
+
+export function browserRuntimePackage(runtime: BrowserRuntimeName): 'playwright' | 'patchright' {
+  if (runtime === 'playwright' || runtime === 'patchright') return runtime
+  throw new Error('browserRuntime must be one of: playwright, patchright')
+}
+
+/** Resolve a supported Playwright-compatible runtime (plugin-local, then global reuse). */
+export function loadBrowserRuntime(runtime: BrowserRuntimeName): any {
+  const packageName = browserRuntimePackage(runtime)
+  const cached = cachedBrowserRuntimes.get(packageName)
+  if (cached) return cached
+  const loaded = createRequire(resolvePkgJson(packageName))(packageName)
+  cachedBrowserRuntimes.set(packageName, loaded)
+  return loaded
+}
+
+/** Backwards-compatible Playwright loader for consumers and status checks. */
 export function loadPlaywright(): any {
-  if (cachedPlaywright) return cachedPlaywright
-  cachedPlaywright = createRequire(resolvePkgJson('playwright'))('playwright')
-  return cachedPlaywright
+  return loadBrowserRuntime('playwright')
 }
 
 /** playwright CLI entry (for `playwright install chromium`). */
 export function playwrightCliPath(): string {
   return path.join(pkgDir('playwright'), 'cli.js')
+}
+
+/** CLI entry for the selected Playwright-compatible runtime. */
+export function browserRuntimeCliPath(runtime: BrowserRuntimeName): string {
+  return path.join(pkgDir(browserRuntimePackage(runtime)), 'cli.js')
 }
 
 /** Entry JS for the bundled/reused @jackwener/opencli (its bin/main). */

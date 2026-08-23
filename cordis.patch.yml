@@ -10,7 +10,17 @@
       name: '@anweat/dsh-browser'
       config:
         automationMode: standard
+        browserRuntime: playwright
         channel: chromium
         headless: true
         opencliEnabled: true
+        usagePolicy:
+          minDelayMs: 750
+          maxConcurrency: 2
+          burst: 3
+          maxPagesPerRun: 20
+          maxDepth: 2
+          retryLimit: 2
+          backoffBaseMs: 1000
+          cooldownMs: 30000
         verbose: false

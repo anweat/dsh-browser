@@ -22,13 +22,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { loadPlaywright, runOpencli, runNode, playwrightCliPath, type CliResult } from './deps.ts'
+import { browserRuntimeCliPath, loadBrowserRuntime, runOpencli, runNode, type CliResult } from './deps.ts'
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
 import { runRecipe, type BrowserRecipeStep, type RecipeStepResult } from './automation.ts'
 import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
 import { browserToolsForMode, type AutomationMode } from './freedom.ts'
+import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
+import { UsageGovernor } from './usage-policy.ts'
 
 export interface RenderRule {
   hostname: string
@@ -85,6 +87,46 @@ export interface ScriptRunResult {
   truncated: boolean
 }
 
+export interface CrawlPage {
+  url: string
+  title: string
+  text: string
+  depth: number
+  status: number
+}
+
+export interface CrawlResult {
+  pages: CrawlPage[]
+  errors: { url: string; depth: number; error: string; status?: number }[]
+  stats: { pagesVisited: number; queued: number; elapsedMs: number; waitMs: number; backoffEvents: number }
+  warnings: string[]
+}
+
+export interface BrowserStatus {
+  enabled: boolean
+  channel: string
+  browserRuntime: 'playwright' | 'patchright'
+  runtimeWarnings: string[]
+  headless: boolean
+  opencliEnabled: boolean
+  automationMode: AutomationMode
+  exposedTools: string[]
+  directInteractionPolicy: 'deny' | 'ask' | 'allow'
+  mutatingRecipePolicy: 'deny' | 'ask' | 'allow'
+  externalUserscriptPolicy: 'deny' | 'ask' | 'allow'
+  opencliRunPolicy: 'deny' | 'ask' | 'allow'
+  chromiumInstalled: boolean
+  usagePolicy: ResolvedConfig['usagePolicy']
+  usageGovernor: ReturnType<UsageGovernor['snapshot']>
+  authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]
+  rulePacks: string[]
+  builtinScripts: string[]
+  externalUserscriptsRequireApproval: boolean
+  mutatingRecipesRequireApproval: boolean
+  activeUrl?: string
+  activeAuthProfile?: string
+}
+
 /** Rules-aware content extractor (runs in the page). */
 const EXTRACTOR_FN = `(ruleList) => {
   const doc = document
@@ -136,6 +178,20 @@ const LIST_EXTRACTOR = `(spec) => {
   return items
 }`
 
+const CRAWL_EXTRACTOR = `(maxChars) => {
+  const root = document.querySelector('article, main, [role="main"]') || document.body
+  const text = ((root && (root.innerText || root.textContent)) || '').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, maxChars)
+  const links = []
+  for (const anchor of document.querySelectorAll('a[href]')) {
+    try {
+      const url = new URL(anchor.href, location.href)
+      if ((url.protocol === 'http:' || url.protocol === 'https:') && !links.includes(url.href)) links.push(url.href)
+      if (links.length >= 500) break
+    } catch (e) {}
+  }
+  return { title: document.title || '', text, links }
+}`
+
 function uid(): string {
   return crypto.randomUUID()
 }
@@ -161,9 +217,12 @@ export class BrowserService {
   private activeProfile?: ResolvedAuthProfile
   private activeRulePack?: ResolvedRulePack
   private readonly authProfiles: AuthProfileStore
+  private readonly usageGovernor: UsageGovernor
+  private opencliCatalogCache?: OpencliCatalogItem[]
 
   constructor(private readonly config: ResolvedConfig) {
     this.authProfiles = new AuthProfileStore(config.authProfiles)
+    this.usageGovernor = new UsageGovernor(config.usagePolicy)
   }
 
   available(): boolean {
@@ -174,7 +233,7 @@ export class BrowserService {
     if (this.browser) return this.browser
     if (!this.launching) {
       this.launching = (async () => {
-        const pw = loadPlaywright()
+        const pw = loadBrowserRuntime(this.config.browserRuntime)
         const launchOptions: Record<string, unknown> = { headless: this.config.headless }
         if (this.config.channel) launchOptions.channel = this.config.channel
         if (this.config.executablePath) launchOptions.executablePath = this.config.executablePath
@@ -187,7 +246,7 @@ export class BrowserService {
               await this.installChromium()
               this.browser = await pw.chromium.launch(launchOptions)
             } else {
-              throw new Error('dsh-browser: chromium is not installed. Run the browser_install tool, or: node "' + playwrightCliPath() + '" install chromium')
+              throw new Error('dsh-browser: chromium is not installed for ' + this.config.browserRuntime + '. Run the browser_install tool, or: node "' + browserRuntimeCliPath(this.config.browserRuntime) + '" install chromium')
             }
           } else {
             throw error
@@ -204,17 +263,34 @@ export class BrowserService {
 
   /** Run `playwright install chromium` from the bundled playwright CLI. */
   installChromium(): Promise<CliResult> {
-    return runNode(playwrightCliPath(), ['install', 'chromium'], { timeoutMs: 600_000, signal: undefined, maxOutput: 256 * 1024 })
+    return runNode(browserRuntimeCliPath(this.config.browserRuntime), ['install', 'chromium'], { timeoutMs: 600_000, signal: undefined, maxOutput: 256 * 1024 })
   }
 
-  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack }> {
+  private async navigate(page: any, url: string, options: Record<string, unknown>, signal?: AbortSignal): Promise<any> {
+    let response: any
+    for (let attempt = 0; attempt <= this.config.usagePolicy.retryLimit; attempt++) {
+      response = await this.usageGovernor.run(url, () => page.goto(url, options), signal)
+      const status = Number(response?.status?.() ?? 0)
+      if (status >= 200 && status < 400) this.usageGovernor.noteResponse(url, status)
+      if (![429, 502, 503, 504].includes(status)) return response
+      const rawRetryAfter = String(response?.headers?.()?.['retry-after'] ?? '')
+      const retryAfterMs = /^\d+(?:\.\d+)?$/.test(rawRetryAfter)
+        ? Number(rawRetryAfter) * 1000
+        : (Number.isFinite(Date.parse(rawRetryAfter)) ? Math.max(Date.parse(rawRetryAfter) - Date.now(), 0) : undefined)
+      this.usageGovernor.noteResponse(url, status, retryAfterMs)
+      if (attempt === this.config.usagePolicy.retryLimit) return response
+    }
+    return response
+  }
+
+  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack }> {
     const browser = await this.ensure()
-    const profileId = opts.authProfile ?? this.config.defaultAuthProfile
+    const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
     const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
     const context = await browser.newContext(profile?.storageStatePath
       ? { storageState: profile.storageStatePath }
-      : (this.config.storageStatePath ? { storageState: this.config.storageStatePath } : {}))
+      : (!opts.anonymous && this.config.storageStatePath ? { storageState: this.config.storageStatePath } : {}))
     try {
       if (rulePack?.initScriptPath) await context.addInitScript({ path: rulePack.initScriptPath })
     } catch (error) {
@@ -254,7 +330,7 @@ export class BrowserService {
     else signal?.addEventListener('abort', onAbort)
     try {
       page.setDefaultTimeout(20_000)
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25_000 })
+      await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 25_000 }, signal)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
@@ -291,7 +367,7 @@ export class BrowserService {
     const htmlPath = path.join(opts.outDir, stamp + '.html')
     try {
       page.setDefaultTimeout(25_000)
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
       await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
       if (screenshotPath) await page.screenshot({ path: screenshotPath, fullPage: true })
@@ -328,7 +404,7 @@ export class BrowserService {
     else signal?.addEventListener('abort', onAbort)
     try {
       page.setDefaultTimeout(25_000)
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
@@ -360,11 +436,110 @@ export class BrowserService {
     if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
       return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
     }
-    return runOpencli(args, { ...opts, signal: opts.signal })
+    // OpenCLI adapters can issue real site traffic outside Playwright, so they
+    // share the same approval-independent concurrency and burst buffer.
+    return this.usageGovernor.run(
+      'https://opencli.local/',
+      () => runOpencli(args, { ...opts, signal: opts.signal }),
+      opts.signal,
+    )
   }
 
   opencliDoctor(signal?: AbortSignal): Promise<CliResult> {
     return this.opencli(['doctor'], { timeoutMs: 30_000, signal })
+  }
+
+  async opencliCatalog(filter: OpencliCatalogFilter = {}, signal?: AbortSignal): Promise<OpencliCatalogItem[]> {
+    if (!this.config.opencliEnabled) throw new Error('dsh-browser: OpenCLI is disabled')
+    if (!this.opencliCatalogCache) {
+      const result = await this.opencli(['list', '-f', 'json'], { timeoutMs: 60_000, signal })
+      if (result.code !== 0 || result.timedOut) throw new Error('OpenCLI catalog failed: ' + (result.stderr || result.stdout).slice(0, 500))
+      this.opencliCatalogCache = parseOpencliCatalog(result.stdout)
+    }
+    return filterOpencliCatalog(this.opencliCatalogCache, filter)
+  }
+
+  async crawl(startUrls: readonly string[], opts: { maxPages?: number; maxDepth?: number; sameOrigin?: boolean; maxCharsPerPage?: number; signal?: AbortSignal } = {}): Promise<CrawlResult> {
+    if (startUrls.length < 1 || startUrls.length > 5) throw new Error('browser crawl requires 1 to 5 start URLs')
+    const normalized = startUrls.map(value => {
+      const url = new URL(value)
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('browser crawl only supports HTTP(S) URLs')
+      url.hash = ''
+      return url.href
+    })
+    const maxPages = opts.maxPages ?? this.config.usagePolicy.maxPagesPerRun
+    const maxDepth = opts.maxDepth ?? this.config.usagePolicy.maxDepth
+    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > this.config.usagePolicy.maxPagesPerRun) {
+      throw new Error('browser crawl maxPages must be from 1 to configured usagePolicy.maxPagesPerRun (' + this.config.usagePolicy.maxPagesPerRun + ')')
+    }
+    if (!Number.isInteger(maxDepth) || maxDepth < 0 || maxDepth > this.config.usagePolicy.maxDepth) {
+      throw new Error('browser crawl maxDepth must be from 0 to configured usagePolicy.maxDepth (' + this.config.usagePolicy.maxDepth + ')')
+    }
+    const maxCharsPerPage = Math.min(Math.max(opts.maxCharsPerPage ?? 20_000, 1_000), 50_000)
+    const sameOrigin = opts.sameOrigin ?? true
+    const allowedOrigins = new Set(normalized.map(value => new URL(value).origin))
+    const queue = normalized.map(url => ({ url, depth: 0 }))
+    const seen = new Set(normalized)
+    const pages: CrawlPage[] = []
+    const errors: CrawlResult['errors'] = []
+    const before = this.usageGovernor.snapshot()
+    const started = Date.now()
+    const session = await this.transientContext(normalized[0]!, { anonymous: true })
+    try {
+      while (queue.length && pages.length + errors.length < maxPages) {
+        if (opts.signal?.aborted) throw new Error('browser crawl aborted')
+        const item = queue.shift()!
+        const page = await session.context.newPage()
+        try {
+          page.setDefaultTimeout(30_000)
+          const response = await this.navigate(page, item.url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, opts.signal)
+          const status = Number(response?.status?.() ?? 0)
+          if (sameOrigin && !allowedOrigins.has(new URL(page.url()).origin)) {
+            errors.push({ url: item.url, depth: item.depth, status, error: 'cross-origin redirect blocked: ' + page.url() })
+            continue
+          }
+          if (status >= 400) {
+            errors.push({ url: item.url, depth: item.depth, status, error: 'HTTP ' + status })
+            continue
+          }
+          await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {})
+          const data = await page.evaluate('(' + CRAWL_EXTRACTOR + ')(' + maxCharsPerPage + ')') as { title?: string; text?: string; links?: string[] }
+          pages.push({ url: page.url(), title: String(data.title ?? ''), text: String(data.text ?? ''), depth: item.depth, status })
+          if (item.depth >= maxDepth) continue
+          for (const rawLink of Array.isArray(data.links) ? data.links : []) {
+            let link: URL
+            try { link = new URL(rawLink); link.hash = '' } catch { continue }
+            if (sameOrigin && !allowedOrigins.has(link.origin)) continue
+            const href = link.href
+            if (seen.has(href) || seen.size >= maxPages * 25) continue
+            seen.add(href)
+            queue.push({ url: href, depth: item.depth + 1 })
+          }
+        } catch (error) {
+          errors.push({ url: item.url, depth: item.depth, error: String(error).slice(0, 500) })
+        } finally {
+          await page.close().catch(() => {})
+        }
+      }
+    } finally {
+      await this.persistAndClose(session)
+    }
+    const after = this.usageGovernor.snapshot()
+    return {
+      pages,
+      errors,
+      stats: {
+        pagesVisited: pages.length + errors.length,
+        queued: queue.length,
+        elapsedMs: Date.now() - started,
+        waitMs: after.totalWaitMs - before.totalWaitMs,
+        backoffEvents: after.backoffEvents - before.backoffEvents,
+      },
+      warnings: [
+        'Bounded crawl: respect each site\'s terms, robots directives, copyright, privacy, and applicable law.',
+        'No-approval mode skips human confirmation only; concurrency, burst, page/depth budgets, and server-pressure backoff remain active.',
+      ],
+    }
   }
 
   scriptCatalog(): { id: string; name: string; description: string; sha256: string }[] {
@@ -396,7 +571,7 @@ export class BrowserService {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       page.setDefaultTimeout(30_000)
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
       const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? 15_000, 1_000), 30_000)
@@ -484,7 +659,7 @@ export class BrowserService {
   async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(url, opts)
     page.setDefaultTimeout(30_000)
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
     await applyRuleSteps(page, this.activeRulePack)
     if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
@@ -532,7 +707,7 @@ export class BrowserService {
     const page = await this.ensureActivePage(opts.url, opts)
     if (opts.url) {
       page.setDefaultTimeout(30_000)
-      await page.goto(opts.url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await this.navigate(page, opts.url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, opts.signal)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
       await applyRuleSteps(page, this.activeRulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
@@ -557,15 +732,25 @@ export class BrowserService {
     this.activeRulePack = undefined
   }
 
-  async status(): Promise<{ enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; automationMode: AutomationMode; exposedTools: string[]; directInteractionPolicy: 'deny' | 'ask' | 'allow'; mutatingRecipePolicy: 'deny' | 'ask' | 'allow'; externalUserscriptPolicy: 'deny' | 'ask' | 'allow'; opencliRunPolicy: 'deny' | 'ask' | 'allow'; chromiumInstalled: boolean; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean; activeUrl?: string; activeAuthProfile?: string }> {
+  async status(): Promise<BrowserStatus> {
     let chromiumInstalled = false
     try {
-      const pw = loadPlaywright()
+      const pw = loadBrowserRuntime(this.config.browserRuntime)
       chromiumInstalled = !!pw.chromium.executablePath()
     } catch { chromiumInstalled = false }
+    const runtimeWarnings = this.config.browserRuntime === 'patchright'
+      ? [
+          'Patchright is Chromium-only and disables Playwright console APIs to avoid Runtime.enable detection.',
+          ...(this.config.channel !== 'chrome' || this.config.headless
+            ? ['Patchright stealth is strongest with channel=chrome and headless=false; current settings favor automation/test compatibility.']
+            : []),
+        ]
+      : []
     return {
       enabled: this.config.enabled,
       channel: this.config.channel,
+      browserRuntime: this.config.browserRuntime,
+      runtimeWarnings,
       headless: this.config.headless,
       opencliEnabled: this.config.opencliEnabled,
       automationMode: this.config.automationMode,
@@ -575,6 +760,8 @@ export class BrowserService {
       externalUserscriptPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       opencliRunPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
+      usagePolicy: this.config.usagePolicy,
+      usageGovernor: this.usageGovernor.snapshot(),
       authProfiles: this.authProfiles.list(),
       rulePacks: Object.keys(this.config.rulePacks).sort(),
       builtinScripts: BUILTIN_SCRIPTS.map(script => script.id),

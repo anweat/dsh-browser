@@ -23,6 +23,8 @@ import type { ResolvedConfig } from './config.ts';
 import { type BrowserRecipeStep, type RecipeStepResult } from './automation.ts';
 import { type UserscriptValidation } from './scripts.ts';
 import { type AutomationMode } from './freedom.ts';
+import { type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts';
+import { UsageGovernor } from './usage-policy.ts';
 export interface RenderRule {
     hostname: string;
     contentSelectors: string[];
@@ -70,6 +72,58 @@ export interface ScriptRunResult {
     resultJson: string;
     truncated: boolean;
 }
+export interface CrawlPage {
+    url: string;
+    title: string;
+    text: string;
+    depth: number;
+    status: number;
+}
+export interface CrawlResult {
+    pages: CrawlPage[];
+    errors: {
+        url: string;
+        depth: number;
+        error: string;
+        status?: number;
+    }[];
+    stats: {
+        pagesVisited: number;
+        queued: number;
+        elapsedMs: number;
+        waitMs: number;
+        backoffEvents: number;
+    };
+    warnings: string[];
+}
+export interface BrowserStatus {
+    enabled: boolean;
+    channel: string;
+    browserRuntime: 'playwright' | 'patchright';
+    runtimeWarnings: string[];
+    headless: boolean;
+    opencliEnabled: boolean;
+    automationMode: AutomationMode;
+    exposedTools: string[];
+    directInteractionPolicy: 'deny' | 'ask' | 'allow';
+    mutatingRecipePolicy: 'deny' | 'ask' | 'allow';
+    externalUserscriptPolicy: 'deny' | 'ask' | 'allow';
+    opencliRunPolicy: 'deny' | 'ask' | 'allow';
+    chromiumInstalled: boolean;
+    usagePolicy: ResolvedConfig['usagePolicy'];
+    usageGovernor: ReturnType<UsageGovernor['snapshot']>;
+    authProfiles: {
+        id: string;
+        allowedDomains: string[];
+        persistState: boolean;
+    }[];
+    rulePacks: string[];
+    builtinScripts: string[];
+    externalUserscriptsRequireApproval: boolean;
+    mutatingRecipesRequireApproval: boolean;
+    activeUrl?: string;
+    activeAuthProfile?: string;
+}
 export declare class BrowserService {
     private readonly config;
     private browser;
@@ -79,11 +133,14 @@ export declare class BrowserService {
     private activeProfile?;
     private activeRulePack?;
     private readonly authProfiles;
+    private readonly usageGovernor;
+    private opencliCatalogCache?;
     constructor(config: ResolvedConfig);
     available(): boolean;
     private ensure;
     /** Run `playwright install chromium` from the bundled playwright CLI. */
     installChromium(): Promise<CliResult>;
+    private navigate;
     private transientContext;
     private persistAndClose;
     render(url: string, rules: readonly RenderRule[], opts?: {
@@ -120,6 +177,14 @@ export declare class BrowserService {
         signal?: AbortSignal;
     }): Promise<CliResult>;
     opencliDoctor(signal?: AbortSignal): Promise<CliResult>;
+    opencliCatalog(filter?: OpencliCatalogFilter, signal?: AbortSignal): Promise<OpencliCatalogItem[]>;
+    crawl(startUrls: readonly string[], opts?: {
+        maxPages?: number;
+        maxDepth?: number;
+        sameOrigin?: boolean;
+        maxCharsPerPage?: number;
+        signal?: AbortSignal;
+    }): Promise<CrawlResult>;
     scriptCatalog(): {
         id: string;
         name: string;
@@ -170,29 +235,6 @@ export declare class BrowserService {
         signal?: AbortSignal;
     }): Promise<RecipeRunResult>;
     closePage(): Promise<void>;
-    status(): Promise<{
-        enabled: boolean;
-        channel: string;
-        headless: boolean;
-        opencliEnabled: boolean;
-        automationMode: AutomationMode;
-        exposedTools: string[];
-        directInteractionPolicy: 'deny' | 'ask' | 'allow';
-        mutatingRecipePolicy: 'deny' | 'ask' | 'allow';
-        externalUserscriptPolicy: 'deny' | 'ask' | 'allow';
-        opencliRunPolicy: 'deny' | 'ask' | 'allow';
-        chromiumInstalled: boolean;
-        authProfiles: {
-            id: string;
-            allowedDomains: string[];
-            persistState: boolean;
-        }[];
-        rulePacks: string[];
-        builtinScripts: string[];
-        externalUserscriptsRequireApproval: boolean;
-        mutatingRecipesRequireApproval: boolean;
-        activeUrl?: string;
-        activeAuthProfile?: string;
-    }>;
+    status(): Promise<BrowserStatus>;
     close(): Promise<void>;
 }

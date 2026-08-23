@@ -72,11 +72,11 @@ test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating reci
 })
 
 test('automation modes expose predictable tool sets and retain validation when approval is disabled', () => {
-  assert.equal(ALL_BROWSER_TOOL_NAMES.length, 16)
-  assert.equal(browserToolsForMode('read-only').length, 10)
-  assert.equal(browserToolsForMode('standard').length, 16)
-  assert.equal(browserToolsForMode('autonomous').length, 16)
-  assert.equal(browserToolsForMode('unrestricted').length, 16)
+  assert.equal(ALL_BROWSER_TOOL_NAMES.length, 18)
+  assert.equal(browserToolsForMode('read-only').length, 12)
+  assert.equal(browserToolsForMode('standard').length, 18)
+  assert.equal(browserToolsForMode('autonomous').length, 18)
+  assert.equal(browserToolsForMode('unrestricted').length, 18)
   assert.equal(browserToolsForMode('read-only').includes('browser_userscript_run'), false)
   assert.equal(browserToolsForMode('read-only').includes('browser_recipe_run'), true)
 
@@ -155,18 +155,115 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
       snippet: 'Browser automation fixture.',
     }])
 
+    const crawl = await service.crawl([url], { maxPages: 2, maxDepth: 1, sameOrigin: true, maxCharsPerPage: 2_000 })
+    assert.equal(crawl.pages.length, 2, JSON.stringify(crawl))
+    assert.deepEqual(crawl.pages.map(page => page.depth), [0, 1])
+    assert.equal(crawl.stats.pagesVisited, 2)
+    assert.match(crawl.warnings.join(' '), /terms|robots/i)
+
+    const catalog = await service.opencliCatalog({ site: 'reddit', query: 'search', limit: 5 })
+    assert.ok(catalog.length > 0 && catalog.length <= 5)
+    assert.ok(catalog.every(item => item.site === 'reddit'))
+
     const snapshot = await service.snapshot(url, [], { outDir: snapshotDir, screenshot: false } as never)
     assert.equal(snapshot.screenshotPath, undefined)
     assert.equal(fs.existsSync(snapshot.htmlPath), true)
     assert.deepEqual(fs.readdirSync(snapshotDir).filter(file => file.endsWith('.png')), [])
 
     const status = await service.status()
+    assert.equal(status.browserRuntime, 'playwright')
+    assert.equal(status.usagePolicy.maxPagesPerRun, 20)
+    assert.equal(status.usageGovernor.totalRuns > 0, true)
     assert.equal(status.automationMode, 'standard')
-    assert.equal(status.exposedTools.length, 16)
+    assert.equal(status.exposedTools.length, 18)
     assert.equal(status.directInteractionPolicy, 'ask')
   } finally {
     await service.close()
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
     fs.rmSync(snapshotDir, { recursive: true, force: true })
+  }
+})
+
+test('real Patchright runtime is selectable and executes a trusted script', async () => {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    response.end('<!doctype html><title>Patchright fixture</title><main><h1>Stealth runtime</h1><p>Patchright works through the same browser contract.</p></main>')
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('fixture server did not expose a TCP port')
+  const service = new BrowserService(resolveConfig({
+    enabled: true,
+    channel: 'chrome',
+    headless: true,
+    browserRuntime: 'patchright',
+    opencliEnabled: false,
+    automationMode: 'standard',
+    autoInstall: false,
+    verbose: false,
+  }))
+  try {
+    const result = await service.runBuiltinScript(`http://127.0.0.1:${address.port}/`, 'article-clean')
+    assert.match(result.resultJson, /Stealth runtime/)
+    const status = await service.status()
+    assert.equal(status.browserRuntime, 'patchright')
+    assert.match(status.runtimeWarnings.join(' '), /headed|headless/i)
+  } finally {
+    await service.close()
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  }
+})
+
+test('bounded crawl backs off and retries a real 429 response', async () => {
+  let requests = 0
+  const observedCookies: string[] = []
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-crawl-auth-'))
+  const storageStatePath = path.join(authDir, 'state.json')
+  fs.writeFileSync(storageStatePath, JSON.stringify({ cookies: [{ name: 'crawl_session', value: 'must-not-leak', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax' }], origins: [] }), 'utf8')
+  const server = http.createServer((request, response) => {
+    if (request.url !== '/') {
+      response.writeHead(204)
+      response.end()
+      return
+    }
+    requests++
+    observedCookies.push(request.headers.cookie ?? '')
+    if (requests === 1) {
+      response.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '0.02' })
+      response.end('slow down')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    response.end('<!doctype html><title>Recovered</title><main><h1>Recovered after backoff</h1></main>')
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('fixture server did not expose a TCP port')
+  const service = new BrowserService(resolveConfig({
+    enabled: true,
+    channel: 'chromium',
+    headless: true,
+    browserRuntime: 'playwright',
+    opencliEnabled: false,
+    automationMode: 'unrestricted',
+    authProfiles: { crawlAuth: { storageStatePath, allowedDomains: ['127.0.0.1'] } },
+    defaultAuthProfile: 'crawlAuth',
+    usagePolicy: { minDelayMs: 0, maxConcurrency: 2, burst: 3, maxPagesPerRun: 2, maxDepth: 0, retryLimit: 1, backoffBaseMs: 10, cooldownMs: 100 },
+    autoInstall: false,
+    verbose: false,
+  }))
+  try {
+    const result = await service.crawl([`http://127.0.0.1:${address.port}/`], { maxPages: 1, maxDepth: 0 })
+    assert.equal(requests, 2)
+    assert.equal(result.pages.length, 1)
+    assert.equal(result.errors.length, 0)
+    assert.equal(result.stats.backoffEvents, 1)
+    assert.match(result.pages[0]?.text ?? '', /Recovered after backoff/)
+    assert.ok(observedCookies.every(value => !value.includes('crawl_session')))
+    await assert.rejects(() => service.crawl([`http://127.0.0.1:${address.port}/`], { maxPages: 3 }), /maxPages/)
+  } finally {
+    await service.close()
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    fs.rmSync(authDir, { recursive: true, force: true })
   }
 })

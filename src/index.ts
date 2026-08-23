@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import fs from 'node:fs'
 import path from 'node:path'
 import type {} from '@deepseek-ai/dsh-tools'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { Config, resolveConfig, type ResolvedConfig } from './config.ts'
 import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
@@ -31,7 +32,18 @@ export type { AutomationMode, BrowserToolName } from './freedom.ts'
 export { AUTOMATION_MODES, ALL_BROWSER_TOOL_NAMES, browserToolsForMode } from './freedom.ts'
 
 export function apply(ctx: Context, config: Config): void {
-  const resolved: ResolvedConfig = resolveConfig(config)
+  const deployed: ResolvedConfig = resolveConfig(config)
+  let resolveSource: () => Config = () => deployed
+  ctx.inject(['settings'], (settingsCtx) => {
+    const scope = settingsCtx.settings.register(settingsNamespace('browser'), Config, {
+      base: deployed,
+      // Browser processes, tool exposure, and approval hooks are deliberately
+      // startup-scoped. The next full profile start reads the persisted layer.
+      applies: 'restart',
+    })
+    resolveSource = () => scope.get()
+  })
+  const resolved: ResolvedConfig = resolveConfig(resolveSource())
   fs.mkdirSync(resolved.snapshotDir, { recursive: true })
 
   const service = new BrowserService(resolved)

@@ -249,6 +249,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
         properties: {
           enabled: { type: 'boolean', required: true },
           channel: { type: 'string', required: true },
+          browserRuntime: { type: 'string', required: true, enum: ['playwright', 'patchright'] },
+          runtimeWarnings: { type: 'array', required: true, items: { type: 'string' } },
           headless: { type: 'boolean', required: true },
           opencliEnabled: { type: 'boolean', required: true },
           automationMode: { type: 'string', required: true, enum: ['read-only', 'standard', 'autonomous', 'unrestricted'] },
@@ -258,6 +260,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
           externalUserscriptPolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
           opencliRunPolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
           chromiumInstalled: { type: 'boolean', required: true },
+          usagePolicy: { type: 'object', required: true, additionalProperties: true, properties: {} },
+          usageGovernor: { type: 'object', required: true, additionalProperties: true, properties: {} },
           activeUrl: { type: 'string' },
           activeAuthProfile: { type: 'string' },
           authProfiles: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', required: true }, allowedDomains: { type: 'array', required: true, items: { type: 'string' } }, persistState: { type: 'boolean', required: true } } } },
@@ -268,20 +272,23 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
         },
       },
       render: (_args, value) => {
-        const v = value as { enabled: boolean; channel: string; headless: boolean; opencliEnabled: boolean; automationMode: string; exposedTools: string[]; directInteractionPolicy: string; mutatingRecipePolicy: string; externalUserscriptPolicy: string; opencliRunPolicy: string; chromiumInstalled: boolean; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean }
+        const v = value as { enabled: boolean; channel: string; browserRuntime: string; runtimeWarnings: string[]; headless: boolean; opencliEnabled: boolean; automationMode: string; exposedTools: string[]; directInteractionPolicy: string; mutatingRecipePolicy: string; externalUserscriptPolicy: string; opencliRunPolicy: string; chromiumInstalled: boolean; usagePolicy: { minDelayMs: number; maxConcurrency: number; burst: number; maxPagesPerRun: number; maxDepth: number }; usageGovernor: { active: number; queued: number; totalRuns: number; totalWaitMs: number; backoffEvents: number }; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean }
         return [{ type: 'text', text: [
           'browser: ' + (v.enabled ? 'enabled' : 'disabled'),
-          'channel: ' + v.channel + (v.headless ? ' (headless)' : ' (headed)'),
+          'runtime: ' + v.browserRuntime + ' / ' + v.channel + (v.headless ? ' (headless)' : ' (headed)'),
           'automation mode: ' + v.automationMode + ' (' + v.exposedTools.length + ' tools exposed)',
           'direct interactions: ' + v.directInteractionPolicy,
           'mutating recipes: ' + v.mutatingRecipePolicy,
           'external userscripts: ' + v.externalUserscriptPolicy,
           'general opencli: ' + v.opencliRunPolicy,
           'chromium installed: ' + v.chromiumInstalled,
+          `usage buffer: concurrency=${v.usagePolicy.maxConcurrency}, burst=${v.usagePolicy.burst}/${v.usagePolicy.minDelayMs}ms, crawl=${v.usagePolicy.maxPagesPerRun} pages depth ${v.usagePolicy.maxDepth}`,
+          `usage activity: runs=${v.usageGovernor.totalRuns}, queued=${v.usageGovernor.queued}, waited=${v.usageGovernor.totalWaitMs}ms, backoffs=${v.usageGovernor.backoffEvents}`,
           'opencli (bundled): ' + (v.opencliEnabled ? 'enabled' : 'disabled'),
           'auth profiles: ' + (v.authProfiles.map(p => p.id + '[' + p.allowedDomains.join(',') + ']' + (p.persistState ? '(writeback)' : '')).join('; ') || '-'),
           'rule packs: ' + (v.rulePacks.join(', ') || '-'),
           'built-in scripts: ' + v.builtinScripts.join(', '),
+          ...v.runtimeWarnings.map(warning => 'warning: ' + warning),
           ...(v.activeAuthProfile ? ['active auth profile: ' + v.activeAuthProfile] : []),
           ...(v.activeUrl ? ['active page: ' + v.activeUrl] : []),
         ].join('\n') }]
@@ -494,6 +501,51 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
   }))
 
   register(defineTool({
+    name: 'browser_crawl',
+    description: 'Crawl a bounded set of HTTP(S) pages with the configured concurrency, burst, page/depth, retry, and cooldown budgets. This is read-only and remains buffered even in unrestricted/no-approval mode. Respect site terms and robots directives.',
+    parameters: {
+      startUrls: { type: 'array', required: true, items: { type: 'string' }, description: 'One to five starting URLs.' },
+      maxPages: { type: 'number', description: 'Page budget, capped by usagePolicy.maxPagesPerRun.' },
+      maxDepth: { type: 'number', description: 'Link depth, capped by usagePolicy.maxDepth.' },
+      sameOrigin: { type: 'boolean', description: 'Only follow links on starting origins. Default true.' },
+      maxCharsPerPage: { type: 'number', description: 'Readable text cap per page, 1000-50000.' },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, properties: {
+          pages: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+            url: { type: 'string', required: true }, title: { type: 'string', required: true }, text: { type: 'string', required: true }, depth: { type: 'number', required: true }, status: { type: 'number', required: true },
+          } } },
+          errors: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+            url: { type: 'string', required: true }, depth: { type: 'number', required: true }, error: { type: 'string', required: true }, status: { type: 'number' },
+          } } },
+          stats: { type: 'object', required: true, additionalProperties: false, properties: {
+            pagesVisited: { type: 'number', required: true }, queued: { type: 'number', required: true }, elapsedMs: { type: 'number', required: true }, waitMs: { type: 'number', required: true }, backoffEvents: { type: 'number', required: true },
+          } },
+          warnings: { type: 'array', required: true, items: { type: 'string' } },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: [
+        `crawl: ${value.stats.pagesVisited} visited, ${value.pages.length} pages, ${value.errors.length} errors, ${value.stats.waitMs}ms buffered`,
+        ...value.warnings.map(warning => 'warning: ' + warning),
+        ...value.pages.map(page => `\n[depth ${page.depth}, HTTP ${page.status}] ${page.title}\n${page.url}\n${page.text}`),
+        ...value.errors.map(error => `\nERROR depth ${error.depth} ${error.url}: ${error.error}`),
+      ].join('\n') }],
+    },
+    timeoutMs: 300_000,
+    isConcurrencySafe: () => false,
+    async execute(args, exec) {
+      return service.crawl(args.startUrls, {
+        signal: exec.signal,
+        ...args.maxPages !== undefined ? { maxPages: args.maxPages } : {},
+        ...args.maxDepth !== undefined ? { maxDepth: args.maxDepth } : {},
+        ...args.sameOrigin !== undefined ? { sameOrigin: args.sameOrigin } : {},
+        ...args.maxCharsPerPage !== undefined ? { maxCharsPerPage: args.maxCharsPerPage } : {},
+      })
+    },
+  }))
+
+  register(defineTool({
     name: 'browser_opencli_status',
     description: 'Run bundled OpenCLI doctor and return the real daemon, extension, profile, and Browser Bridge connectivity status.',
     parameters: {},
@@ -509,6 +561,30 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     isConcurrencySafe: () => true,
     async execute(_args, exec) {
       return service.opencliDoctor(exec.signal)
+    },
+  }))
+
+  register(defineTool({
+    name: 'browser_opencli_catalog',
+    description: 'Discover bundled OpenCLI adapters through a filtered, capped catalog. Use before browser_opencli_run to find exact command names, access class, strategy, and arguments without exposing the full catalog.',
+    parameters: {
+      query: { type: 'string' },
+      site: { type: 'string' },
+      access: { type: 'string', enum: ['read', 'write'] },
+      strategy: { type: 'string' },
+      limit: { type: 'number' },
+    },
+    output: {
+      schema: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+        command: { type: 'string', required: true }, site: { type: 'string', required: true }, name: { type: 'string', required: true }, description: { type: 'string', required: true }, access: { type: 'string', required: true }, strategy: { type: 'string', required: true }, argsJson: { type: 'string', required: true }, example: { type: 'string' }, domain: { type: 'string' },
+      } } },
+      render: (_args, value) => [{ type: 'text', text: value.map(item => `${item.command} [${item.access}/${item.strategy}]\n${item.description}\nargs=${item.argsJson}${item.example ? '\nexample: ' + item.example : ''}`).join('\n\n') }],
+    },
+    timeoutMs: 75_000,
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      const items = await service.opencliCatalog(args, exec.signal)
+      return items.map(({ args: itemArgs, ...item }) => ({ ...item, argsJson: JSON.stringify(itemArgs) }))
     },
   }))
 

@@ -21,10 +21,16 @@ export interface CliResult {
     stderr: string;
     timedOut: boolean;
 }
-/** Resolve the playwright module (plugin-local, then global reuse). */
+export type BrowserRuntimeName = 'playwright' | 'patchright';
+export declare function browserRuntimePackage(runtime: BrowserRuntimeName): 'playwright' | 'patchright';
+/** Resolve a supported Playwright-compatible runtime (plugin-local, then global reuse). */
+export declare function loadBrowserRuntime(runtime: BrowserRuntimeName): any;
+/** Backwards-compatible Playwright loader for consumers and status checks. */
 export declare function loadPlaywright(): any;
 /** playwright CLI entry (for `playwright install chromium`). */
 export declare function playwrightCliPath(): string;
+/** CLI entry for the selected Playwright-compatible runtime. */
+export declare function browserRuntimeCliPath(runtime: BrowserRuntimeName): string;
 /** Entry JS for the bundled/reused @jackwener/opencli (its bin/main). */
 export declare function opencliEntryPath(): string;
 /**

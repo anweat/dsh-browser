@@ -9,12 +9,26 @@ import z from '@deepseek-ai/schemastery'
 import type { AuthProfileConfig } from './auth-profiles.ts'
 import type { RulePackConfig } from './rule-packs.ts'
 import { resolveAutomationMode, type AutomationMode } from './freedom.ts'
+import { resolveUsagePolicy, type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts'
+
+export const BROWSER_RUNTIMES = ['playwright', 'patchright'] as const
+export type BrowserRuntime = typeof BROWSER_RUNTIMES[number]
+
+export function resolveBrowserRuntime(value: unknown): BrowserRuntime {
+  const runtime = value ?? 'playwright'
+  if (typeof runtime !== 'string' || !BROWSER_RUNTIMES.includes(runtime as BrowserRuntime)) {
+    throw new Error('browserRuntime must be one of: ' + BROWSER_RUNTIMES.join(', '))
+  }
+  return runtime as BrowserRuntime
+}
 
 export interface Config {
   /** Whether the browser service is active. */
   enabled: boolean
   /** Browser channel: 'chromium' (bundled, self-contained) or 'msedge'. */
   channel: string
+  /** Browser driver/runtime implementation. Patchright is Chromium-only. */
+  browserRuntime?: BrowserRuntime
   headless: boolean
   /** Path to a Playwright storageState JSON (persisted login state). */
   storageStatePath?: string
@@ -30,6 +44,8 @@ export interface Config {
   opencliEnabled: boolean
   /** Model-facing tool exposure and approval level. */
   automationMode: AutomationMode
+  /** Approval-independent traffic buffering and bounded crawl budgets. */
+  usagePolicy?: UsagePolicyInput
   /** Lazily run `playwright install chromium` when the browser is missing. */
   autoInstall: boolean
   /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
@@ -40,6 +56,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
   channel: z.string().default('chromium'),
+  browserRuntime: z.string().default('playwright'),
   headless: z.boolean().default(true),
   storageStatePath: z.string(),
   authProfiles: z.dict(z.object({
@@ -65,6 +82,16 @@ export const Config: z<Config> = z.object({
   executablePath: z.string(),
   opencliEnabled: z.boolean().default(true),
   automationMode: z.string().default('standard'),
+  usagePolicy: z.object({
+    minDelayMs: z.number().default(750),
+    maxConcurrency: z.number().default(2),
+    burst: z.number().default(3),
+    maxPagesPerRun: z.number().default(20),
+    maxDepth: z.number().default(2),
+    retryLimit: z.number().default(2),
+    backoffBaseMs: z.number().default(1000),
+    cooldownMs: z.number().default(30000),
+  }),
   autoInstall: z.boolean().default(false),
   snapshotDir: z.string(),
   verbose: z.boolean().default(false),
@@ -73,6 +100,7 @@ export const Config: z<Config> = z.object({
 export interface ResolvedConfig {
   enabled: boolean
   channel: string
+  browserRuntime: BrowserRuntime
   headless: boolean
   storageStatePath?: string
   authProfiles: Record<string, AuthProfileConfig>
@@ -81,6 +109,7 @@ export interface ResolvedConfig {
   executablePath?: string
   opencliEnabled: boolean
   automationMode: AutomationMode
+  usagePolicy: UsagePolicy
   autoInstall: boolean
   snapshotDir: string
   verbose: boolean
@@ -96,9 +125,11 @@ export function resolveConfig(config: Config): ResolvedConfig {
   return {
     enabled: config.enabled ?? true,
     channel: config.channel ?? 'chromium',
+    browserRuntime: resolveBrowserRuntime(config.browserRuntime),
     headless: config.headless ?? true,
     opencliEnabled: config.opencliEnabled ?? true,
     automationMode: resolveAutomationMode(config.automationMode),
+    usagePolicy: resolveUsagePolicy(config.usagePolicy),
     autoInstall: config.autoInstall ?? false,
     snapshotDir,
     verbose: config.verbose ?? false,

@@ -19,10 +19,11 @@
     "verbatimModuleSyntax": false,
     "noUncheckedIndexedAccess": false,
     "exactOptionalPropertyTypes": false,
+    "jsx": "react-jsx",
     "noImplicitAny": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "types": ["node"]
+    "types": ["node", "react"]
   },
   "include": ["src"]
 }
