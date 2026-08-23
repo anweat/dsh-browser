@@ -65,6 +65,10 @@ test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating reci
   assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'extract', selector: 'main' }] }).kind, 'allow')
   assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }).kind, 'ask')
   assert.equal(browserPolicyDecision('browser_userscript_run', { source: 'alert(1)', url: 'https://example.com/' }).kind, 'deny')
+  assert.equal(browserPolicyDecision('web_deps', { action: 'check' }, 'standard').kind, 'allow')
+  assert.equal(browserPolicyDecision('web_deps', { action: 'install', backend: 'yt-dlp' }, 'standard').kind, 'ask')
+  assert.equal(browserPolicyDecision('web_cache_clear', {}, 'standard').kind, 'ask')
+  assert.equal(browserPolicyDecision('web_rule', { action: 'upsert' }, 'standard').kind, 'ask')
 })
 
 test('automation modes expose predictable tool sets and retain validation when approval is disabled', () => {
@@ -87,6 +91,13 @@ test('automation modes expose predictable tool sets and retain validation when a
   assert.equal(browserPolicyDecision('browser_userscript_run', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'unrestricted').kind, 'allow')
   assert.equal(browserPolicyDecision('browser_opencli_run', { args: ['browser', 'research', 'state'] }, 'unrestricted').kind, 'allow')
   assert.equal(browserPolicyDecision('browser_install', {}, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('web_deps', { action: 'install' }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('web_deps', { action: 'install' }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('web_deps', { action: 'install' }, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('web_cache_clear', {}, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('web_cache_clear', {}, 'autonomous').kind, 'allow')
+  assert.equal(browserPolicyDecision('web_rule', { action: 'remove' }, 'autonomous').kind, 'allow')
+  assert.equal(browserPolicyDecision('web_rule', { action: 'list' }, 'read-only').kind, 'allow')
   assert.equal(browserPolicyDecision('browser_userscript_run', { source: 'alert(1)', url: 'https://example.com/' }, 'unrestricted').kind, 'deny')
   assert.throws(() => resolveAutomationMode('anything-goes'), /automationMode/)
 })
@@ -105,6 +116,7 @@ test('runNode passes argv containing spaces verbatim without shell quoting', asy
 })
 
 test('real Playwright runtime executes built-ins, recipes, and a scoped userscript', async () => {
+  const snapshotDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-snapshot-'))
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
     response.end('<!doctype html><title>Fixture</title><main><h1>Hello DSH</h1><p id="copy">Browser automation fixture.</p><a href="/next">Next</a></main>')
@@ -134,6 +146,20 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     const external = await service.runUserscript(url, VALID_SCRIPT)
     assert.equal(JSON.parse(external.resultJson).heading, 'Hello DSH')
 
+    const extracted = await service.searchResults(url, {
+      item: 'main', title: 'h1', link: 'a', text: '#copy',
+    }, { count: 1 })
+    assert.deepEqual(extracted, [{
+      title: 'Hello DSH',
+      url: `http://127.0.0.1:${address.port}/next`,
+      snippet: 'Browser automation fixture.',
+    }])
+
+    const snapshot = await service.snapshot(url, [], { outDir: snapshotDir, screenshot: false } as never)
+    assert.equal(snapshot.screenshotPath, undefined)
+    assert.equal(fs.existsSync(snapshot.htmlPath), true)
+    assert.deepEqual(fs.readdirSync(snapshotDir).filter(file => file.endsWith('.png')), [])
+
     const status = await service.status()
     assert.equal(status.automationMode, 'standard')
     assert.equal(status.exposedTools.length, 16)
@@ -141,5 +167,6 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
   } finally {
     await service.close()
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    fs.rmSync(snapshotDir, { recursive: true, force: true })
   }
 })

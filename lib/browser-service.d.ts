@@ -37,7 +37,7 @@ export interface RenderResult {
 export interface SnapshotResult {
     title: string;
     text: string;
-    screenshotPath: string;
+    screenshotPath?: string;
     htmlPath: string;
     usedRule?: string;
 }
@@ -99,6 +99,7 @@ export declare class BrowserService {
         maxChars?: number;
         authProfile?: string;
         rulePack?: string;
+        screenshot?: boolean;
     }): Promise<SnapshotResult>;
     searchResults(url: string, spec: PlatformSpec, opts?: {
         signal?: AbortSignal;

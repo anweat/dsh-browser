@@ -19,6 +19,16 @@ dsh --profile web
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
+## 从旧版本升级
+
+Web Search Pro 与浏览器插件应同步升级；`dsh-web-search-pro >= 0.1.8` 需要 `@anweat/dsh-browser >= 0.1.8`。本版修正了 `web_snapshot screenshot=false` 仍写入 PNG 的问题，并让同一 `automationMode` 同时管辖 Web Search Pro 的缓存、规则和依赖安装操作。
+
+```bash
+dsh plugin --profile web add @anweat/dsh-browser@^0.1.8 dsh-web-search-pro@^0.1.8
+```
+
+升级后完整停止并重启 Web profile，再调用 `browser_status`、`browser_opencli_status` 和 `web_backend_status`；仅刷新网页不会重新加载插件服务或 Web Search Pro 配置面板。
+
 ## 快速使用与适用情形
 
 安装并重启后，可先让模型调用 `browser_status`，再按任务选择工具。默认
@@ -70,12 +80,12 @@ export function apply(ctx: Context) {
 
 `automationMode` 控制模型可见的工具集合和执行审批。建议从 `standard` 开始，仅在完全只读任务或受控自动化环境中切换：
 
-| 模式 | 暴露工具 | 直接交互 / 写 Recipe | 不可取消的安全底线 |
-|---|---:|---|---|
-| `read-only` | 10 个 | 隐藏 click/type/scroll/install/UserScript/OpenCLI run；写 Recipe 拒绝 | 只能读取、校验、截图及运行只读脚本/Recipe |
-| `standard`（默认） | 16 个 | 点击、输入、滚动及写 Recipe 均需一次性审批 | UserScript、通用 OpenCLI、浏览器安装也需审批 |
-| `autonomous` | 16 个 | 点击、输入、滚动及写 Recipe 可直接执行 | 外部 UserScript、通用 OpenCLI、浏览器安装仍强制审批 |
-| `unrestricted` | 16 个 | 所有工具均不触发审批，适合隔离环境中的无人值守测试 | 仍执行域名、元数据、参数、大小和步骤数校验 |
+| 模式 | 浏览器与 Web Search Pro 写操作 | 仍需审批或拒绝 | 不可取消的安全底线 |
+|---|---|---|---|
+| `read-only` | 只读工具与只读 Recipe；缓存清理、规则写入和安装拒绝 | 页面交互、写 Recipe、UserScript、OpenCLI run 均隐藏或拒绝 | 只能读取、校验、截图及运行只读脚本/Recipe |
+| `standard`（默认） | 页面交互、写 Recipe、缓存清理和规则写入均需一次性审批 | UserScript、通用 OpenCLI、浏览器/后端安装也需审批 | 所有安全校验持续启用 |
+| `autonomous` | 页面交互、写 Recipe、缓存清理和规则写入可直接执行 | 外部 UserScript、通用 OpenCLI、浏览器/后端安装仍强制审批 | 所有安全校验持续启用 |
+| `unrestricted` | 所有上述工具均不触发审批，适合隔离环境中的无人值守测试 | 无审批提示 | 仍执行域名、元数据、参数、大小和步骤数校验 |
 
 `unrestricted` 会允许模型直接运行外部脚本、通用 CLI 和安装命令，只应在隔离的测试 profile 或明确授权的自动化环境中使用；日常 profile 保持 `standard`。模式改变后需要重启 DSH profile，工具目录才会按新配置重新注册。
 

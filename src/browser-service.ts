@@ -46,7 +46,7 @@ export interface RenderResult {
 export interface SnapshotResult {
   title: string
   text: string
-  screenshotPath: string
+  screenshotPath?: string
   htmlPath: string
   usedRule?: string
 }
@@ -276,7 +276,7 @@ export class BrowserService {
   async snapshot(
     url: string,
     rules: readonly RenderRule[],
-    opts: { signal?: AbortSignal; outDir: string; maxChars?: number; authProfile?: string; rulePack?: string },
+    opts: { signal?: AbortSignal; outDir: string; maxChars?: number; authProfile?: string; rulePack?: string; screenshot?: boolean },
   ): Promise<SnapshotResult> {
     const session = await this.transientContext(url, opts)
     const { context } = session
@@ -287,21 +287,21 @@ export class BrowserService {
     else signal?.addEventListener('abort', onAbort)
     fs.mkdirSync(opts.outDir, { recursive: true })
     const stamp = Date.now() + '-' + uid().slice(0, 8)
-    const screenshotPath = path.join(opts.outDir, stamp + '.png')
+    const screenshotPath = opts.screenshot === false ? undefined : path.join(opts.outDir, stamp + '.png')
     const htmlPath = path.join(opts.outDir, stamp + '.html')
     try {
       page.setDefaultTimeout(25_000)
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
       await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
-      await page.screenshot({ path: screenshotPath, fullPage: true })
+      if (screenshotPath) await page.screenshot({ path: screenshotPath, fullPage: true })
       const html = await page.content()
       fs.writeFileSync(htmlPath, html, 'utf8')
       const data = await evaluateExtractor(page, rules)
       return {
         title: String(data.title ?? ''),
         text: capText(String(data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(), opts.maxChars ?? 200_000),
-        screenshotPath,
+        ...screenshotPath ? { screenshotPath } : {},
         htmlPath,
         ...data.usedRule ? { usedRule: String(data.usedRule) } : {},
       }

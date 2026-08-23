@@ -10,6 +10,7 @@ export type BrowserPolicyDecision =
   | { kind: 'ask'; reason: string }
 
 const DIRECT_INTERACTIONS = new Set(['browser_click', 'browser_type', 'browser_scroll'])
+const WEB_LOCAL_MUTATIONS = new Set(['web_cache_clear'])
 
 export function browserPolicyDecision(name: string, args: unknown, mode: AutomationMode = 'standard'): BrowserPolicyDecision {
   if (!isBrowserToolExposed(name, mode) && name.startsWith('browser_')) {
@@ -53,6 +54,16 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
       if (mode === 'autonomous' || mode === 'unrestricted') return { kind: 'allow' }
       return { kind: 'ask', reason: 'Run a multi-step Playwright recipe with page mutations: ' + actions.join(', ') }
     }
+  }
+  if (name === 'web_deps' && (args as { action?: unknown })?.action === 'install') {
+    if (mode === 'read-only') return { kind: 'deny', reason: `Dependency installation is disabled by automationMode=${mode}` }
+    if (mode === 'unrestricted') return { kind: 'allow' }
+    return { kind: 'ask', reason: 'Install an external Web Search Pro backend dependency' }
+  }
+  const webRuleAction = name === 'web_rule' ? (args as { action?: unknown })?.action : undefined
+  if (WEB_LOCAL_MUTATIONS.has(name) || (name === 'web_rule' && ['upsert', 'remove', 'import'].includes(String(webRuleAction)))) {
+    if (mode === 'read-only') return { kind: 'deny', reason: `Web Search Pro mutations are disabled by automationMode=${mode}` }
+    if (mode === 'standard') return { kind: 'ask', reason: 'Modify Web Search Pro local state: ' + name }
   }
   return { kind: 'allow' }
 }
