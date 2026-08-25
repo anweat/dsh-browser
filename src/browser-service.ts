@@ -22,7 +22,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { browserRuntimeCliPath, loadBrowserRuntime, runOpencli, runNode, type CliResult } from './deps.ts'
+import { browserRuntimeCliPath, loadBrowserRuntime, opencliEntryPath, runOpencli, runNode, type CliResult } from './deps.ts'
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
@@ -109,6 +109,8 @@ export interface BrowserStatus {
   runtimeWarnings: string[]
   headless: boolean
   opencliEnabled: boolean
+  opencliInstalled: boolean
+  opencliEntryPath?: string
   automationMode: AutomationMode
   exposedTools: string[]
   directInteractionPolicy: 'deny' | 'ask' | 'allow'
@@ -446,12 +448,14 @@ export class BrowserService {
   // ── bundled opencli ───────────────────────────────────────────────────────
 
   opencliAvailable(): boolean {
-    return this.config.enabled && this.config.opencliEnabled
+    if (!this.config.enabled || !this.config.opencliEnabled) return false
+    try { return fs.existsSync(opencliEntryPath()) } catch { return false }
   }
 
   opencli(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
     if (!this.config.enabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: browser service is disabled', timedOut: false })
     if (!this.config.opencliEnabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI is disabled', timedOut: false })
+    if (!this.opencliAvailable()) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI entry is not installed', timedOut: false })
     if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
       return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
     }
@@ -762,6 +766,12 @@ export class BrowserService {
         chromiumInstalled = fs.existsSync(chromiumExecutablePath)
       }
     } catch { chromiumInstalled = false }
+    let opencliInstalled = false
+    let resolvedOpencliEntryPath: string | undefined
+    try {
+      resolvedOpencliEntryPath = path.resolve(opencliEntryPath())
+      opencliInstalled = fs.existsSync(resolvedOpencliEntryPath)
+    } catch { opencliInstalled = false }
     const runtimeWarnings = this.config.browserRuntime === 'patchright'
       ? [
           'Patchright is Chromium-only and disables Playwright console APIs to avoid Runtime.enable detection.',
@@ -770,9 +780,10 @@ export class BrowserService {
             : []),
         ]
       : []
-    if (!chromiumInstalled && chromiumExecutablePath) {
+    if (!chromiumInstalled && chromiumExecutablePath && (this.config.channel === 'chromium' || !!this.config.executablePath)) {
       runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath}. Run browser_install for ${this.config.browserRuntime}.`)
     }
+    if (this.config.opencliEnabled && !opencliInstalled) runtimeWarnings.push('OpenCLI is enabled but its package entry is not installed.')
     return {
       enabled: this.config.enabled,
       channel: this.config.channel,
@@ -780,6 +791,8 @@ export class BrowserService {
       runtimeWarnings,
       headless: this.config.headless,
       opencliEnabled: this.config.opencliEnabled,
+      opencliInstalled,
+      ...resolvedOpencliEntryPath ? { opencliEntryPath: resolvedOpencliEntryPath } : {},
       automationMode: this.config.automationMode,
       exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets, this.config.enabled),
       directInteractionPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',

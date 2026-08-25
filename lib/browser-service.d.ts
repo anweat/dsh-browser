@@ -103,6 +103,8 @@ export interface BrowserStatus {
     runtimeWarnings: string[];
     headless: boolean;
     opencliEnabled: boolean;
+    opencliInstalled: boolean;
+    opencliEntryPath?: string;
     automationMode: AutomationMode;
     exposedTools: string[];
     directInteractionPolicy: 'deny' | 'ask' | 'allow';

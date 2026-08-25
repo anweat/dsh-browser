@@ -174,17 +174,22 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('fixture server did not expose a TCP port')
   const url = `http://127.0.0.1:${address.port}/page`
+  const bootstrapStatePath = path.join(snapshotDir, 'auth', 'bootstrap.json')
   const service = new BrowserService(resolveConfig({
     enabled: true,
     channel: 'chromium',
     headless: true,
     opencliEnabled: true,
+    authProfiles: { bootstrap: { storageStatePath: bootstrapStatePath, allowedDomains: ['127.0.0.1'], persistState: true } },
     autoInstall: false,
     verbose: false,
   }))
   try {
     const builtIn = await service.runBuiltinScript(url, 'article-clean')
     assert.match(builtIn.resultJson, /Hello DSH/)
+    assert.equal(fs.existsSync(bootstrapStatePath), false)
+    await service.runBuiltinScript(url, 'article-clean', { authProfile: 'bootstrap' })
+    assert.equal(fs.existsSync(bootstrapStatePath), true)
 
     const recipe = await service.recipe([
       { type: 'wait', condition: 'selector', value: '#copy' },

@@ -375,6 +375,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
           runtimeWarnings: { type: 'array', required: true, items: { type: 'string' } },
           headless: { type: 'boolean', required: true },
           opencliEnabled: { type: 'boolean', required: true },
+          opencliInstalled: { type: 'boolean', required: true },
+          opencliEntryPath: { type: 'string' },
           automationMode: { type: 'string', required: true, enum: ['read-only', 'standard', 'autonomous', 'unrestricted'] },
           exposedTools: { type: 'array', required: true, items: { type: 'string' } },
           directInteractionPolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
@@ -395,7 +397,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
         },
       },
       render: (_args, value) => {
-        const v = value as { enabled: boolean; channel: string; browserRuntime: string; runtimeWarnings: string[]; headless: boolean; opencliEnabled: boolean; automationMode: string; exposedTools: string[]; directInteractionPolicy: string; mutatingRecipePolicy: string; externalUserscriptPolicy: string; opencliRunPolicy: string; chromiumInstalled: boolean; chromiumExecutablePath?: string; usagePolicy: { minDelayMs: number; maxConcurrency: number; burst: number; maxPagesPerRun: number; maxDepth: number }; usageGovernor: { active: number; queued: number; totalRuns: number; totalWaitMs: number; backoffEvents: number }; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean }
+        const v = value as { enabled: boolean; channel: string; browserRuntime: string; runtimeWarnings: string[]; headless: boolean; opencliEnabled: boolean; opencliInstalled: boolean; opencliEntryPath?: string; automationMode: string; exposedTools: string[]; directInteractionPolicy: string; mutatingRecipePolicy: string; externalUserscriptPolicy: string; opencliRunPolicy: string; chromiumInstalled: boolean; chromiumExecutablePath?: string; usagePolicy: { minDelayMs: number; maxConcurrency: number; burst: number; maxPagesPerRun: number; maxDepth: number }; usageGovernor: { active: number; queued: number; totalRuns: number; totalWaitMs: number; backoffEvents: number }; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean }
         return [{ type: 'text', text: [
           'browser: ' + (v.enabled ? 'enabled' : 'disabled'),
           'runtime: ' + v.browserRuntime + ' / ' + v.channel + (v.headless ? ' (headless)' : ' (headed)'),
@@ -404,11 +406,12 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
           'mutating recipes: ' + v.mutatingRecipePolicy,
           'external userscripts: ' + v.externalUserscriptPolicy,
           'general opencli: ' + v.opencliRunPolicy,
-          'chromium installed: ' + v.chromiumInstalled,
+          'runtime chromium installed: ' + v.chromiumInstalled,
           ...(v.chromiumExecutablePath ? ['chromium executable: ' + v.chromiumExecutablePath] : []),
           `usage buffer: concurrency=${v.usagePolicy.maxConcurrency}, burst=${v.usagePolicy.burst}/${v.usagePolicy.minDelayMs}ms, crawl=${v.usagePolicy.maxPagesPerRun} pages depth ${v.usagePolicy.maxDepth}`,
           `usage activity: runs=${v.usageGovernor.totalRuns}, queued=${v.usageGovernor.queued}, waited=${v.usageGovernor.totalWaitMs}ms, backoffs=${v.usageGovernor.backoffEvents}`,
-          'opencli (bundled): ' + (v.opencliEnabled ? 'enabled' : 'disabled'),
+          'opencli: ' + (v.opencliEnabled ? 'enabled' : 'disabled') + ' / ' + (v.opencliInstalled ? 'installed' : 'missing'),
+          ...(v.opencliEntryPath ? ['opencli entry: ' + v.opencliEntryPath] : []),
           'auth profiles: ' + (v.authProfiles.map(p => p.id + '[' + p.allowedDomains.join(',') + ']' + (p.persistState ? '(writeback)' : '')).join('; ') || '-'),
           'rule packs: ' + (v.rulePacks.join(', ') || '-'),
           'built-in scripts: ' + v.builtinScripts.join(', '),
