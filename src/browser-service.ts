@@ -210,6 +210,16 @@ function evaluateExtractor(page: any, rules: readonly RenderRule[]): Promise<any
   return page.evaluate('(' + EXTRACTOR_FN + ')(' + JSON.stringify(rules) + ')')
 }
 
+function storageStateOptions(statePath: string | undefined, label: string, allowMissing = false): { storageState?: string } {
+  if (!statePath) return {}
+  if (!fs.existsSync(statePath)) {
+    if (allowMissing) return {}
+    throw new Error(`dsh-browser: ${label} storageState file does not exist: ${statePath}`)
+  }
+  if (!fs.statSync(statePath).isFile()) throw new Error(`dsh-browser: ${label} storageState path is not a file: ${statePath}`)
+  return { storageState: statePath }
+}
+
 export class BrowserService {
   private browser: any
   private launching?: Promise<any>
@@ -295,9 +305,10 @@ export class BrowserService {
     const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
     const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
-    const context = await browser.newContext(profile?.storageStatePath
-      ? { storageState: profile.storageStatePath }
-      : (!opts.anonymous && this.config.storageStatePath ? { storageState: this.config.storageStatePath } : {}))
+    const stateOptions = profile
+      ? storageStateOptions(profile.storageStatePath, `auth profile ${profile.id}`, profile.persistState)
+      : (!opts.anonymous ? storageStateOptions(this.config.storageStatePath, 'global') : {})
+    const context = await browser.newContext(stateOptions)
     try {
       if (rulePack?.initScriptPath) await context.addInitScript({ path: rulePack.initScriptPath })
     } catch (error) {
@@ -640,7 +651,7 @@ export class BrowserService {
       this.activeRulePack = session.rulePack
     } else {
       const browser = await this.ensure()
-      this.activeContext = await browser.newContext(this.config.storageStatePath ? { storageState: this.config.storageStatePath } : {})
+      this.activeContext = await browser.newContext(storageStateOptions(this.config.storageStatePath, 'global'))
     }
     this.activePage = await this.activeContext.newPage()
     return this.activePage

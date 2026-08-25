@@ -8,13 +8,25 @@ import { AuthProfileStore } from '../src/auth-profiles.ts'
 import { resolveRulePack } from '../src/rule-packs.ts'
 
 test('named auth profiles are domain-scoped and default to read-only state', () => {
-  const profiles = new AuthProfileStore({
-    work: { storageStatePath: 'D:/secrets/work.json', allowedDomains: ['example.com'] },
-  })
-  assert.equal(profiles.resolve('work', 'https://sub.example.com/path').persistState, false)
-  assert.throws(() => profiles.resolve('work', 'https://other.test/'), /not allowed/i)
-  assert.throws(() => profiles.resolve('missing', 'https://example.com/'), /unknown auth profile/i)
-  assert.deepEqual(profiles.list().map(v => v.id), ['work'])
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-auth-profile-'))
+  const statePath = path.join(dir, 'work.json')
+  const missingPath = path.join(dir, 'missing.json')
+  fs.writeFileSync(statePath, JSON.stringify({ cookies: [], origins: [] }), 'utf8')
+  try {
+    const profiles = new AuthProfileStore({
+      work: { storageStatePath: statePath, allowedDomains: ['example.com'] },
+      missing: { storageStatePath: missingPath, allowedDomains: ['example.com'] },
+      bootstrap: { storageStatePath: missingPath, allowedDomains: ['example.com'], persistState: true },
+    })
+    assert.equal(profiles.resolve('work', 'https://sub.example.com/path').persistState, false)
+    assert.throws(() => profiles.resolve('work', 'https://other.test/'), /not allowed/i)
+    assert.throws(() => profiles.resolve('missing', 'https://example.com/'), /storageState file does not exist/i)
+    assert.equal(profiles.resolve('bootstrap', 'https://example.com/').persistState, true)
+    assert.throws(() => profiles.resolve('unknown', 'https://example.com/'), /unknown auth profile/i)
+    assert.deepEqual(profiles.list().map(v => v.id), ['bootstrap', 'missing', 'work'])
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('rule packs require host match and a verified local init script', () => {
