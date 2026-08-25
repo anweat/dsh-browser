@@ -78,7 +78,7 @@ const RECIPE_STEP_SCHEMA = {
 } as const
 
 export function registerTools(ctx: Context, config: ResolvedConfig, service: BrowserService, assets?: AutomationAssetStore): void {
-  const exposedTools = new Set<string>(configuredBrowserTools(config.automationMode, config.automationAssets))
+  const exposedTools = new Set<string>(configuredBrowserTools(config.automationMode, config.automationAssets, config.enabled))
   const development = assets ? new AutomationDevelopmentService(assets, config.automationAssets) : undefined
   const register = (tool: any): void => {
     if (exposedTools.has(String(tool.name))) ctx.tools.register(tool)

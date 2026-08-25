@@ -63,6 +63,7 @@ export function browserToolsForMode(mode: AutomationMode): BrowserToolName[] {
   return ALL_BROWSER_TOOL_NAMES.filter(name => isBrowserToolExposed(name, mode))
 }
 
-export function configuredBrowserTools(mode: AutomationMode, options: { modelDevelopmentEnabled: boolean }): BrowserToolName[] {
+export function configuredBrowserTools(mode: AutomationMode, options: { modelDevelopmentEnabled: boolean }, enabled = true): BrowserToolName[] {
+  if (!enabled) return []
   return browserToolsForMode(mode).filter(name => name !== 'browser_automation_develop' || options.modelDevelopmentEnabled)
 }

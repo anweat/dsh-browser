@@ -138,6 +138,7 @@ export declare class BrowserService {
     private opencliCatalogCache?;
     constructor(config: ResolvedConfig);
     available(): boolean;
+    private assertEnabled;
     private ensure;
     /** Run `playwright install chromium` from the bundled playwright CLI. */
     installChromium(): Promise<CliResult>;

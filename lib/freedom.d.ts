@@ -8,4 +8,4 @@ export declare function isBrowserToolExposed(name: string, mode: AutomationMode)
 export declare function browserToolsForMode(mode: AutomationMode): BrowserToolName[];
 export declare function configuredBrowserTools(mode: AutomationMode, options: {
     modelDevelopmentEnabled: boolean;
-}): BrowserToolName[];
+}, enabled?: boolean): BrowserToolName[];

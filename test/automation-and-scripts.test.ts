@@ -45,13 +45,18 @@ test('browser status reports a missing runtime Chromium executable truthfully', 
   const missingPath = path.join(os.tmpdir(), `dsh-browser-missing-chromium-${Date.now()}`, 'chrome.exe')
   Object.defineProperty(runtime.chromium, 'executablePath', { configurable: true, value: () => missingPath })
   const service = new BrowserService(resolveConfig({ browserRuntime: 'playwright', autoInstall: false }))
+  const channelService = new BrowserService(resolveConfig({ browserRuntime: 'playwright', channel: 'chrome', autoInstall: false }))
   try {
     const status = await service.status()
     assert.equal(status.chromiumInstalled, false)
     assert.equal(status.chromiumExecutablePath, path.resolve(missingPath))
     assert.match(status.runtimeWarnings.join(' '), /Expected Chromium executable is missing/)
+    const channelStatus = await channelService.status()
+    assert.equal(channelStatus.chromiumInstalled, false)
+    assert.doesNotMatch(channelStatus.runtimeWarnings.join(' '), /Expected Chromium executable is missing/)
   } finally {
     await service.close()
+    await channelService.close()
     if (descriptor) Object.defineProperty(runtime.chromium, 'executablePath', descriptor)
     else delete runtime.chromium.executablePath
   }
@@ -103,6 +108,7 @@ test('automation modes expose predictable tool sets and retain validation when a
   assert.equal(browserToolsForMode('read-only').includes('browser_automation_develop'), true)
   assert.equal(browserToolsForMode('read-only').includes('browser_automation_run'), false)
   assert.equal(configuredBrowserTools('standard', { modelDevelopmentEnabled: false }).includes('browser_automation_develop'), false)
+  assert.deepEqual(configuredBrowserTools('standard', { modelDevelopmentEnabled: true }, false), [])
 
   assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'read-only').kind, 'deny')
   assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'standard').kind, 'ask')
@@ -132,6 +138,17 @@ test('automation modes expose predictable tool sets and retain validation when a
   assert.equal(browserPolicyDecision('web_rule', { action: 'list' }, 'read-only').kind, 'allow')
   assert.equal(browserPolicyDecision('browser_userscript_run', { source: 'alert(1)', url: 'https://example.com/' }, 'unrestricted').kind, 'deny')
   assert.throws(() => resolveAutomationMode('anything-goes'), /automationMode/)
+})
+
+test('disabled browser service exposes no tools and rejects browser execution', async () => {
+  const service = new BrowserService(resolveConfig({ enabled: false }))
+  try {
+    const status = await service.status()
+    assert.deepEqual(status.exposedTools, [])
+    await assert.rejects(service.open('http://127.0.0.1:1/'), /browser service is disabled/i)
+  } finally {
+    await service.close()
+  }
 })
 
 test('runNode passes argv containing spaces verbatim without shell quoting', async () => {
@@ -219,6 +236,7 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     assert.equal(status.automationMode, 'standard')
     assert.equal(status.exposedTools.length, 21)
     assert.equal(status.directInteractionPolicy, 'ask')
+    assert.equal(status.opencliInstalled, true)
   } finally {
     await service.close()
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))

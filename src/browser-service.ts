@@ -230,7 +230,12 @@ export class BrowserService {
     return this.config.enabled
   }
 
+  private assertEnabled(): void {
+    if (!this.config.enabled) throw new Error('dsh-browser: browser service is disabled')
+  }
+
   private async ensure(): Promise<any> {
+    this.assertEnabled()
     if (this.browser) return this.browser
     if (!this.launching) {
       this.launching = (async () => {
@@ -264,6 +269,7 @@ export class BrowserService {
 
   /** Run `playwright install chromium` from the bundled playwright CLI. */
   installChromium(): Promise<CliResult> {
+    this.assertEnabled()
     return runNode(browserRuntimeCliPath(this.config.browserRuntime), ['install', 'chromium'], { timeoutMs: 600_000, signal: undefined, maxOutput: 256 * 1024 })
   }
 
@@ -429,10 +435,11 @@ export class BrowserService {
   // ── bundled opencli ───────────────────────────────────────────────────────
 
   opencliAvailable(): boolean {
-    return this.config.opencliEnabled
+    return this.config.enabled && this.config.opencliEnabled
   }
 
   opencli(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
+    if (!this.config.enabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: browser service is disabled', timedOut: false })
     if (!this.config.opencliEnabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI is disabled', timedOut: false })
     if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
       return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
@@ -763,11 +770,11 @@ export class BrowserService {
       headless: this.config.headless,
       opencliEnabled: this.config.opencliEnabled,
       automationMode: this.config.automationMode,
-      exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets),
-      directInteractionPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
-      mutatingRecipePolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
-      externalUserscriptPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
-      opencliRunPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets, this.config.enabled),
+      directInteractionPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
+      mutatingRecipePolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
+      externalUserscriptPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      opencliRunPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
       ...chromiumExecutablePath ? { chromiumExecutablePath } : {},
       usagePolicy: this.config.usagePolicy,
