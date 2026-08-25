@@ -29,8 +29,8 @@ export declare const zh: {
     readonly usagePolicyHint: "minDelayMs、maxConcurrency、burst、maxPagesPerRun、maxDepth、retryLimit、backoffBaseMs、cooldownMs。";
     readonly automationAssets: "自动化资产策略 JSON";
     readonly automationAssetsHint: "候选阈值、持久化模式、激活模式、数量与上下文预算。";
-    readonly assetLibrary: "可复用自动化资产";
-    readonly assetLibraryHint: "候选先提示是否总结；草稿测试后再手动激活。源码仅在点选编辑时读取。";
+    readonly assetLibrary: "可复用自动化资产（实验性）";
+    readonly assetLibraryHint: "实验功能：候选先提示是否总结；草稿真实回放后再手动激活。源码仅在点选编辑时读取。";
     readonly assetLoading: "正在读取本地自动化资产…";
     readonly assetFailed: "自动化资产读取失败。";
     readonly assetSuggestions: "建议总结";

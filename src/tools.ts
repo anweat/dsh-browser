@@ -86,7 +86,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_automation_search',
-    description: 'Search active reusable browser automations by task and optional domain. Returns only compact metadata, never recipe steps or userscript source.',
+    description: '[Experimental] Search reusable browser automations by explicit task keywords and optional domain. Returns only compact metadata, never recipe steps or userscript source.',
     parameters: {
       query: { type: 'string', required: true, description: 'Short task description.' },
       domain: { type: 'string', description: 'Optional target hostname.' },
@@ -112,7 +112,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_automation_develop',
-    description: 'Explicitly inspect, save, or validate one reusable automation draft. Use search first. Full recipe/source is returned only for action=get with an exact id. This tool never activates assets.',
+    description: '[Experimental] Explicitly inspect, save, validate, or replay one reusable automation draft. Use search first. Full recipe/source is returned only for action=get with an exact id. This tool never activates assets.',
     parameters: {
       action: { type: 'string', required: true, enum: ['get', 'save', 'validate', 'test'] },
       id: { type: 'string', description: 'Exact asset id for get, update, or validate.' },
@@ -170,7 +170,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_automation_run',
-    description: 'Run one active reusable automation by id. Search first. Source and recipe internals remain Host-side; provide declared inputs and a target HTTP(S) URL.',
+    description: '[Experimental] Run one manually activated reusable automation by id. Search first. Source and recipe internals remain Host-side; provide declared inputs and a target HTTP(S) URL.',
     parameters: {
       id: { type: 'string', required: true }, url: { type: 'string', required: true },
       inputs: { type: 'object', additionalProperties: true, description: 'Declared string inputs used by {{name}} placeholders.' },
