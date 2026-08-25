@@ -382,6 +382,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
           externalUserscriptPolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
           opencliRunPolicy: { type: 'string', required: true, enum: ['deny', 'ask', 'allow'] },
           chromiumInstalled: { type: 'boolean', required: true },
+          chromiumExecutablePath: { type: 'string' },
           usagePolicy: { type: 'object', required: true, additionalProperties: true, properties: {} },
           usageGovernor: { type: 'object', required: true, additionalProperties: true, properties: {} },
           activeUrl: { type: 'string' },
@@ -394,7 +395,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
         },
       },
       render: (_args, value) => {
-        const v = value as { enabled: boolean; channel: string; browserRuntime: string; runtimeWarnings: string[]; headless: boolean; opencliEnabled: boolean; automationMode: string; exposedTools: string[]; directInteractionPolicy: string; mutatingRecipePolicy: string; externalUserscriptPolicy: string; opencliRunPolicy: string; chromiumInstalled: boolean; usagePolicy: { minDelayMs: number; maxConcurrency: number; burst: number; maxPagesPerRun: number; maxDepth: number }; usageGovernor: { active: number; queued: number; totalRuns: number; totalWaitMs: number; backoffEvents: number }; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean }
+        const v = value as { enabled: boolean; channel: string; browserRuntime: string; runtimeWarnings: string[]; headless: boolean; opencliEnabled: boolean; automationMode: string; exposedTools: string[]; directInteractionPolicy: string; mutatingRecipePolicy: string; externalUserscriptPolicy: string; opencliRunPolicy: string; chromiumInstalled: boolean; chromiumExecutablePath?: string; usagePolicy: { minDelayMs: number; maxConcurrency: number; burst: number; maxPagesPerRun: number; maxDepth: number }; usageGovernor: { active: number; queued: number; totalRuns: number; totalWaitMs: number; backoffEvents: number }; activeUrl?: string; activeAuthProfile?: string; authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]; rulePacks: string[]; builtinScripts: string[]; externalUserscriptsRequireApproval: boolean; mutatingRecipesRequireApproval: boolean }
         return [{ type: 'text', text: [
           'browser: ' + (v.enabled ? 'enabled' : 'disabled'),
           'runtime: ' + v.browserRuntime + ' / ' + v.channel + (v.headless ? ' (headless)' : ' (headed)'),
@@ -404,6 +405,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
           'external userscripts: ' + v.externalUserscriptPolicy,
           'general opencli: ' + v.opencliRunPolicy,
           'chromium installed: ' + v.chromiumInstalled,
+          ...(v.chromiumExecutablePath ? ['chromium executable: ' + v.chromiumExecutablePath] : []),
           `usage buffer: concurrency=${v.usagePolicy.maxConcurrency}, burst=${v.usagePolicy.burst}/${v.usagePolicy.minDelayMs}ms, crawl=${v.usagePolicy.maxPagesPerRun} pages depth ${v.usagePolicy.maxDepth}`,
           `usage activity: runs=${v.usageGovernor.totalRuns}, queued=${v.usageGovernor.queued}, waited=${v.usageGovernor.totalWaitMs}ms, backoffs=${v.usageGovernor.backoffEvents}`,
           'opencli (bundled): ' + (v.opencliEnabled ? 'enabled' : 'disabled'),

@@ -110,6 +110,7 @@ export interface BrowserStatus {
     externalUserscriptPolicy: 'deny' | 'ask' | 'allow';
     opencliRunPolicy: 'deny' | 'ask' | 'allow';
     chromiumInstalled: boolean;
+    chromiumExecutablePath?: string;
     usagePolicy: ResolvedConfig['usagePolicy'];
     usageGovernor: ReturnType<UsageGovernor['snapshot']>;
     authProfiles: {

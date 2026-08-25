@@ -7,7 +7,7 @@ import http from 'node:http'
 import { validateRecipe, recipeNeedsApproval } from '../src/automation.ts'
 import { BUILTIN_SCRIPTS, matchUserscriptPattern, validateUserscript } from '../src/scripts.ts'
 import { browserPolicyDecision } from '../src/approval-policy.ts'
-import { runNode } from '../src/deps.ts'
+import { loadBrowserRuntime, runNode } from '../src/deps.ts'
 import { BrowserService } from '../src/browser-service.ts'
 import { resolveConfig } from '../src/config.ts'
 import { ALL_BROWSER_TOOL_NAMES, browserToolsForMode, configuredBrowserTools, resolveAutomationMode } from '../src/freedom.ts'
@@ -37,6 +37,24 @@ test('userscript validation rejects remote requires, grants, and wrong hosts', (
   assert.match(validateUserscript(unsafe, 'http://127.0.0.1/').errors.join(' '), /@require/)
   assert.match(validateUserscript(unsafe, 'http://127.0.0.1/').errors.join(' '), /@grant/)
   assert.match(validateUserscript(VALID_SCRIPT, 'https://example.com/').errors.join(' '), /outside/)
+})
+
+test('browser status reports a missing runtime Chromium executable truthfully', async () => {
+  const runtime = loadBrowserRuntime('playwright')
+  const descriptor = Object.getOwnPropertyDescriptor(runtime.chromium, 'executablePath')
+  const missingPath = path.join(os.tmpdir(), `dsh-browser-missing-chromium-${Date.now()}`, 'chrome.exe')
+  Object.defineProperty(runtime.chromium, 'executablePath', { configurable: true, value: () => missingPath })
+  const service = new BrowserService(resolveConfig({ browserRuntime: 'playwright', autoInstall: false }))
+  try {
+    const status = await service.status()
+    assert.equal(status.chromiumInstalled, false)
+    assert.equal(status.chromiumExecutablePath, path.resolve(missingPath))
+    assert.match(status.runtimeWarnings.join(' '), /Expected Chromium executable is missing/)
+  } finally {
+    await service.close()
+    if (descriptor) Object.defineProperty(runtime.chromium, 'executablePath', descriptor)
+    else delete runtime.chromium.executablePath
+  }
 })
 
 test('built-in scripts are valid, read-only, and have stable ids', () => {

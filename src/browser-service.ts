@@ -116,6 +116,7 @@ export interface BrowserStatus {
   externalUserscriptPolicy: 'deny' | 'ask' | 'allow'
   opencliRunPolicy: 'deny' | 'ask' | 'allow'
   chromiumInstalled: boolean
+  chromiumExecutablePath?: string
   usagePolicy: ResolvedConfig['usagePolicy']
   usageGovernor: ReturnType<UsageGovernor['snapshot']>
   authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]
@@ -734,9 +735,14 @@ export class BrowserService {
 
   async status(): Promise<BrowserStatus> {
     let chromiumInstalled = false
+    let chromiumExecutablePath: string | undefined
     try {
       const pw = loadBrowserRuntime(this.config.browserRuntime)
-      chromiumInstalled = !!pw.chromium.executablePath()
+      const expectedPath = this.config.executablePath || pw.chromium.executablePath()
+      if (typeof expectedPath === 'string' && expectedPath.trim()) {
+        chromiumExecutablePath = path.resolve(expectedPath)
+        chromiumInstalled = fs.existsSync(chromiumExecutablePath)
+      }
     } catch { chromiumInstalled = false }
     const runtimeWarnings = this.config.browserRuntime === 'patchright'
       ? [
@@ -746,6 +752,9 @@ export class BrowserService {
             : []),
         ]
       : []
+    if (!chromiumInstalled && chromiumExecutablePath) {
+      runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath}. Run browser_install for ${this.config.browserRuntime}.`)
+    }
     return {
       enabled: this.config.enabled,
       channel: this.config.channel,
@@ -760,6 +769,7 @@ export class BrowserService {
       externalUserscriptPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       opencliRunPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
+      ...chromiumExecutablePath ? { chromiumExecutablePath } : {},
       usagePolicy: this.config.usagePolicy,
       usageGovernor: this.usageGovernor.snapshot(),
       authProfiles: this.authProfiles.list(),
