@@ -46,9 +46,12 @@ export declare const zh: {
     readonly assetEmpty: "还没有资产。";
     readonly assetEditor: "资产编辑器（JSON）";
     readonly assetEditorHint: "选择资产或新建草稿。";
-    readonly assetInvalid: "JSON 或资产字段无效。";
+    readonly assetInvalid: "JSON、测试 URL 或输入无效。";
     readonly assetSourceBoundary: "不要保存 cookie、token、密码、完整页面内容或聊天记录。";
-    readonly assetTest: "测试";
+    readonly assetValidate: "静态校验";
+    readonly assetTest: "真实回放";
+    readonly assetTestUrl: "测试 URL（必须命中允许域名）";
+    readonly assetTestInputs: "测试输入 JSON";
     readonly assetActivate: "激活";
     readonly assetArchive: "归档";
     readonly assetSaveDraft: "保存草稿";

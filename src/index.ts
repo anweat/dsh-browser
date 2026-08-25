@@ -31,7 +31,7 @@ export type { BrowserRecipeStep, RecipeStepResult } from './automation.ts'
 export type { UserscriptMetadata, UserscriptValidation, BuiltinScript } from './scripts.ts'
 export { BUILTIN_SCRIPTS, validateUserscript } from './scripts.ts'
 export type { AutomationMode, BrowserToolName } from './freedom.ts'
-export { AUTOMATION_MODES, ALL_BROWSER_TOOL_NAMES, browserToolsForMode } from './freedom.ts'
+export { AUTOMATION_MODES, ALL_BROWSER_TOOL_NAMES, browserToolsForMode, configuredBrowserTools } from './freedom.ts'
 export type { AutomationAssetPolicy, AutomationAssetPolicyInput, AutomationAsset, AutomationAssetSummary, AutomationCandidate, AutomationCandidateSummary, AssetPersistenceMode, AssetActivationMode } from './automation-assets.ts'
 export { ASSET_PERSISTENCE_MODES, ASSET_ACTIVATION_MODES, resolveAutomationAssetPolicy, AutomationAssetStore } from './automation-assets.ts'
 
@@ -68,7 +68,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => () => void service.close())
 
   registerTools(ctx, resolved, service, assets)
-  registerAutomationAssetRpc(ctx, assets)
+  registerAutomationAssetRpc(ctx, assets, service)
 
   if (resolved.verbose) {
     try {

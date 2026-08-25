@@ -92,7 +92,7 @@ export function apply(ctx: Context) {
 
 `unrestricted` 会允许模型直接运行外部脚本、通用 CLI 和安装命令，只应在隔离的测试 profile 或明确授权的自动化环境中使用；日常 profile 保持 `standard`。它只取消人工确认，**不会取消 `usagePolicy` 的并发、突发、页数、深度、重试与冷却保护**。模式改变后需要重启 DSH profile，工具目录才会按新配置重新注册。
 
-## 工具（最多 20 个）
+## 工具（最多 21 个）
 
 | 工具 | 作用 |
 |---|---|
@@ -110,7 +110,8 @@ export function apply(ctx: Context) {
 | `browser_script_run_builtin` | 在独立 Playwright context 中运行内置只读脚本 |
 | `browser_userscript_run` | 运行外部 UserScript；强制域名匹配，审批策略由模式决定 |
 | `browser_recipe_run` | 最多 25 步 Playwright Recipe；支持等待、定位、表单、键盘、提取、断言和截图 |
-| `browser_automation_search` | 从已激活资产中检索最多 `retrievalTopK` 条摘要；不返回 recipe 或脚本源码 |
+| `browser_automation_search` | 只有显式关键词调用才检索；可限定 active/draft/all、域名和类型，最多返回 `retrievalTopK` 条摘要 |
+| `browser_automation_develop` | 按确切 ID 读取源码，或显式保存、静态校验、真实回放草稿；永远不能激活资产 |
 | `browser_automation_run` | 按 ID 运行已激活资产；再次执行限域和输入大小校验，审批由 `automationMode` 决定 |
 | `browser_opencli_status` | 实际运行 OpenCLI doctor，报告 daemon/extension/profile 连通性 |
 | `browser_opencli_catalog` | 对 OpenCLI 大目录按 query/site/access/strategy 过滤，单次最多返回 100 条 |
@@ -125,10 +126,24 @@ export function apply(ctx: Context) {
 
 1. 候选达到阈值后，在“浏览器自动化 → 可复用自动化资产”选择“总结为草稿”或“暂不总结”。
 2. 在脚本列表点选草稿；只有此时前端才按 ID 读取完整 recipe / UserScript。编辑器支持 recipe 和带 `@match`、`@grant none` 的 UserScript。UserScript 可从只读对象 `__DSH_INPUTS__` 读取 `inputNames` 声明的运行时输入，输入不会写入资产文件。
-3. 保存草稿并测试，通过后手动激活。已激活版本不可原地编辑，避免后台行为静默漂移；需要修改时先归档或创建新草稿。
+3. 保存后先做静态校验，再填写测试 URL/输入执行真实浏览器回放。只有真实回放成功才可手动激活；已激活版本不可原地编辑，避免后台行为静默漂移。
 4. Agent 用 `browser_automation_search` 获取有界摘要，再用 `browser_automation_run` 按 ID 调用。检索默认 top 5、目录预算约 800 tokens，源码不会进入模型上下文。
 
 `persistenceMode` 可选 `off | manual | suggest | auto-draft`。日常使用建议 `suggest`；`auto-draft` 只适合隔离测试 profile，并且仍不会自动激活。`activationMode` 当前默认并推荐 `manual`；`auto-tested` 作为后续真实沙箱回放策略的保留配置，不会把一次静态校验当成生产激活依据。
+
+### 模型显式开发 recipe / UserScript
+
+模型目录不会预载任何 recipe 或源码。需要批量索引等强指向自动化时，模型按以下顺序显式访问：
+
+1. 调用 `browser_automation_search(query="batch-index issues", status="draft|active", kind="recipe")`，仅得到 ID、名称、标签、域名、输入名和运行统计。
+2. 确认要修改某项后，调用 `browser_automation_develop(action="get", id="...")`；只有这一步会把单个资产的完整 recipe/源码带入当前上下文。
+3. `action="save"` 可直接声明新的 recipe，或保存带 `@match` / `@grant none` 的 UserScript；只能生成/更新 draft。默认每个模型会话最多写 3 次，仍受全局 `maxDrafts` 限制。
+4. `action="validate"` 只做结构与 UserScript 元数据校验，不提供激活资格；`action="test"` 必须给 URL 和声明输入，执行真实 Playwright 回放，成功后才标记 `passed`。
+5. 激活、归档和回滚只在可视化面板完成，模型开发工具没有对应动作。
+
+recipe 建议把检索意图固化在 `name`、`description` 和 `tags`，例如 `batch-index`、`issues`、`community-search`。检索采用小规模确定性关键词评分和 token 预算，不自动把整个资产库升级成模型工具，也不使用隐藏的全量 prompt 注入。
+
+`modelDevelopmentEnabled: false` 会在重启后直接从模型工具目录移除开发入口；`standard` 保存草稿和真实回放均需审批，`autonomous` 可直接保存草稿但真实回放仍需审批，只有 `unrestricted` 才会跳过回放审批。所有模式仍执行域名、UserScript 元数据、输入、源码大小和使用频率限制。
 
 ## 使用策略：防止过度调用的缓冲
 
@@ -233,6 +248,8 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
           maxActiveAssets: 50
           retrievalTopK: 5
           catalogTokenBudget: 800
+          modelDevelopmentEnabled: true
+          maxModelDraftWritesPerSession: 3
         storageStatePath: ''     # Playwright 登录态 JSON（复用已登录会话）
         authProfiles:
           forum:

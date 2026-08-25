@@ -36,7 +36,8 @@ export class AutomationAssetsController {
       saveAutomationAsset: (asset: Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>) => this.mutate('save', { asset }),
       summarizeAutomationCandidate: (id: string) => this.mutate('summarize', { id }),
       dismissAutomationCandidate: (id: string) => this.mutate('dismiss', { id }),
-      testAutomationAsset: (id: string) => this.mutate('test', { id }),
+      validateAutomationAsset: (id: string) => this.mutate('validate', { id }),
+      testAutomationAsset: (id: string, url: string, inputs: Record<string, string>) => this.mutate('test', { id, url, inputs }),
       setAutomationAssetStatus: (id: string, status: AutomationAssetStatus) => this.mutate('status', { id, status }),
     }
   }
@@ -82,4 +83,3 @@ export class AutomationAssetsController {
 
   private publish(state: AutomationAssetsState): void { if (!this.disposed) this.store.set(state) }
 }
-

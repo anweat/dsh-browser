@@ -28,7 +28,7 @@ import { AuthProfileStore, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
 import { runRecipe, type BrowserRecipeStep, type RecipeStepResult } from './automation.ts'
 import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
-import { browserToolsForMode, type AutomationMode } from './freedom.ts'
+import { configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
 
@@ -754,7 +754,7 @@ export class BrowserService {
       headless: this.config.headless,
       opencliEnabled: this.config.opencliEnabled,
       automationMode: this.config.automationMode,
-      exposedTools: browserToolsForMode(this.config.automationMode),
+      exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets),
       directInteractionPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
       mutatingRecipePolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
       externalUserscriptPolicy: this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',

@@ -6,3 +6,6 @@ export type BrowserToolName = typeof ALL_BROWSER_TOOL_NAMES[number];
 export declare function resolveAutomationMode(value: unknown): AutomationMode;
 export declare function isBrowserToolExposed(name: string, mode: AutomationMode): name is BrowserToolName;
 export declare function browserToolsForMode(mode: AutomationMode): BrowserToolName[];
+export declare function configuredBrowserTools(mode: AutomationMode, options: {
+    modelDevelopmentEnabled: boolean;
+}): BrowserToolName[];

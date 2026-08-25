@@ -10,28 +10,14 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './config.ts'
 import type { BrowserService, InteractiveState } from './browser-service.ts'
 import type { BrowserRecipeStep } from './automation.ts'
-import { browserToolsForMode } from './freedom.ts'
+import { configuredBrowserTools } from './freedom.ts'
 import type { AutomationAsset, AutomationAssetStore } from './automation-assets.ts'
 import { AutomationDevelopmentService } from './automation-development.ts'
+import { executeAutomationAsset } from './automation-execution.ts'
 
 function sessionId(exec: unknown): string {
   const value = (exec as { agent?: { session?: { id?: unknown } } })?.agent?.session?.id
   return typeof value === 'string' && value ? value : 'unknown-session'
-}
-
-function materialize(value: string, inputs: Record<string, string>): string {
-  return value.replace(/\{\{([a-zA-Z][\w-]*)\}\}/g, (_match, name: string) => {
-    if (!(name in inputs)) throw new Error(`missing automation input: ${name}`)
-    return String(inputs[name])
-  })
-}
-
-function materializeRecipe(steps: BrowserRecipeStep[], inputs: Record<string, string>): BrowserRecipeStep[] {
-  return steps.map(step => {
-    const copy = structuredClone(step) as Record<string, unknown>
-    for (const key of ['value', 'text']) if (typeof copy[key] === 'string') copy[key] = materialize(copy[key], inputs)
-    return copy as unknown as BrowserRecipeStep
-  })
 }
 
 function developmentResult(action: string, value: unknown, asset?: AutomationAsset): { action: string; assetId?: string; status?: string; resultJson: string; truncated: boolean } {
@@ -92,7 +78,7 @@ const RECIPE_STEP_SCHEMA = {
 } as const
 
 export function registerTools(ctx: Context, config: ResolvedConfig, service: BrowserService, assets?: AutomationAssetStore): void {
-  const exposedTools = new Set<string>(browserToolsForMode(config.automationMode))
+  const exposedTools = new Set<string>(configuredBrowserTools(config.automationMode, config.automationAssets))
   const development = assets ? new AutomationDevelopmentService(assets, config.automationAssets) : undefined
   const register = (tool: any): void => {
     if (exposedTools.has(String(tool.name))) ctx.tools.register(tool)
@@ -128,7 +114,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     name: 'browser_automation_develop',
     description: 'Explicitly inspect, save, or validate one reusable automation draft. Use search first. Full recipe/source is returned only for action=get with an exact id. This tool never activates assets.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['get', 'save', 'validate'] },
+      action: { type: 'string', required: true, enum: ['get', 'save', 'validate', 'test'] },
       id: { type: 'string', description: 'Exact asset id for get, update, or validate.' },
       kind: { type: 'string', enum: ['recipe', 'userscript'], description: 'Required for save.' },
       name: { type: 'string', description: 'Required for save.' },
@@ -138,6 +124,9 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
       inputNames: { type: 'array', items: { type: 'string' }, description: 'Declared UserScript __DSH_INPUTS__ keys. Recipe placeholders are inferred.' },
       recipe: { type: 'array', items: RECIPE_STEP_SCHEMA, description: 'One to 25 declarative Playwright steps.' },
       source: { type: 'string', description: 'Complete UserScript with @match and @grant none; capped by validator.' },
+      url: { type: 'string', description: 'Required for test; must match the draft domain and UserScript @match.' },
+      inputs: { type: 'object', additionalProperties: true, description: 'Declared runtime inputs for test.' },
+      authProfile: { type: 'string' }, rulePack: { type: 'string' },
     },
     output: {
       schema: { type: 'object', additionalProperties: false, properties: {
@@ -159,6 +148,12 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
         if (!args.id) throw new Error('automation development validate requires id')
         const asset = development.validate(args.id)
         return developmentResult('validate', { id: asset.id, kind: asset.kind, status: asset.status, testStatus: asset.testStatus, testMessage: asset.testMessage }, asset)
+      }
+      if (args.action === 'test') {
+        if (!args.id || !args.url) throw new Error('automation development test requires id and url')
+        const result = await executeAutomationAsset(service, assets, args.id, args.url, args.inputs, 'draft', { signal: exec.signal, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {} })
+        const raw = JSON.stringify(result.value)
+        return developmentResult('test', { id: result.asset.id, testStatus: result.asset.testStatus, testMessage: result.asset.testMessage, resultJson: raw.slice(0, 50_000), truncated: raw.length > 50_000 }, result.asset)
       }
       if (args.action !== 'save' || !args.kind || !args.name) throw new Error('automation development save requires kind and name')
       const asset = development.save({
@@ -191,24 +186,9 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     isConcurrencySafe: () => false,
     async execute(args, exec) {
       if (!assets) throw new Error('automation assets are unavailable')
-      const asset = assets.get(args.id)
-      if (!asset || asset.status !== 'active') throw new Error('active automation asset not found')
-      assets.assertTarget(asset, args.url)
-      const inputs = args.inputs && typeof args.inputs === 'object' && !Array.isArray(args.inputs)
-        ? Object.fromEntries(Object.entries(args.inputs).map(([key, value]) => [key, String(value)])) : {}
-      if (Object.keys(inputs).length > 20 || Object.entries(inputs).some(([key, value]) => !/^[a-zA-Z][\w-]{0,39}$/.test(key) || value.length > 10_000)) throw new Error('automation inputs exceed key, count, or value limits')
-      const missingInputs = asset.inputNames.filter(name => !(name in inputs))
-      const extraInputs = Object.keys(inputs).filter(name => !asset.inputNames.includes(name))
-      if (missingInputs.length) throw new Error('missing declared automation inputs: ' + missingInputs.join(', '))
-      if (extraInputs.length) throw new Error('undeclared automation inputs: ' + extraInputs.join(', '))
-      let value: unknown
-      try {
-        if (asset.kind === 'recipe') value = await service.recipe(materializeRecipe(asset.recipe ?? [], inputs), { url: args.url, signal: exec.signal, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {} })
-        else value = await service.runUserscript(args.url, asset.source ?? '', { signal: exec.signal, inputs, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {} })
-        assets.noteRun(asset.id, true)
-      } catch (error) { assets.noteRun(asset.id, false); throw error }
-      const raw = JSON.stringify(value)
-      return { assetId: asset.id, kind: asset.kind, resultJson: raw.slice(0, 100_000), truncated: raw.length > 100_000 }
+      const result = await executeAutomationAsset(service, assets, args.id, args.url, args.inputs, 'active', { signal: exec.signal, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {} })
+      const raw = JSON.stringify(result.value)
+      return { assetId: result.asset.id, kind: result.asset.kind, resultJson: raw.slice(0, 100_000), truncated: raw.length > 100_000 }
     },
   }))
 

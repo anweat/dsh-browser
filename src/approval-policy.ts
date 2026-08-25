@@ -64,6 +64,7 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
     const action = String((args as { action?: unknown })?.action ?? '')
     if (['get', 'validate'].includes(action)) return { kind: 'allow' }
     if (mode === 'read-only') return { kind: 'deny', reason: `Automation draft writes are disabled by automationMode=${mode}` }
+    if (action === 'test' && mode !== 'unrestricted') return { kind: 'ask', reason: 'Replay a reusable automation draft in a real browser context' }
     if (mode === 'standard') return { kind: 'ask', reason: 'Save a bounded local reusable automation draft' }
     return { kind: 'allow' }
   }

@@ -41,6 +41,7 @@ export declare const styles: {
     readonly assetItem: "dsb-asset-item";
     readonly assetSelected: "dsb-asset-selected";
     readonly assetTest: "dsb-asset-test";
+    readonly assetTestForm: "dsb-asset-test-form";
     readonly assetEditor: "dsb-asset-editor";
     readonly invalidInput: "dsb-invalid-input";
 };

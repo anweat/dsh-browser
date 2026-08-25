@@ -43,6 +43,8 @@ function AutomationAssetsPanel(props: BrowserSettingsCardProps) {
   const state = props.useAutomationAssets(snapshot => snapshot)
   const [draft, setDraft] = useState('')
   const [draftError, setDraftError] = useState(false)
+  const [testUrl, setTestUrl] = useState('')
+  const [testInputs, setTestInputs] = useState('{}')
   const selected = state.selected
   useEffect(() => { if (selected) setDraft(JSON.stringify(selected, null, 2)) }, [selected?.id, selected?.revision])
 
@@ -58,6 +60,13 @@ function AutomationAssetsPanel(props: BrowserSettingsCardProps) {
       const value = JSON.parse(draft) as Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>
       if (selected?.id) value.id = selected.id
       await props.saveAutomationAsset(value); setDraftError(false)
+    } catch { setDraftError(true) }
+  }
+  const runTest = async () => {
+    if (!selected || !testUrl.trim()) { setDraftError(true); return }
+    try {
+      const inputs = JSON.parse(testInputs) as Record<string, string>
+      await props.testAutomationAsset(selected.id, testUrl.trim(), inputs); setDraftError(false)
     } catch { setDraftError(true) }
   }
   const candidates = state.snapshot?.candidates.filter(candidate => candidate.suggestedAt && !candidate.dismissedAt) ?? []
@@ -78,8 +87,10 @@ function AutomationAssetsPanel(props: BrowserSettingsCardProps) {
         <label className={css.label} htmlFor="dsh-browser-asset-editor">{t('assetEditor')}</label>
         <textarea id="dsh-browser-asset-editor" className={`${css.input} ${css.textarea} ${css.code} ${draftError ? css.invalidInput : ''}`} rows={18} value={draft} spellCheck={false} placeholder={t('assetEditorHint')} onChange={event => { setDraft(event.currentTarget.value); setDraftError(false) }} />
         <p className={css.hint}>{draftError ? t('assetInvalid') : t('assetSourceBoundary')}</p>
+        {selected?.status === 'draft' ? <div className={css.assetTestForm}><input className={css.input} value={testUrl} placeholder={t('assetTestUrl')} onChange={event => setTestUrl(event.currentTarget.value)} /><textarea className={`${css.input} ${css.textarea} ${css.code}`} rows={3} value={testInputs} spellCheck={false} aria-label={t('assetTestInputs')} onChange={event => setTestInputs(event.currentTarget.value)} /></div> : null}
         <div className={css.actions}>
-          {selected ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.testAutomationAsset(selected.id)}>{t('assetTest')}</button> : null}
+          {selected ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.validateAutomationAsset(selected.id)}>{t('assetValidate')}</button> : null}
+          {selected?.status === 'draft' ? <button type="button" className={css.secondary} disabled={state.busy || !testUrl.trim()} onClick={() => void runTest()}>{t('assetTest')}</button> : null}
           {selected?.status === 'draft' ? <button type="button" className={css.secondary} disabled={state.busy || selected.testStatus !== 'passed'} onClick={() => props.setAutomationAssetStatus(selected.id, 'active')}>{t('assetActivate')}</button> : null}
           {selected && selected.status !== 'archived' ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.setAutomationAssetStatus(selected.id, 'archived')}>{t('assetArchive')}</button> : null}
           <button type="button" className={css.primary} disabled={state.busy || !draft || selected?.status === 'active'} onClick={() => void save()}>{t('assetSaveDraft')}</button>

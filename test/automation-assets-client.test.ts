@@ -28,10 +28,12 @@ const snapshot: AutomationAssetSnapshot = {
 
 test('client loads summaries first and fetches source only after explicit selection', async () => {
   const endpoints: string[] = []
+  const payloads: unknown[] = []
   const rpc = {
-    async call(_channel: string, endpoint: string) {
+    async call(_channel: string, endpoint: string, payload: unknown) {
       endpoints.push(endpoint)
-      return { ok: true, value: endpoint === 'get' ? asset : snapshot }
+      payloads.push(payload)
+      return { ok: true, value: ['get', 'test', 'validate'].includes(endpoint) ? asset : snapshot }
     },
   } as unknown as ClientConnectionRpc
   const controller = new AutomationAssetsController(rpc)
@@ -41,5 +43,8 @@ test('client loads summaries first and fetches source only after explicit select
   await controller.select(asset.id)
   assert.equal(controller.snapshot().selected?.source?.includes('return document.title'), true)
   assert.equal(endpoints.filter(endpoint => endpoint === 'get').length, 1)
+  await controller.inject().testAutomationAsset(asset.id, 'https://example.com/', { query: 'one' })
+  const testIndex = endpoints.indexOf('test')
+  assert.deepEqual(payloads[testIndex], { id: asset.id, url: 'https://example.com/', inputs: { query: 'one' } })
   controller.dispose()
 })

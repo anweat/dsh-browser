@@ -10,7 +10,9 @@ import { browserPolicyDecision } from '../src/approval-policy.ts'
 import { runNode } from '../src/deps.ts'
 import { BrowserService } from '../src/browser-service.ts'
 import { resolveConfig } from '../src/config.ts'
-import { ALL_BROWSER_TOOL_NAMES, browserToolsForMode, resolveAutomationMode } from '../src/freedom.ts'
+import { ALL_BROWSER_TOOL_NAMES, browserToolsForMode, configuredBrowserTools, resolveAutomationMode } from '../src/freedom.ts'
+import { AutomationAssetStore, resolveAutomationAssetPolicy } from '../src/automation-assets.ts'
+import { executeAutomationAsset } from '../src/automation-execution.ts'
 
 const VALID_SCRIPT = `// ==UserScript==
 // @name Read Heading
@@ -82,6 +84,7 @@ test('automation modes expose predictable tool sets and retain validation when a
   assert.equal(browserToolsForMode('read-only').includes('browser_automation_search'), true)
   assert.equal(browserToolsForMode('read-only').includes('browser_automation_develop'), true)
   assert.equal(browserToolsForMode('read-only').includes('browser_automation_run'), false)
+  assert.equal(configuredBrowserTools('standard', { modelDevelopmentEnabled: false }).includes('browser_automation_develop'), false)
 
   assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'read-only').kind, 'deny')
   assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'standard').kind, 'ask')
@@ -94,6 +97,8 @@ test('automation modes expose predictable tool sets and retain validation when a
   assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'get' }, 'read-only').kind, 'allow')
   assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'save' }, 'read-only').kind, 'deny')
   assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'save' }, 'standard').kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'test' }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'test' }, 'unrestricted').kind, 'allow')
   assert.equal(browserPolicyDecision('browser_userscript_run', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'autonomous').kind, 'ask')
   assert.equal(browserPolicyDecision('browser_opencli_run', { args: ['browser', 'research', 'state'] }, 'autonomous').kind, 'ask')
   assert.equal(browserPolicyDecision('browser_install', {}, 'autonomous').kind, 'ask')
@@ -155,6 +160,15 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     const external = await service.runUserscript(url, VALID_SCRIPT, { inputs: { query: 'runtime-only' } })
     assert.equal(JSON.parse(external.resultJson).heading, 'Hello DSH')
     assert.equal(JSON.parse(external.resultJson).input, 'runtime-only')
+
+    const assetStore = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory: path.join(snapshotDir, 'automations'), persistenceMode: 'manual' }))
+    const draft = assetStore.saveDraft({ kind: 'userscript', name: 'Reusable heading reader', domains: ['127.0.0.1'], inputNames: ['query'], source: VALID_SCRIPT })
+    assert.equal(assetStore.validate(draft.id).testStatus, 'untested')
+    assert.throws(() => assetStore.setStatus(draft.id, 'active'), /pass testing/)
+    const replay = await executeAutomationAsset(service, assetStore, draft.id, url, { query: 'draft-replay' }, 'draft')
+    assert.equal(JSON.parse((replay.value as { resultJson: string }).resultJson).input, 'draft-replay')
+    assert.equal(assetStore.get(draft.id)?.testStatus, 'passed')
+    assert.equal(assetStore.setStatus(draft.id, 'active').status, 'active')
 
     const extracted = await service.searchResults(url, {
       item: 'main', title: 'h1', link: 'a', text: '#copy',

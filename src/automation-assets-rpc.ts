@@ -2,6 +2,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { AutomationAsset, AutomationAssetStatus, AutomationAssetStore } from './automation-assets.ts'
+import type { BrowserService } from './browser-service.ts'
+import { executeAutomationAsset } from './automation-execution.ts'
 
 const CHANNEL = '/dsh-browser-assets'
 
@@ -17,7 +19,7 @@ function stringField(payload: Record<string, unknown>, name: string): string {
   return value
 }
 
-export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore): void {
+export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService): void {
   ctx.inject(['connection'], (connectionCtx) => {
     const connection = (connectionCtx as unknown as { connection: { rpc: { handle(channel: string, handler: (endpoint: string, payload: unknown) => Promise<unknown>, options: { authority: 'loopback' }): () => Promise<void> } } }).connection
     const dispose = connection.rpc.handle(CHANNEL, async (endpoint, rawPayload) => {
@@ -30,7 +32,12 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
           case 'save': value = store.saveDraft(payload.asset as Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>); break
           case 'summarize': value = store.summarizeCandidate(stringField(payload, 'id')); break
           case 'dismiss': store.dismissCandidate(stringField(payload, 'id')); value = store.snapshot(); break
-          case 'test': value = store.test(stringField(payload, 'id')); break
+          case 'validate': value = store.validate(stringField(payload, 'id')); break
+          case 'test': {
+            const result = await executeAutomationAsset(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputs, 'draft')
+            value = result.asset
+            break
+          }
           case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus); break
           default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}` } }
         }

@@ -126,11 +126,11 @@ export declare class AutomationAssetStore {
     summarizeCandidate(id: string): AutomationAsset;
     dismissCandidate(id: string): void;
     saveDraft(input: Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>): AutomationAsset;
-    test(id: string): AutomationAsset;
     validate(id: string): AutomationAsset;
     setStatus(id: string, status: AutomationAssetStatus): AutomationAsset;
     search(query: string, domain?: string, status?: AutomationAssetStatus | 'all', kind?: AutomationAssetKind): AutomationAssetSummary[];
     noteRun(id: string, ok: boolean): void;
+    noteTestResult(id: string, ok: boolean, url: string): void;
     assertTarget(asset: AutomationAsset, url: string): void;
     private requireAsset;
     private prune;

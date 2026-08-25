@@ -50,8 +50,10 @@ test('candidate summary creates a draft that must pass testing before activation
   const draft = store.summarizeCandidate(candidate.id)
   assert.equal(draft.status, 'draft')
   assert.throws(() => store.setStatus(draft.id, 'active'), /pass testing/)
-  store.test(draft.id)
+  assert.equal(store.validate(draft.id).testStatus, 'untested')
+  store.noteTestResult(draft.id, true, 'https://example.com/search')
   assert.equal(store.setStatus(draft.id, 'active').status, 'active')
+  assert.equal(store.validate(draft.id).testStatus, 'passed')
   assert.doesNotThrow(() => store.assertTarget(store.get(draft.id)!, 'https://sub.example.com/result'))
   assert.throws(() => store.assertTarget(store.get(draft.id)!, 'https://other.example/result'), /not allowed/)
   assert.equal(store.search('search', 'example.com')[0]?.id, draft.id)
@@ -71,7 +73,7 @@ test('retrieval returns only active summaries and respects top-k', () => {
   const { store } = fixture({ persistenceMode: 'manual', retrievalTopK: 1 })
   for (const name of ['Search articles', 'Search issues']) {
     const draft = store.saveDraft({ kind: 'recipe', name, description: 'search example', domains: ['example.com'], recipe })
-    store.test(draft.id)
+    store.noteTestResult(draft.id, true, 'https://example.com/')
     store.setStatus(draft.id, 'active')
   }
   const results = store.search('search', 'example.com')
@@ -85,7 +87,8 @@ test('retrieval returns only active summaries and respects top-k', () => {
 test('auto-tested policy never promotes a static validation result', () => {
   const { store } = fixture({ persistenceMode: 'manual', activationMode: 'auto-tested' })
   const draft = store.saveDraft({ kind: 'recipe', name: 'Bounded recipe', domains: ['example.com'], recipe })
-  assert.equal(store.test(draft.id).status, 'draft')
+  assert.equal(store.validate(draft.id).status, 'draft')
+  assert.equal(store.get(draft.id)?.testStatus, 'untested')
 })
 
 test('corrupt persisted assets fail closed instead of being overwritten', () => {

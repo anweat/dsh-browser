@@ -375,22 +375,6 @@ export class AutomationAssetStore {
     return structuredClone(asset)
   }
 
-  test(id: string): AutomationAsset {
-    const asset = this.requireAsset(id)
-    let message = 'Recipe structure is valid.'
-    if (asset.kind === 'recipe') normalizeRecipeForCandidate(asset.recipe ?? [])
-    else {
-      const validation = validateUserscript(asset.source ?? '')
-      if (!validation.valid) throw new Error(validation.errors.join('; '))
-      message = `Userscript validated (${validation.sha256.slice(0, 12)}).`
-    }
-    asset.testStatus = 'passed'
-    asset.testMessage = message
-    asset.updatedAt = nowIso()
-    this.write()
-    return structuredClone(asset)
-  }
-
   validate(id: string): AutomationAsset {
     const asset = this.requireAsset(id)
     let message = 'Recipe structure is valid; runtime replay is still required.'
@@ -400,11 +384,7 @@ export class AutomationAssetStore {
       if (!validation.valid) throw new Error(validation.errors.join('; '))
       message = `Userscript validated (${validation.sha256.slice(0, 12)}); runtime replay is still required.`
     }
-    asset.testStatus = 'untested'
-    asset.testMessage = message
-    asset.updatedAt = nowIso()
-    this.write()
-    return structuredClone(asset)
+    return { ...structuredClone(asset), testMessage: message }
   }
 
   setStatus(id: string, status: AutomationAssetStatus): AutomationAsset {
@@ -452,6 +432,16 @@ export class AutomationAssetStore {
     if (ok) asset.successCount += 1
     else asset.failureCount += 1
     asset.lastRunAt = nowIso(); asset.updatedAt = asset.lastRunAt
+    this.write()
+  }
+
+  noteTestResult(id: string, ok: boolean, url: string): void {
+    const asset = this.requireAsset(id)
+    if (asset.status !== 'draft') throw new Error('only draft automation assets can record test results')
+    const domain = safeDomain(url)
+    asset.testStatus = ok ? 'passed' : 'failed'
+    asset.testMessage = ok ? `Runtime replay passed on ${domain}.` : `Runtime replay failed on ${domain}.`
+    asset.updatedAt = nowIso()
     this.write()
   }
 
