@@ -14,17 +14,17 @@ dsh plugin --profile web add ./dsh-browser
 dsh --profile web
 ```
 
-> 依赖 `@deepseek-ai/*` 已发布到 npm（`^0.1.0-rc.6`）。
-> 若你的 harness 是本地源码 checkout（如 `0.1.0-rc.5`），版本号可能有出入——用
+> 依赖 `@deepseek-ai/*` 已发布到 npm（当前适配基线为 `^0.1.1-rc.2`）。
+> 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
 ## 从旧版本升级
 
-Web Search Pro 与浏览器插件应同步升级；`dsh-web-search-pro >= 0.1.8` 需要 `@anweat/dsh-browser >= 0.1.8`。本版修正了 `web_snapshot screenshot=false` 仍写入 PNG 的问题，并让同一 `automationMode` 同时管辖 Web Search Pro 的缓存、规则和依赖安装操作。
+Web Search Pro 与浏览器插件应同步升级；`dsh-web-search-pro >= 0.1.8` 需要 `@anweat/dsh-browser >= 0.1.8`。0.1.9 新增受治理的可复用 Recipe / UserScript 草稿，要求真实浏览器回放通过后才能手工激活；同时修正 Chromium 就绪探测、服务禁用开关和持久登录态校验。
 
 ```bash
-dsh plugin --profile web add @anweat/dsh-browser@^0.1.8 dsh-web-search-pro@^0.1.8
+dsh plugin --profile web add @anweat/dsh-browser@^0.1.9 dsh-web-search-pro@^0.1.11
 ```
 
 升级后完整停止并重启 Web profile，再调用 `browser_status`、`browser_opencli_status` 和 `web_backend_status`；仅刷新网页不会重新加载插件服务或 Web Search Pro 配置面板。尤其不要只升级 Web Search Pro：新的工具目录、Patchright 运行时和调用缓冲都来自浏览器插件。
