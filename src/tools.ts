@@ -173,7 +173,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     description: '[Experimental] Run one manually activated reusable automation by id. Search first. Source and recipe internals remain Host-side; provide declared inputs and a target HTTP(S) URL.',
     parameters: {
       id: { type: 'string', required: true }, url: { type: 'string', required: true },
-      inputs: { type: 'object', additionalProperties: true, description: 'Declared string inputs used by {{name}} placeholders.' },
+      inputs: { type: 'object', additionalProperties: true, description: 'Declared string inputs used by named recipe placeholders.' },
       authProfile: { type: 'string' }, rulePack: { type: 'string' },
     },
     output: {

@@ -13,6 +13,7 @@ import { resolveConfig } from '../src/config.ts'
 import { ALL_BROWSER_TOOL_NAMES, browserToolsForMode, configuredBrowserTools, resolveAutomationMode } from '../src/freedom.ts'
 import { AutomationAssetStore, resolveAutomationAssetPolicy } from '../src/automation-assets.ts'
 import { executeAutomationAsset } from '../src/automation-execution.ts'
+import { registerTools } from '../src/tools.ts'
 
 const VALID_SCRIPT = `// ==UserScript==
 // @name Read Heading
@@ -20,6 +21,16 @@ const VALID_SCRIPT = `// ==UserScript==
 // @grant none
 // ==/UserScript==
 return { heading: document.querySelector('h1')?.textContent || '', input: __DSH_INPUTS__.query || '' }`
+
+test('registered tool schemas do not expose host prompt template groups', () => {
+  const registered: unknown[] = []
+  const ctx = { tools: { register: (tool: unknown) => registered.push(tool) } }
+
+  registerTools(ctx as never, resolveConfig({ automationMode: 'unrestricted' }), {} as never)
+
+  const unsafe = registered.filter(tool => /\{\{[^{}]+\}\}/.test(JSON.stringify(tool)))
+  assert.deepEqual(unsafe, [])
+})
 
 test('userscript metadata is scoped, hashed, and capability-reported', () => {
   const validation = validateUserscript(VALID_SCRIPT, 'http://127.0.0.1/page')
