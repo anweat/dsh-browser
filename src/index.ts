@@ -11,7 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import fs from 'node:fs'
 import path from 'node:path'
 import type {} from '@deepseek-ai/dsh-tools'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 import { Config, resolveConfig, type ResolvedConfig } from './config.ts'
 import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
@@ -39,13 +39,22 @@ export function apply(ctx: Context, config: Config): void {
   const deployed: ResolvedConfig = resolveConfig(config)
   let resolveSource: () => Config = () => deployed
   ctx.inject(['settings'], (settingsCtx) => {
-    const scope = settingsCtx.settings.register(settingsNamespace('browser'), Config, {
-      base: deployed,
-      // Browser processes, tool exposure, and approval hooks are deliberately
-      // startup-scoped. The next full profile start reads the persisted layer.
-      applies: 'restart',
-    })
-    resolveSource = () => scope.get()
+    const settings = settingsCtx.settings as unknown as {
+      register?: (
+        ns: string,
+        schema: typeof Config,
+        options?: { base?: ResolvedConfig; applies?: string },
+      ) => { get: () => Config }
+    }
+    if (typeof settings?.register === 'function') {
+      const scope = settings.register('browser', Config, {
+        base: deployed,
+        // Browser processes, tool exposure, and approval hooks are deliberately
+        // startup-scoped. The next full profile start reads the persisted layer.
+        applies: 'restart',
+      })
+      resolveSource = () => scope.get()
+    }
   })
   const resolved: ResolvedConfig = resolveConfig(resolveSource())
   fs.mkdirSync(resolved.snapshotDir, { recursive: true })
