@@ -9,7 +9,7 @@
  *   web-search-pro's former PlaywrightManager (rules-aware page extraction and
  *   platform search-page list extraction run in the page itself).
  * - opencli(...) runs the bundled @jackwener/opencli (no global CLI).
- * - The interactive surface (open/click/type/scroll/read/screenshot/closePage)
+ * - The interactive surface (open/click/type/hover/setFiles/evaluate/scroll/read/screenshot/closePage)
  *   drives ONE persistent context+page, giving the model multi-step browsing.
  *
  * The page-side extractors are raw JS strings, not closures: tsx/esbuild would
@@ -72,6 +72,16 @@ export interface ScriptRunResult {
     resultJson: string;
     truncated: boolean;
 }
+export interface EvaluateResult {
+    url: string;
+    resultJson: string;
+    truncated: boolean;
+    capabilities: string[];
+    warnings: string[];
+}
+export interface FileUploadResult extends InteractiveState {
+    files: string[];
+}
 export interface CrawlPage {
     url: string;
     title: string;
@@ -110,6 +120,8 @@ export interface BrowserStatus {
     directInteractionPolicy: 'deny' | 'ask' | 'allow';
     mutatingRecipePolicy: 'deny' | 'ask' | 'allow';
     externalUserscriptPolicy: 'deny' | 'ask' | 'allow';
+    pageEvaluatePolicy: 'deny' | 'ask' | 'allow';
+    fileUploadPolicy: 'deny' | 'ask' | 'allow';
     opencliRunPolicy: 'deny' | 'ask' | 'allow';
     chromiumInstalled: boolean;
     chromiumExecutablePath?: string;
@@ -225,6 +237,16 @@ export declare class BrowserService {
     type(selector: string, text: string, opts?: {
         timeoutMs?: number;
     }): Promise<InteractiveState>;
+    hover(selector: string, opts?: {
+        timeoutMs?: number;
+        waitMs?: number;
+    }): Promise<InteractiveState>;
+    setFiles(selector: string, files: readonly string[], opts?: {
+        timeoutMs?: number;
+    }): Promise<FileUploadResult>;
+    evaluate(expression: string, opts?: {
+        timeoutMs?: number;
+    }): Promise<EvaluateResult>;
     scroll(deltaY: number, opts?: {
         waitMs?: number;
     }): Promise<InteractiveState>;

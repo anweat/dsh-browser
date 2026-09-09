@@ -9,7 +9,7 @@ export type BrowserPolicyDecision =
   | { kind: 'deny'; reason: string }
   | { kind: 'ask'; reason: string }
 
-const DIRECT_INTERACTIONS = new Set(['browser_click', 'browser_type', 'browser_scroll'])
+const DIRECT_INTERACTIONS = new Set(['browser_click', 'browser_type', 'browser_hover', 'browser_scroll'])
 const WEB_LOCAL_MUTATIONS = new Set(['web_cache_clear'])
 
 export function browserPolicyDecision(name: string, args: unknown, mode: AutomationMode = 'standard'): BrowserPolicyDecision {
@@ -24,6 +24,23 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
     if (mode === 'read-only') return { kind: 'deny', reason: `Browser installation is disabled by automationMode=${mode}` }
     if (mode === 'unrestricted') return { kind: 'allow' }
     return { kind: 'ask', reason: 'Install Playwright Chromium into the shared browser cache' }
+  }
+  if (name === 'browser_set_files') {
+    const files = Array.isArray((args as { files?: unknown })?.files)
+      ? (args as { files: unknown[] }).files.filter(value => typeof value === 'string') as string[]
+      : []
+    if (files.length === 0) return { kind: 'deny', reason: 'browser_set_files requires one or more absolute file paths' }
+    if (mode === 'read-only') return { kind: 'deny', reason: `Local file upload is disabled by automationMode=${mode}` }
+    if (mode === 'unrestricted') return { kind: 'allow' }
+    return { kind: 'ask', reason: 'Read local files and expose them to the current website upload control: ' + files.slice(0, 5).join(', ') }
+  }
+  if (name === 'browser_evaluate') {
+    const expression = (args as { expression?: unknown })?.expression
+    if (typeof expression !== 'string' || !expression.trim()) return { kind: 'deny', reason: 'browser_evaluate requires a JavaScript expression' }
+    if (expression.length > 20_000) return { kind: 'deny', reason: 'browser_evaluate expression exceeds 20,000 characters' }
+    if (mode === 'read-only') return { kind: 'deny', reason: `Page JavaScript execution is disabled by automationMode=${mode}` }
+    if (mode === 'unrestricted') return { kind: 'allow' }
+    return { kind: 'ask', reason: 'Run JavaScript with the current page origin and login state; it may access page storage, non-HttpOnly cookies, and browser-permitted network APIs' }
   }
   if (name === 'browser_userscript_run') {
     const input = args as { source?: unknown; url?: unknown }

@@ -24,7 +24,7 @@ export const inject = ['tools']
 
 export { Config }
 export type { Config as BrowserConfig } from './config.ts'
-export type { BrowserService, RenderRule, RenderResult, SnapshotResult, PlatformSpec, SearchItem, InteractiveState, RecipeRunResult, ScriptRunResult } from './browser-service.ts'
+export type { BrowserService, RenderRule, RenderResult, SnapshotResult, PlatformSpec, SearchItem, InteractiveState, RecipeRunResult, ScriptRunResult, EvaluateResult, FileUploadResult } from './browser-service.ts'
 export type { AuthProfileConfig, ResolvedAuthProfile } from './auth-profiles.ts'
 export type { RulePackConfig, RuleStep, ResolvedRulePack } from './rule-packs.ts'
 export type { BrowserRecipeStep, RecipeStepResult } from './automation.ts'

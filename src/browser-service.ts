@@ -9,7 +9,7 @@
  *   web-search-pro's former PlaywrightManager (rules-aware page extraction and
  *   platform search-page list extraction run in the page itself).
  * - opencli(...) runs the bundled @jackwener/opencli (no global CLI).
- * - The interactive surface (open/click/type/scroll/read/screenshot/closePage)
+ * - The interactive surface (open/click/type/hover/setFiles/evaluate/scroll/read/screenshot/closePage)
  *   drives ONE persistent context+page, giving the model multi-step browsing.
  *
  * The page-side extractors are raw JS strings, not closures: tsx/esbuild would
@@ -87,6 +87,18 @@ export interface ScriptRunResult {
   truncated: boolean
 }
 
+export interface EvaluateResult {
+  url: string
+  resultJson: string
+  truncated: boolean
+  capabilities: string[]
+  warnings: string[]
+}
+
+export interface FileUploadResult extends InteractiveState {
+  files: string[]
+}
+
 export interface CrawlPage {
   url: string
   title: string
@@ -116,6 +128,8 @@ export interface BrowserStatus {
   directInteractionPolicy: 'deny' | 'ask' | 'allow'
   mutatingRecipePolicy: 'deny' | 'ask' | 'allow'
   externalUserscriptPolicy: 'deny' | 'ask' | 'allow'
+  pageEvaluatePolicy: 'deny' | 'ask' | 'allow'
+  fileUploadPolicy: 'deny' | 'ask' | 'allow'
   opencliRunPolicy: 'deny' | 'ask' | 'allow'
   chromiumInstalled: boolean
   chromiumExecutablePath?: string
@@ -705,6 +719,64 @@ export class BrowserService {
     return this.readState(page, false)
   }
 
+  async hover(selector: string, opts: { timeoutMs?: number; waitMs?: number } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage()
+    const timeoutMs = opts.timeoutMs ?? 15_000
+    const waitMs = Math.min(Math.max(opts.waitMs ?? 300, 0), timeoutMs)
+    await page.waitForSelector(selector, { timeout: timeoutMs })
+    await page.hover(selector)
+    await page.waitForTimeout(waitMs)
+    return this.readState(page, true)
+  }
+
+  async setFiles(selector: string, files: readonly string[], opts: { timeoutMs?: number } = {}): Promise<FileUploadResult> {
+    if (files.length === 0 || files.length > 20) throw new Error('browser_set_files requires 1 to 20 files')
+    const resolved = files.map(file => {
+      if (!path.isAbsolute(file)) throw new Error('browser_set_files requires absolute file paths: ' + file)
+      const real = fs.realpathSync(file)
+      if (!fs.statSync(real).isFile()) throw new Error('browser_set_files path is not a file: ' + file)
+      return real
+    })
+    const totalBytes = resolved.reduce((total, file) => total + fs.statSync(file).size, 0)
+    if (totalBytes > 512 * 1024 * 1024) throw new Error('browser_set_files total upload size exceeds 512 MiB')
+    const page = await this.ensureActivePage()
+    await page.waitForSelector(selector, { timeout: opts.timeoutMs ?? 15_000 })
+    await page.setInputFiles(selector, resolved)
+    return { ...await this.readState(page, true), files: resolved.map(file => path.basename(file)) }
+  }
+
+  async evaluate(expression: string, opts: { timeoutMs?: number } = {}): Promise<EvaluateResult> {
+    const source = expression.trim()
+    if (!source) throw new Error('browser_evaluate requires a JavaScript expression')
+    if (source.length > 20_000) throw new Error('browser_evaluate expression exceeds 20,000 characters')
+    const page = await this.ensureActivePage()
+    const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? 15_000, 1_000), 30_000)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        void this.closePage()
+        reject(new Error('browser_evaluate timed out after ' + timeoutMs + 'ms; the active page was closed'))
+      }, timeoutMs)
+    })
+    try {
+      const script = `(async () => {\nconst value = await (${source}\n);\nconst json = JSON.stringify(value);\nif (json === undefined) throw new Error('expression result is not JSON-serializable');\nreturn { resultJson: json.slice(0, 100000), truncated: json.length > 100000 };\n})()`
+      const result = await Promise.race([page.evaluate(script), timeout]) as { resultJson: string; truncated: boolean }
+      return {
+        url: page.url(),
+        resultJson: result.resultJson,
+        truncated: result.truncated,
+        capabilities: ['dom', 'page-javascript', 'page-network', 'page-storage'],
+        warnings: [
+          'The expression runs with the current page origin and login state. It can mutate the page, access non-HttpOnly cookies and browser storage, and issue requests allowed by the browser.',
+          'Use this capability according to the target site rules and applicable requirements. The caller/operator is responsible for that decision; dsh-browser only executes approved browser operations.',
+          'The expression has no Node.js or direct host-filesystem access. Downloads are not persisted or returned by this tool.',
+        ],
+      }
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
   async scroll(deltaY: number, opts: { waitMs?: number } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage()
     await page.mouse?.wheel(0, deltaY || 2000).catch(() => {})
@@ -798,6 +870,8 @@ export class BrowserService {
       directInteractionPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
       mutatingRecipePolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
       externalUserscriptPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      pageEvaluatePolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      fileUploadPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       opencliRunPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
       ...chromiumExecutablePath ? { chromiumExecutablePath } : {},

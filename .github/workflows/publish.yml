@@ -1,4 +1,4 @@
-# Publish to npm (and attach tarball to a GitHub Release) for dsh-web-search-pro.
+# Publish to npm (and attach tarball to a GitHub Release) for dsh-browser.
 #
 # Modeled on the official deepseek-harness release.yml pattern:
 #   - pack runs WITHOUT registry credentials on every run — it builds, verifies
@@ -142,4 +142,3 @@ jobs:
         with:
           files: dist/*.tgz
           generate_release_notes: true
-
