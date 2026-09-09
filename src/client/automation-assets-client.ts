@@ -1,4 +1,4 @@
-import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
 import type { AutomationAsset, AutomationAssetSnapshot, AutomationAssetStatus } from '../automation-assets.ts'
 
@@ -72,7 +72,7 @@ export class AutomationAssetsController {
   }
 
   private async call<T>(endpoint: string, payload: unknown): Promise<T> {
-    const result = await this.rpc.call('/dsh-browser-assets', endpoint, payload)
+    const result = await this.rpc.call('/api', `dsh-browser-assets/${endpoint}`, payload)
     if (!result.ok) throw new Error(result.error.message)
     return result.value as T
   }

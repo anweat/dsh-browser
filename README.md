@@ -4,6 +4,17 @@
 
 把 **Playwright / Patchright（可选 Chromium 驱动）** 与 **OpenCLI** 作为插件自身的 npm 依赖打包（优先插件本地，缺省回退全局复用），对外提供一个 `browser` 服务 + 一组交互式浏览器工具。`dsh-web-search-pro` 通过 `inject: ['browser']` 注入该服务，驱动它的浏览器 / OpenCLI 后端——**不再依赖全局 CLI**。
 
+## 兼容与发布通道
+
+| 插件发布通道 | DSH 基线 | 兼容承诺 |
+|---|---|---|
+| npm `latest`（`0.1.12`） | `dsh-v0.1.1-rc.2` 至 `dsh-v0.1.2-rc.1` | 已验证维护基线 |
+| npm `next` 候选（`0.1.13-alpha.1`） | `dsh-v0.1.5-alpha.1` | 精确依赖与真实 profile 验收目标 |
+
+`0.1.13-alpha.1` 使用 DSH 新客户端分包：状态存储来自
+`dsh-client-store`，设置契约来自 `dsh-client-ui-settings`，客户端 Context
+来自 Cordis。该候选不会覆盖 npm `latest`。
+
 ## 安装
 
 ```bash
@@ -14,17 +25,17 @@ dsh plugin --profile web add ./dsh-browser
 dsh --profile web
 ```
 
-> 依赖 `@deepseek-ai/*` 已发布到 npm（当前适配基线为 `^0.1.1-rc.2`）。
+> npm `latest` 延续现有维护基线；本开发分支精确适配 `dsh-v0.1.5-alpha.1`。
 > 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
 ## 从旧版本升级
 
-Web Search Pro 与浏览器插件应同步升级；`dsh-web-search-pro >= 0.1.8` 需要 `@anweat/dsh-browser >= 0.1.8`。0.1.11 移除了对旧版 `dsh-settings` 的运行时 `settingsNamespace` 导入，可随 DSH `0.1.2-rc.1` 加载，同时保留 `0.1.1-rc.2` 支持；0.1.10 修复工具描述被 DSH 误解析为 prompt 变量、补齐独立开发环境的 DSH peer 安装。
+Web Search Pro 与浏览器插件应同步升级；`dsh-web-search-pro >= 0.1.8` 需要 `@anweat/dsh-browser >= 0.1.8`。面向 `dsh-v0.1.5-alpha.1` 联调时，使用 browser 与 Web Search Pro 的 npm `next` 候选并完整重启 profile。0.1.11 移除了对旧版 `dsh-settings` 的运行时 `settingsNamespace` 导入；0.1.10 修复工具描述被 DSH 误解析为 prompt 变量。
 
 ```bash
-dsh plugin --profile web add @anweat/dsh-browser@^0.1.11 dsh-web-search-pro@^0.1.11
+dsh plugin --profile web add @anweat/dsh-browser@next dsh-web-search-pro@next
 ```
 
 升级后完整停止并重启 Web profile，再调用 `browser_status`、`browser_opencli_status` 和 `web_backend_status`；仅刷新网页不会重新加载插件服务或 Web Search Pro 配置面板。尤其不要只升级 Web Search Pro：新的工具目录、Patchright 运行时和调用缓冲都来自浏览器插件。
