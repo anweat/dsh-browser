@@ -1,4 +1,4 @@
-import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client';
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client';
 import type { AutomationAsset, AutomationAssetSnapshot, AutomationAssetStatus } from '../automation-assets.ts';
 export interface AutomationAssetsState {

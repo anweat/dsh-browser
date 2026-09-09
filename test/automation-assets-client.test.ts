@@ -28,23 +28,26 @@ const snapshot: AutomationAssetSnapshot = {
 
 test('client loads summaries first and fetches source only after explicit selection', async () => {
   const endpoints: string[] = []
+  const channels: string[] = []
   const payloads: unknown[] = []
   const rpc = {
-    async call(_channel: string, endpoint: string, payload: unknown) {
+    async call(channel: string, endpoint: string, payload: unknown) {
+      channels.push(channel)
       endpoints.push(endpoint)
       payloads.push(payload)
-      return { ok: true, value: ['get', 'test', 'validate'].includes(endpoint) ? asset : snapshot }
+      return { ok: true, value: ['get', 'test', 'validate'].some(name => endpoint.endsWith(`/${name}`)) ? asset : snapshot }
     },
   } as unknown as ClientConnectionRpc
   const controller = new AutomationAssetsController(rpc)
   await controller.refresh()
   assert.equal(controller.snapshot().selected, undefined)
-  assert.equal(endpoints.includes('get'), false)
+  assert.equal(endpoints.includes('dsh-browser-assets/get'), false)
   await controller.select(asset.id)
   assert.equal(controller.snapshot().selected?.source?.includes('return document.title'), true)
-  assert.equal(endpoints.filter(endpoint => endpoint === 'get').length, 1)
+  assert.equal(endpoints.filter(endpoint => endpoint === 'dsh-browser-assets/get').length, 1)
   await controller.inject().testAutomationAsset(asset.id, 'https://example.com/', { query: 'one' })
-  const testIndex = endpoints.indexOf('test')
+  const testIndex = endpoints.indexOf('dsh-browser-assets/test')
   assert.deepEqual(payloads[testIndex], { id: asset.id, url: 'https://example.com/', inputs: { query: 'one' } })
+  assert.deepEqual(new Set(channels), new Set(['/api']))
   controller.dispose()
 })

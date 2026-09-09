@@ -1,7 +1,7 @@
 import type { UserConfig } from 'tsdown'
 
 const PLUGIN_ID = '@anweat/dsh-browser'
-const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-runtime/client', '@deepseek-ai/dsh-client-ui-slots'] as const
+const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-slots'] as const
 
 export default {
   name: `${PLUGIN_ID}/client`, entry: { client: 'src/client/index.ts' }, outDir: 'lib', format: 'cjs', platform: 'browser', dts: false, sourcemap: true, clean: false,

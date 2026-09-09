@@ -1,11 +1,22 @@
 /** Loopback-only Host RPC for the automation asset review UI. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type { AutomationAsset, AutomationAssetStatus, AutomationAssetStore } from './automation-assets.ts'
 import type { BrowserService } from './browser-service.ts'
 import { executeAutomationAsset } from './automation-execution.ts'
 
-const CHANNEL = '/dsh-browser-assets'
+const CHANNEL = '/api'
+const PREFIX = 'dsh-browser-assets'
+const ENDPOINTS = ['snapshot', 'get', 'save', 'summarize', 'dismiss', 'validate', 'test', 'status'] as const
+
+function failure(rpcId: string, message: string): Response {
+  return Response.json({
+    type: 'server-response',
+    rpcId,
+    result: { ok: false, error: { code: 'gateway/bad-request', message, details: {} } },
+  })
+}
 
 function record(payload: unknown): Record<string, unknown> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('request payload must be an object')
@@ -21,8 +32,19 @@ function stringField(payload: Record<string, unknown>, name: string): string {
 
 export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService): void {
   ctx.inject(['connection'], (connectionCtx) => {
-    const connection = (connectionCtx as unknown as { connection: { rpc: { handle(channel: string, handler: (endpoint: string, payload: unknown) => Promise<unknown>, options: { authority: 'loopback' }): () => Promise<void> } } }).connection
-    const dispose = connection.rpc.handle(CHANNEL, async (endpoint, rawPayload) => {
+    const connection = (connectionCtx as unknown as {
+      connection: {
+        fetch: {
+          register(route: {
+            path: string
+            methods: readonly ['POST']
+            requestBody: 'buffered'
+            fetch(request: Request): Promise<Response>
+          }): () => Promise<void>
+        }
+      }
+    }).connection
+    const handler: ConnectionRpcHandler = async (endpoint, rawPayload) => {
       try {
         const payload = record(rawPayload)
         let value: unknown
@@ -39,13 +61,43 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
             break
           }
           case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus); break
-          default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}` } }
+          default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}`, details: {} } }
         }
         return { ok: true, value }
       } catch (error) {
-        return { ok: false, error: { code: 'bad-request' as const, message: String(error instanceof Error ? error.message : error).slice(0, 500) } }
+        return { ok: false, error: { code: 'bad-request' as const, message: String(error instanceof Error ? error.message : error).slice(0, 500), details: {} } }
       }
-    }, { authority: 'loopback' })
-    connectionCtx.effect(() => dispose, 'dsh-browser: automation asset RPC')
+    }
+    for (const endpoint of ENDPOINTS) {
+      const method = `${PREFIX}/${endpoint}`
+      connectionCtx.effect(() => connection.fetch.register({
+        path: `${CHANNEL}/${method}`,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          let body: unknown
+          try {
+            body = await request.json()
+          } catch {
+            return new Response('body is not JSON', { status: 400 })
+          }
+          const rpcId = typeof body === 'object' && body !== null
+            && typeof (body as { rpcId?: unknown }).rpcId === 'string'
+            ? (body as { rpcId: string }).rpcId
+            : 'invalid-request'
+          if (typeof body !== 'object' || body === null
+            || (body as { type?: unknown }).type !== 'client-request'
+            || (body as { method?: unknown }).method !== method) {
+            return failure(rpcId, 'invalid RPC request')
+          }
+          try {
+            const result = await handler(endpoint, (body as { payload?: unknown }).payload, request.signal)
+            return Response.json({ type: 'server-response', rpcId, result })
+          } catch (error) {
+            return failure(rpcId, String(error instanceof Error ? error.message : error).slice(0, 500))
+          }
+        },
+      }), `dsh-browser: ${method} RPC route`)
+    }
   })
 }

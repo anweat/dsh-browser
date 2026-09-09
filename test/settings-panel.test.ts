@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { BrowserSettingsController, FIELD_SPECS } from '../src/client/form.ts'
 import { SETTINGS_NAMESPACE } from '../src/client/settings-namespace.ts'
 
