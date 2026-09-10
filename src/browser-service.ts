@@ -337,6 +337,10 @@ export class BrowserService {
 
   private async ensure(): Promise<any> {
     this.assertEnabled()
+    if (this.browser && !this.browser.isConnected()) {
+      this.browser = undefined
+      this.launching = undefined
+    }
     if (this.browser) return this.browser
     if (!this.launching) {
       this.launching = (async () => {
@@ -359,6 +363,12 @@ export class BrowserService {
             throw error
           }
         }
+        this.browser.on?.('disconnected', () => {
+          this.browser = undefined
+          this.launching = undefined
+          this.activePage = undefined
+          this.activeContext = undefined
+        })
         return this.browser
       })().catch((error: unknown) => {
         this.launching = undefined
@@ -392,14 +402,24 @@ export class BrowserService {
   }
 
   private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack }> {
-    const browser = await this.ensure()
+    let browser = await this.ensure()
     const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
     const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
     const stateOptions = profile
       ? storageStateOptions(profile.storageStatePath, `auth profile ${profile.id}`, profile.persistState)
       : (!opts.anonymous ? storageStateOptions(this.config.storageStatePath, 'global') : {})
-    const context = await browser.newContext(stateOptions)
+    let context: any
+    try {
+      context = await browser.newContext(stateOptions)
+    } catch (error) {
+      if (!browser.isConnected()) {
+        browser = await this.ensure()
+        context = await browser.newContext(stateOptions)
+      } else {
+        throw error
+      }
+    }
     try {
       if (rulePack?.initScriptPath) await context.addInitScript({ path: rulePack.initScriptPath })
     } catch (error) {
@@ -418,6 +438,8 @@ export class BrowserService {
         fs.writeFileSync(temporary, JSON.stringify(state, null, 2), { encoding: 'utf8', mode: 0o600 })
         fs.renameSync(temporary, session.profile.storageStatePath)
       }
+    } catch {
+      // ignore storageState errors if context or browser closed/crashed
     } finally {
       await session.context.close().catch(() => {})
     }
@@ -728,14 +750,16 @@ export class BrowserService {
   // ── interactive surface (one persistent context + page) ──────────────────
 
   private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string } = {}): Promise<any> {
-    if (this.activePage && !this.activePage.isClosed()) {
+    if (this.activePage && !this.activePage.isClosed() && this.browser?.isConnected()) {
       if (!targetUrl) return this.activePage
       if ((opts.authProfile ?? this.config.defaultAuthProfile) === this.activeProfile?.id && opts.rulePack === this.activeRulePack?.id) {
         if (this.activeProfile) this.authProfiles.resolve(this.activeProfile.id, targetUrl)
         if (this.activeRulePack) resolveRulePack(this.config.rulePacks, this.activeRulePack.id, targetUrl)
         return this.activePage
       }
-      await this.closePage()
+      await this.closePage().catch(() => {})
+    } else if (this.activePage || this.activeContext) {
+      await this.closePage().catch(() => {})
     }
     if (targetUrl) {
       const session = await this.transientContext(targetUrl, opts)
@@ -785,6 +809,16 @@ export class BrowserService {
         timestamp: new Date().toISOString(),
       })
       if (this.capturedRequests.length > 200) this.capturedRequests.splice(0, this.capturedRequests.length - 200)
+    })
+    page.on?.('close', () => {
+      if (this.activePage === page) {
+        void this.closePage().catch(() => {})
+      }
+    })
+    page.on?.('crash', () => {
+      if (this.activePage === page) {
+        void this.closePage().catch(() => {})
+      }
     })
   }
 
@@ -1073,13 +1107,16 @@ export class BrowserService {
   }
 
   async closePage(): Promise<void> {
-    if (this.activePage) { await this.activePage.close().catch(() => {}) }
+    const page = this.activePage
+    const context = this.activeContext
+    const profile = this.activeProfile
     this.activePage = undefined
-    if (this.activeContext) await this.persistAndClose({ context: this.activeContext, ...this.activeProfile ? { profile: this.activeProfile } : {} })
     this.activeContext = undefined
     this.activeProfile = undefined
     this.activeRulePack = undefined
     this.resetCapture()
+    if (page) await page.close().catch(() => {})
+    if (context) await this.persistAndClose({ context, ...profile ? { profile } : {} }).catch(() => {})
   }
 
   async status(): Promise<BrowserStatus> {
@@ -1137,13 +1174,13 @@ export class BrowserService {
       builtinScripts: BUILTIN_SCRIPTS.map(script => script.id),
       externalUserscriptsRequireApproval: ['standard', 'autonomous'].includes(this.config.automationMode),
       mutatingRecipesRequireApproval: this.config.automationMode === 'standard',
-      ...(this.activePage && !this.activePage.isClosed() ? { activeUrl: this.activePage.url() } : {}),
+      ...(this.activePage && !this.activePage.isClosed() && this.browser?.isConnected() ? { activeUrl: this.activePage.url() } : {}),
       ...this.activeProfile ? { activeAuthProfile: this.activeProfile.id } : {},
     }
   }
 
   async close(): Promise<void> {
-    await this.closePage()
+    await this.closePage().catch(() => {})
     const b = this.browser
     this.browser = undefined
     this.launching = undefined
