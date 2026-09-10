@@ -82,6 +82,47 @@ export interface EvaluateResult {
 export interface FileUploadResult extends InteractiveState {
     files: string[];
 }
+export interface BrowserFrameSpec {
+    selector?: string;
+    name?: string;
+    url?: string;
+}
+export interface BrowserLocatorSpec {
+    selector?: string;
+    role?: string;
+    name?: string;
+    text?: string;
+    label?: string;
+    exact?: boolean;
+    frame?: BrowserFrameSpec;
+}
+export type BrowserTarget = string | BrowserLocatorSpec;
+export interface BrowserConsoleRecord {
+    type: string;
+    text: string;
+    url?: string;
+    timestamp: string;
+}
+export interface BrowserRequestRecord {
+    method: string;
+    url: string;
+    status?: number;
+    failure?: string;
+    timestamp: string;
+}
+export interface BrowserScreenshotOptions {
+    target?: BrowserTarget;
+    clip?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+    fullPage?: boolean;
+    format?: 'png' | 'jpeg';
+    quality?: number;
+    filename?: string;
+}
 export interface CrawlPage {
     url: string;
     title: string;
@@ -150,6 +191,10 @@ export declare class BrowserService {
     private readonly authProfiles;
     private readonly usageGovernor;
     private opencliCatalogCache?;
+    private captureConsoleEnabled;
+    private captureNetworkEnabled;
+    private capturedConsole;
+    private capturedRequests;
     constructor(config: ResolvedConfig);
     available(): boolean;
     private assertEnabled;
@@ -223,25 +268,46 @@ export declare class BrowserService {
         inputs?: Record<string, string>;
     }): Promise<ScriptRunResult>;
     private ensureActivePage;
+    private attachCapture;
+    private resetCapture;
+    private resolveTarget;
+    private screenshotFile;
     private captureScreenshot;
     private readState;
     open(url: string, opts?: {
         waitMs?: number;
         authProfile?: string;
         rulePack?: string;
+        capture?: readonly ('console' | 'network')[];
     }): Promise<InteractiveState>;
-    click(selector: string, opts?: {
+    click(target: BrowserTarget, opts?: {
         timeoutMs?: number;
         waitMs?: number;
     }): Promise<InteractiveState>;
-    type(selector: string, text: string, opts?: {
+    type(target: BrowserTarget, text: string, opts?: {
         timeoutMs?: number;
     }): Promise<InteractiveState>;
-    hover(selector: string, opts?: {
+    wait(target: BrowserTarget | undefined, opts?: {
+        urlPattern?: string;
+        networkIdle?: boolean;
+        timeMs?: number;
+        state?: 'visible' | 'hidden' | 'attached' | 'detached';
+        timeoutMs?: number;
+    }): Promise<InteractiveState>;
+    press(target: BrowserTarget | undefined, key: string, opts?: {
+        timeoutMs?: number;
+    }): Promise<InteractiveState>;
+    select(target: BrowserTarget, values: readonly string[], opts?: {
+        timeoutMs?: number;
+    }): Promise<InteractiveState>;
+    check(target: BrowserTarget, checked?: boolean, opts?: {
+        timeoutMs?: number;
+    }): Promise<InteractiveState>;
+    hover(target: BrowserTarget, opts?: {
         timeoutMs?: number;
         waitMs?: number;
     }): Promise<InteractiveState>;
-    setFiles(selector: string, files: readonly string[], opts?: {
+    setFiles(target: BrowserTarget, files: readonly string[], opts?: {
         timeoutMs?: number;
     }): Promise<FileUploadResult>;
     evaluate(expression: string, opts?: {
@@ -251,7 +317,22 @@ export declare class BrowserService {
         waitMs?: number;
     }): Promise<InteractiveState>;
     read(): Promise<InteractiveState>;
-    screenshot(): Promise<{
+    consoleMessages(opts?: {
+        level?: string;
+        limit?: number;
+        clear?: boolean;
+    }): {
+        enabled: boolean;
+        records: BrowserConsoleRecord[];
+    };
+    networkRequests(opts?: {
+        limit?: number;
+        clear?: boolean;
+    }): {
+        enabled: boolean;
+        records: BrowserRequestRecord[];
+    };
+    screenshot(options?: BrowserScreenshotOptions): Promise<{
         path: string;
     }>;
     recipe(steps: readonly BrowserRecipeStep[], opts?: {

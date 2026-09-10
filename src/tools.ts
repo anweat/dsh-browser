@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './config.ts'
-import type { BrowserService, InteractiveState } from './browser-service.ts'
+import type { BrowserLocatorSpec, BrowserService, BrowserTarget, InteractiveState } from './browser-service.ts'
 import type { BrowserRecipeStep } from './automation.ts'
 import { configuredBrowserTools } from './freedom.ts'
 import type { AutomationAsset, AutomationAssetStore } from './automation-assets.ts'
@@ -77,6 +77,50 @@ const RECIPE_STEP_SCHEMA = {
   },
 } as const
 
+const COMPLIANCE_NOTICE = 'The caller/operator must use this capability according to the target site rules and applicable requirements; dsh-browser only executes the requested browser operation and does not determine whether a particular use is permitted.'
+
+const FRAME_SCHEMA = {
+  type: 'object' as const,
+  additionalProperties: false,
+  properties: {
+    selector: { type: 'string' as const, description: 'CSS selector for an iframe. Use exactly one frame field.' },
+    name: { type: 'string' as const, description: 'Frame name. Use exactly one frame field.' },
+    url: { type: 'string' as const, description: 'Playwright frame URL/glob. Use exactly one frame field.' },
+  },
+} as const
+
+const LOCATOR_SCHEMA = {
+  type: 'object' as const,
+  additionalProperties: false,
+  properties: {
+    selector: { type: 'string' as const, description: 'CSS selector. Use exactly one of selector, role, text, or label.' },
+    role: { type: 'string' as const, description: 'Accessible role used by Playwright getByRole.' },
+    name: { type: 'string' as const, description: 'Optional accessible name; valid only with role.' },
+    text: { type: 'string' as const, description: 'Visible text used by Playwright getByText.' },
+    label: { type: 'string' as const, description: 'Form label used by Playwright getByLabel.' },
+    exact: { type: 'boolean' as const, description: 'Require an exact semantic match. Defaults to false.' },
+    frame: FRAME_SCHEMA,
+  },
+} as const
+
+const INTERACTIVE_OUTPUT_SCHEMA = {
+  type: 'object' as const,
+  additionalProperties: false,
+  properties: {
+    url: { type: 'string' as const, required: true },
+    title: { type: 'string' as const },
+    text: { type: 'string' as const, required: true },
+    screenshotPath: { type: 'string' as const },
+  },
+} as const
+
+function toolTarget(args: { selector?: unknown; locator?: unknown }, required = true): BrowserTarget | undefined {
+  if (typeof args.selector === 'string' && args.locator === undefined) return args.selector
+  if (args.selector === undefined && args.locator && typeof args.locator === 'object') return args.locator as BrowserLocatorSpec
+  if (!required && args.selector === undefined && args.locator === undefined) return undefined
+  throw new Error('provide exactly one of selector or locator')
+}
+
 export function registerTools(ctx: Context, config: ResolvedConfig, service: BrowserService, assets?: AutomationAssetStore): void {
   const exposedTools = new Set<string>(configuredBrowserTools(config.automationMode, config.automationAssets, config.enabled))
   const development = assets ? new AutomationDevelopmentService(assets, config.automationAssets) : undefined
@@ -112,7 +156,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_automation_develop',
-    description: '[Experimental] Explicitly inspect, save, validate, or replay one reusable automation draft. Use search first. Full recipe/source is returned only for action=get with an exact id. This tool never activates assets.',
+    description: '[Experimental] Explicitly inspect, save, validate, or replay one reusable automation draft. Use search first. Full recipe/source is returned only for action=get with an exact id. This tool never activates assets. ' + COMPLIANCE_NOTICE,
     parameters: {
       action: { type: 'string', required: true, enum: ['get', 'save', 'validate', 'test'] },
       id: { type: 'string', description: 'Exact asset id for get, update, or validate.' },
@@ -170,7 +214,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_automation_run',
-    description: '[Experimental] Run one manually activated reusable automation by id. Search first. Source and recipe internals remain Host-side; provide declared inputs and a target HTTP(S) URL.',
+    description: '[Experimental] Run one manually activated reusable automation by id. Search first. Source and recipe internals remain Host-side; provide declared inputs and a target HTTP(S) URL. ' + COMPLIANCE_NOTICE,
     parameters: {
       id: { type: 'string', required: true }, url: { type: 'string', required: true },
       inputs: { type: 'object', additionalProperties: true, description: 'Declared string inputs used by named recipe placeholders.' },
@@ -194,12 +238,13 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_open',
-    description: 'Open a URL in the persistent browser page and return the rendered title, readable text, and a full-page screenshot path. Use this to start a multi-step browsing session.',
+    description: 'Open a URL in the persistent browser page and return the rendered title, readable text, and a full-page screenshot path. Optional bounded capture stores console messages and failed/4xx/5xx requests in memory without bodies or headers. ' + COMPLIANCE_NOTICE,
     parameters: {
       url: { type: 'string', required: true, description: 'The HTTP(S) URL to open.' },
       waitMs: { type: 'number', description: 'Extra settle time in ms after load.' },
       authProfile: { type: 'string', description: 'Named, domain-scoped auth profile from dsh-browser config.' },
       rulePack: { type: 'string', description: 'Named, domain-scoped enhancement rule pack.' },
+      capture: { type: 'array', items: { type: 'string', enum: ['console', 'network'] }, description: 'Optional in-memory capture channels for this navigation. Records are capped and reset on the next open.' },
     },
     output: {
       schema: {
@@ -217,15 +262,16 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     timeoutMs: 60_000,
     isConcurrencySafe: () => false,
     async execute(args) {
-      return service.open(args.url, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {}, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {} })
+      return service.open(args.url, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {}, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {}, ...args.capture ? { capture: args.capture as ('console' | 'network')[] } : {} })
     },
   }))
 
   register(defineTool({
     name: 'browser_click',
-    description: 'Click a CSS selector on the current browser page, then return the updated page state. Use after browser_open to follow links or press buttons.',
+    description: 'Click a CSS selector or structured Playwright locator on the current browser page, then return the updated page state. ' + COMPLIANCE_NOTICE,
     parameters: {
-      selector: { type: 'string', required: true, description: 'CSS selector of the element to click.' },
+      selector: { type: 'string', description: 'CSS selector of the element to click. Omit when locator is provided.' },
+      locator: LOCATOR_SCHEMA,
     },
     output: {
       schema: {
@@ -243,15 +289,16 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
     async execute(args) {
-      return service.click(args.selector)
+      return service.click(toolTarget(args)!)
     },
   }))
 
   register(defineTool({
     name: 'browser_type',
-    description: 'Type text into an input/textarea (CSS selector) on the current browser page, then return the page state. Use to fill search boxes and forms.',
+    description: 'Type text into an input/textarea selected by CSS or a structured Playwright locator, then return the page state. ' + COMPLIANCE_NOTICE,
     parameters: {
-      selector: { type: 'string', required: true, description: 'CSS selector of the input/textarea to fill.' },
+      selector: { type: 'string', description: 'CSS selector of the input/textarea. Omit when locator is provided.' },
+      locator: LOCATOR_SCHEMA,
       text: { type: 'string', required: true, description: 'Text to type.' },
     },
     output: {
@@ -270,15 +317,84 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
     async execute(args) {
-      return service.type(args.selector, args.text)
+      return service.type(toolTarget(args)!, args.text)
     },
   }))
 
   register(defineTool({
-    name: 'browser_hover',
-    description: 'Hover a CSS selector on the current browser page and return the updated state. Use for hover menus, tooltips, and controls that reveal content without a click.',
+    name: 'browser_wait',
+    description: 'Wait for one locator state, URL pattern, network idle, or a bounded amount of time on the active page. ' + COMPLIANCE_NOTICE,
     parameters: {
-      selector: { type: 'string', required: true, description: 'CSS selector of the element to hover.' },
+      selector: { type: 'string', description: 'CSS selector to wait for. Omit when locator or another wait mode is provided.' },
+      locator: LOCATOR_SCHEMA,
+      state: { type: 'string', enum: ['visible', 'hidden', 'attached', 'detached'], description: 'Locator state. Defaults to visible.' },
+      urlPattern: { type: 'string', description: 'Playwright URL glob to wait for.' },
+      networkIdle: { type: 'boolean', description: 'Set true to wait for networkidle.' },
+      timeMs: { type: 'number', description: 'Fixed delay from 0 to 10,000 ms.' },
+      timeoutMs: { type: 'number', description: 'Condition timeout from 0 to 30,000 ms. Default 15,000.' },
+    },
+    output: { schema: INTERACTIVE_OUTPUT_SCHEMA, render: (_args, value) => renderState(value as InteractiveState) },
+    timeoutMs: 35_000,
+    isConcurrencySafe: () => false,
+    async execute(args) {
+      const target = toolTarget(args, false)
+      return service.wait(target, {
+        ...args.state ? { state: args.state } : {}, ...args.urlPattern ? { urlPattern: args.urlPattern } : {},
+        ...args.networkIdle !== undefined ? { networkIdle: args.networkIdle } : {}, ...args.timeMs !== undefined ? { timeMs: args.timeMs } : {},
+        ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {},
+      })
+    },
+  }))
+
+  register(defineTool({
+    name: 'browser_press',
+    description: 'Press a key globally or on a CSS/semantic locator in the active page. ' + COMPLIANCE_NOTICE,
+    parameters: {
+      selector: { type: 'string', description: 'Optional CSS target. Omit for a global keyboard press or when locator is provided.' },
+      locator: LOCATOR_SCHEMA,
+      key: { type: 'string', required: true, description: 'Playwright key such as Enter, ArrowDown, or Control+Enter.' },
+      timeoutMs: { type: 'number', description: 'Target timeout from 1 to 30,000 ms.' },
+    },
+    output: { schema: INTERACTIVE_OUTPUT_SCHEMA, render: (_args, value) => renderState(value as InteractiveState) },
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => false,
+    async execute(args) { return service.press(toolTarget(args, false), args.key, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {} }) },
+  }))
+
+  register(defineTool({
+    name: 'browser_select',
+    description: 'Select one or more values in a dropdown selected by CSS or a semantic locator. ' + COMPLIANCE_NOTICE,
+    parameters: {
+      selector: { type: 'string', description: 'CSS selector. Omit when locator is provided.' }, locator: LOCATOR_SCHEMA,
+      values: { type: 'array', required: true, items: { type: 'string' }, description: 'One to 20 option values.' },
+      timeoutMs: { type: 'number', description: 'Target timeout from 1 to 30,000 ms.' },
+    },
+    output: { schema: INTERACTIVE_OUTPUT_SCHEMA, render: (_args, value) => renderState(value as InteractiveState) },
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => false,
+    async execute(args) { return service.select(toolTarget(args)!, args.values, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {} }) },
+  }))
+
+  register(defineTool({
+    name: 'browser_check',
+    description: 'Check or uncheck a checkbox or radio control selected by CSS or a semantic locator. ' + COMPLIANCE_NOTICE,
+    parameters: {
+      selector: { type: 'string', description: 'CSS selector. Omit when locator is provided.' }, locator: LOCATOR_SCHEMA,
+      checked: { type: 'boolean', description: 'True to check, false to uncheck. Defaults to true.' },
+      timeoutMs: { type: 'number', description: 'Target timeout from 1 to 30,000 ms.' },
+    },
+    output: { schema: INTERACTIVE_OUTPUT_SCHEMA, render: (_args, value) => renderState(value as InteractiveState) },
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => false,
+    async execute(args) { return service.check(toolTarget(args)!, args.checked ?? true, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {} }) },
+  }))
+
+  register(defineTool({
+    name: 'browser_hover',
+    description: 'Hover a CSS selector or semantic locator on the current browser page and return the updated state. ' + COMPLIANCE_NOTICE,
+    parameters: {
+      selector: { type: 'string', description: 'CSS selector of the element to hover. Omit when locator is provided.' },
+      locator: LOCATOR_SCHEMA,
       waitMs: { type: 'number', description: 'Settle time after hovering, from 0 to the tool timeout. Default 300 ms.' },
     },
     output: {
@@ -291,14 +407,15 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) { return service.hover(args.selector, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {} }) },
+    async execute(args) { return service.hover(toolTarget(args)!, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {} }) },
   }))
 
   register(defineTool({
     name: 'browser_set_files',
-    description: 'Set one or more existing local files on a file-input CSS selector in the current page. Paths must be absolute regular files; the tool reads them for upload but does not modify them. Approval discloses the requested paths unless automationMode=unrestricted.',
+    description: 'Set one or more existing local files on a file-input CSS selector in the current page. Paths must be absolute regular files; the tool reads them for upload but does not modify them. Approval discloses the requested paths unless automationMode=unrestricted. ' + COMPLIANCE_NOTICE,
     parameters: {
-      selector: { type: 'string', required: true, description: 'CSS selector of an input[type=file] element.' },
+      selector: { type: 'string', description: 'CSS selector of an input[type=file] element. Omit when locator is provided.' },
+      locator: LOCATOR_SCHEMA,
       files: { type: 'array', required: true, items: { type: 'string' }, description: 'One to 20 absolute local file paths, with at most 512 MiB total size.' },
     },
     output: {
@@ -315,15 +432,15 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) { return service.setFiles(args.selector, args.files) },
+    async execute(args) { return service.setFiles(toolTarget(args)!, args.files) },
   }))
 
   register(defineTool({
     name: 'browser_evaluate',
-    description: 'Evaluate one bounded JavaScript expression in the current page and return capped JSON. It runs with the page origin and login state, so it can read or mutate the DOM, access non-HttpOnly cookies/storage, and issue requests allowed by the browser. Use it according to the target site rules; dsh-browser does not decide whether a site action is permitted. It has no Node.js or direct host-filesystem access, and downloads are not persisted by this tool.',
+    description: 'Evaluate one bounded JavaScript expression in the current page and return capped JSON. It runs with the page origin and login state, so it can read or mutate the DOM, access non-HttpOnly cookies/storage, and issue requests allowed by the browser. It has no Node.js or direct host-filesystem access, and downloads are not persisted by this tool. ' + COMPLIANCE_NOTICE,
     parameters: {
       expression: { type: 'string', required: true, description: 'A JavaScript expression up to 20,000 characters. The resolved value must be JSON-serializable.' },
-      timeoutMs: { type: 'number', description: 'Execution timeout from 1,000 to 30,000 ms. Default 15,000; timeout closes the active page.' },
+      timeoutMs: { type: 'number', description: 'Execution timeout from 1,000 to 30,000 ms. Default 15,000; Chromium page execution is terminated while the page remains open.' },
     },
     output: {
       schema: {
@@ -343,8 +460,43 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
   }))
 
   register(defineTool({
+    name: 'browser_console',
+    description: 'Return bounded, redacted console records captured since the latest browser_open with capture=[console]. Records stay in memory and omit console argument objects. ' + COMPLIANCE_NOTICE,
+    parameters: {
+      level: { type: 'string', enum: ['debug', 'log', 'info', 'warning', 'error'], description: 'Minimum severity. Defaults to debug.' },
+      limit: { type: 'number', description: 'Return the newest 1 to 200 records. Default 100.' },
+      clear: { type: 'boolean', description: 'Clear captured records after reading.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: {
+      enabled: { type: 'boolean', required: true }, records: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+        type: { type: 'string', required: true }, text: { type: 'string', required: true }, url: { type: 'string' }, timestamp: { type: 'string', required: true },
+      } } },
+    } }, render: (_args, value) => [{ type: 'text', text: value.enabled ? (value.records.map(record => `[${record.type}] ${record.text}${record.url ? ` (${record.url})` : ''}`).join('\n') || 'No captured console messages.') : 'Console capture is disabled; reopen with capture=[console].' }] },
+    timeoutMs: 10_000,
+    isConcurrencySafe: () => true,
+    async execute(args) { return service.consoleMessages(args) },
+  }))
+
+  register(defineTool({
+    name: 'browser_requests',
+    description: 'Return bounded, redacted failed and HTTP 4xx/5xx requests captured since the latest browser_open with capture=[network]. Request/response bodies and headers are never recorded. ' + COMPLIANCE_NOTICE,
+    parameters: {
+      limit: { type: 'number', description: 'Return the newest 1 to 200 records. Default 100.' },
+      clear: { type: 'boolean', description: 'Clear captured records after reading.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: {
+      enabled: { type: 'boolean', required: true }, records: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+        method: { type: 'string', required: true }, url: { type: 'string', required: true }, status: { type: 'number' }, failure: { type: 'string' }, timestamp: { type: 'string', required: true },
+      } } },
+    } }, render: (_args, value) => [{ type: 'text', text: value.enabled ? (value.records.map(record => `${record.method} ${record.status ?? 'FAILED'} ${record.url}${record.failure ? ` — ${record.failure}` : ''}`).join('\n') || 'No failed or HTTP 4xx/5xx requests captured.') : 'Network capture is disabled; reopen with capture=[network].' }] },
+    timeoutMs: 10_000,
+    isConcurrencySafe: () => true,
+    async execute(args) { return service.networkRequests(args) },
+  }))
+
+  register(defineTool({
     name: 'browser_scroll',
-    description: 'Scroll the current browser page vertically by deltaY pixels (positive = down) to trigger lazy loading, then return the page state.',
+    description: 'Scroll the current browser page vertically by deltaY pixels (positive = down) to trigger lazy loading, then return the page state. ' + COMPLIANCE_NOTICE,
     parameters: {
       deltaY: { type: 'number', description: 'Pixels to scroll; positive scrolls down. Default 2000.' },
     },
@@ -394,8 +546,18 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_screenshot',
-    description: 'Capture a full-page screenshot of the current browser page and return the file path.',
-    parameters: {},
+    description: 'Capture the page, a bounded region, or a CSS/semantic locator. Files always land inside the configured snapshotDir under a plain caller-supplied filename or an autogenerated name. ' + COMPLIANCE_NOTICE,
+    parameters: {
+      selector: { type: 'string', description: 'Optional CSS selector. Omit when locator is provided.' },
+      locator: LOCATOR_SCHEMA,
+      clip: { type: 'object', additionalProperties: false, properties: {
+        x: { type: 'number', required: true }, y: { type: 'number', required: true }, width: { type: 'number', required: true }, height: { type: 'number', required: true },
+      } },
+      fullPage: { type: 'boolean', description: 'Capture the full scrollable page. Defaults to true for page screenshots; incompatible with selector/locator.' },
+      format: { type: 'string', enum: ['png', 'jpeg'], description: 'Image format. Defaults from filename or png.' },
+      quality: { type: 'number', description: 'JPEG quality from 0 to 100.' },
+      filename: { type: 'string', description: 'Plain filename only, ending in .png, .jpg, or .jpeg. Directory traversal and absolute paths are rejected.' },
+    },
     output: {
       schema: {
         type: 'object',
@@ -408,8 +570,14 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute() {
-      return service.screenshot()
+    async execute(args) {
+      const target = toolTarget(args, false)
+      return service.screenshot({
+        ...target ? { target } : {},
+        ...args.clip ? { clip: args.clip } : {}, ...args.fullPage !== undefined ? { fullPage: args.fullPage } : {},
+        ...args.format ? { format: args.format } : {}, ...args.quality !== undefined ? { quality: args.quality } : {},
+        ...args.filename ? { filename: args.filename } : {},
+      })
     },
   }))
 
@@ -605,7 +773,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_script_run_builtin',
-    description: 'Run one trusted built-in read-only script in a fresh Playwright context and return bounded JSON. Supports named AuthProfile and RulePack selection.',
+    description: 'Run one trusted built-in read-only script in a fresh Playwright context and return bounded JSON. Supports named AuthProfile and RulePack selection. ' + COMPLIANCE_NOTICE,
     parameters: {
       url: { type: 'string', required: true },
       scriptId: { type: 'string', required: true, enum: ['article-clean', 'links', 'jsonld', 'forms'] },
@@ -628,7 +796,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_userscript_run',
-    description: 'Run an externally supplied Tampermonkey/UserScript-style script in a fresh Playwright context. Approval follows automationMode (skipped only in unrestricted); target @match, source/result caps, and no-GM_* validation always apply.',
+    description: 'Run an externally supplied Tampermonkey/UserScript-style script in a fresh Playwright context. Approval follows automationMode (skipped only in unrestricted); target @match, source/result caps, and no-GM_* validation always apply. ' + COMPLIANCE_NOTICE,
     parameters: {
       url: { type: 'string', required: true },
       source: { type: 'string', required: true, description: 'Complete userscript source. Validate first. Never embed credentials or tokens.' },
@@ -651,7 +819,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_recipe_run',
-    description: 'Run a bounded Playwright recipe (max 25 named steps). Read-only steps run directly; mutating steps are denied in read-only, approved once in standard, and direct in autonomous/unrestricted.',
+    description: 'Run a bounded Playwright recipe (max 25 named steps). Read-only steps run directly; mutating steps are denied in read-only, approved once in standard, and direct in autonomous/unrestricted. ' + COMPLIANCE_NOTICE,
     parameters: {
       url: { type: 'string', description: 'Open this URL first; omit only when browser_open already established an active page.' },
       authProfile: { type: 'string' },
@@ -709,7 +877,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_crawl',
-    description: 'Crawl a bounded set of HTTP(S) pages with the configured concurrency, burst, page/depth, retry, and cooldown budgets. This is read-only and remains buffered even in unrestricted/no-approval mode. Respect site terms and robots directives.',
+    description: 'Crawl a bounded set of HTTP(S) pages with the configured concurrency, burst, page/depth, retry, and cooldown budgets. This is read-only and remains buffered even in unrestricted/no-approval mode. ' + COMPLIANCE_NOTICE,
     parameters: {
       startUrls: { type: 'array', required: true, items: { type: 'string' }, description: 'One to five starting URLs.' },
       maxPages: { type: 'number', description: 'Page budget, capped by usagePolicy.maxPagesPerRun.' },
@@ -797,7 +965,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_opencli_run',
-    description: 'Run any bundled OpenCLI adapter or browser-session command with verbatim argv. Approval is skipped only in unrestricted because commands may reuse logged-in Chrome state or perform writes. Prefer existing read-only search tools when available.',
+    description: 'Run any bundled OpenCLI adapter or browser-session command with verbatim argv. Approval is skipped only in unrestricted because commands may reuse logged-in Chrome state or perform writes. Prefer existing read-only search tools when available. ' + COMPLIANCE_NOTICE,
     parameters: {
       args: { type: 'array', required: true, items: { type: 'string' }, description: 'Arguments after opencli, e.g. ["browser","work","state"] or ["reddit","search","dsh","-f","json"].' },
       profile: { type: 'string', description: 'Optional OpenCLI profile alias, passed as --profile.' },
