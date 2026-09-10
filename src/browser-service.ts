@@ -99,6 +99,48 @@ export interface FileUploadResult extends InteractiveState {
   files: string[]
 }
 
+export interface BrowserFrameSpec {
+  selector?: string
+  name?: string
+  url?: string
+}
+
+export interface BrowserLocatorSpec {
+  selector?: string
+  role?: string
+  name?: string
+  text?: string
+  label?: string
+  exact?: boolean
+  frame?: BrowserFrameSpec
+}
+
+export type BrowserTarget = string | BrowserLocatorSpec
+
+export interface BrowserConsoleRecord {
+  type: string
+  text: string
+  url?: string
+  timestamp: string
+}
+
+export interface BrowserRequestRecord {
+  method: string
+  url: string
+  status?: number
+  failure?: string
+  timestamp: string
+}
+
+export interface BrowserScreenshotOptions {
+  target?: BrowserTarget
+  clip?: { x: number; y: number; width: number; height: number }
+  fullPage?: boolean
+  format?: 'png' | 'jpeg'
+  quality?: number
+  filename?: string
+}
+
 export interface CrawlPage {
   url: string
   title: string
@@ -236,6 +278,35 @@ function storageStateOptions(statePath: string | undefined, label: string, allow
   return { storageState: statePath }
 }
 
+function boundedString(value: string | undefined, label: string, max: number): string {
+  if (!value || value.length > max) throw new Error(`${label} must contain 1 to ${max} characters`)
+  return value
+}
+
+function boundedTimeout(value: number | undefined, label: string): number {
+  const resolved = value ?? 15_000
+  if (!Number.isFinite(resolved) || resolved < 1 || resolved > 30_000) throw new Error(`${label} must be between 1 and 30,000 ms`)
+  return resolved
+}
+
+function redactCaptureText(value: string, max = 2_000): string {
+  return value
+    .replace(/\b(authorization|cookie|set-cookie|password|passwd|secret|token|api[-_]?key|session[-_]?id)\b\s*[:=]\s*([^\s,;]+)/gi, '$1=[redacted]')
+    .slice(0, max)
+}
+
+function redactCaptureUrl(value: string): string {
+  try {
+    const parsed = new URL(value)
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/token|key|auth|session|cookie|password|secret/i.test(key)) parsed.searchParams.set(key, '[redacted]')
+    }
+    return parsed.toString().slice(0, 2_000)
+  } catch {
+    return redactCaptureText(value)
+  }
+}
+
 export class BrowserService {
   private browser: any
   private launching?: Promise<any>
@@ -246,6 +317,10 @@ export class BrowserService {
   private readonly authProfiles: AuthProfileStore
   private readonly usageGovernor: UsageGovernor
   private opencliCatalogCache?: OpencliCatalogItem[]
+  private captureConsoleEnabled = false
+  private captureNetworkEnabled = false
+  private capturedConsole: BrowserConsoleRecord[] = []
+  private capturedRequests: BrowserRequestRecord[] = []
 
   constructor(private readonly config: ResolvedConfig) {
     this.authProfiles = new AuthProfileStore(config.authProfiles)
@@ -672,13 +747,120 @@ export class BrowserService {
       this.activeContext = await browser.newContext(storageStateOptions(this.config.storageStatePath, 'global'))
     }
     this.activePage = await this.activeContext.newPage()
+    this.attachCapture(this.activePage)
     return this.activePage
   }
 
-  private async captureScreenshot(page: any): Promise<string> {
+  private attachCapture(page: any): void {
+    page.on('console', (message: any) => {
+      if (!this.captureConsoleEnabled) return
+      const location = message.location?.() as { url?: string } | undefined
+      this.capturedConsole.push({
+        type: String(message.type?.() ?? 'log').slice(0, 40),
+        text: redactCaptureText(String(message.text?.() ?? '')),
+        ...location?.url ? { url: redactCaptureUrl(location.url) } : {},
+        timestamp: new Date().toISOString(),
+      })
+      if (this.capturedConsole.length > 200) this.capturedConsole.splice(0, this.capturedConsole.length - 200)
+    })
+    page.on('response', (response: any) => {
+      if (!this.captureNetworkEnabled) return
+      const status = Number(response.status?.() ?? 0)
+      if (status < 400) return
+      const request = response.request?.()
+      this.capturedRequests.push({
+        method: String(request?.method?.() ?? 'GET').slice(0, 20),
+        url: redactCaptureUrl(String(response.url?.() ?? '')),
+        status,
+        timestamp: new Date().toISOString(),
+      })
+      if (this.capturedRequests.length > 200) this.capturedRequests.splice(0, this.capturedRequests.length - 200)
+    })
+    page.on('requestfailed', (request: any) => {
+      if (!this.captureNetworkEnabled) return
+      this.capturedRequests.push({
+        method: String(request.method?.() ?? 'GET').slice(0, 20),
+        url: redactCaptureUrl(String(request.url?.() ?? '')),
+        failure: redactCaptureText(String(request.failure?.()?.errorText ?? 'request failed'), 500),
+        timestamp: new Date().toISOString(),
+      })
+      if (this.capturedRequests.length > 200) this.capturedRequests.splice(0, this.capturedRequests.length - 200)
+    })
+  }
+
+  private resetCapture(capture: readonly ('console' | 'network')[] = []): void {
+    this.captureConsoleEnabled = capture.includes('console')
+    this.captureNetworkEnabled = capture.includes('network')
+    this.capturedConsole = []
+    this.capturedRequests = []
+  }
+
+  private resolveTarget(page: any, target: BrowserTarget): any {
+    if (!target || (typeof target !== 'string' && typeof target !== 'object')) throw new Error('browser target must be a selector string or locator object')
+    const spec: BrowserLocatorSpec = typeof target === 'string' ? { selector: target } : target
+    const modes = [spec.selector, spec.role, spec.text, spec.label].filter(value => value !== undefined)
+    if (modes.length !== 1) throw new Error('browser target requires exactly one of selector, role, text, or label')
+    if (spec.name !== undefined && spec.role === undefined) throw new Error('browser target name is only valid with role')
+    let root: any = page
+    if (spec.frame) {
+      const frameModes = [spec.frame.selector, spec.frame.name, spec.frame.url].filter(value => value !== undefined)
+      if (frameModes.length !== 1) throw new Error('browser frame requires exactly one of selector, name, or url')
+      if (spec.frame.selector) root = page.frameLocator(boundedString(spec.frame.selector, 'frame selector', 500))
+      else {
+        const frame = page.frame(spec.frame.name
+          ? { name: boundedString(spec.frame.name, 'frame name', 500) }
+          : { url: boundedString(spec.frame.url, 'frame url', 2_000) })
+        if (!frame) throw new Error('browser target frame was not found')
+        root = frame
+      }
+    }
+    if (spec.selector) return root.locator(boundedString(spec.selector, 'selector', 500))
+    if (spec.role) return root.getByRole(boundedString(spec.role, 'role', 100), {
+      ...spec.name !== undefined ? { name: boundedString(spec.name, 'role name', 2_000) } : {},
+      exact: spec.exact ?? false,
+    })
+    if (spec.text) return root.getByText(boundedString(spec.text, 'text locator', 2_000), { exact: spec.exact ?? false })
+    return root.getByLabel(boundedString(spec.label, 'label locator', 2_000), { exact: spec.exact ?? false })
+  }
+
+  private screenshotFile(options: BrowserScreenshotOptions): { file: string; format: 'png' | 'jpeg' } {
+    const filename = options.filename ?? `shot-${Date.now()}-${uid().slice(0, 8)}.${options.format === 'jpeg' ? 'jpg' : 'png'}`
+    if (filename !== path.basename(filename) || !/^[\w.() -]{1,160}$/.test(filename)) {
+      throw new Error('browser_screenshot filename must be a plain file name inside snapshotDir')
+    }
+    const extension = path.extname(filename).toLowerCase()
+    const inferred = extension === '.jpg' || extension === '.jpeg' ? 'jpeg' : extension === '.png' ? 'png' : undefined
+    const format = options.format ?? inferred ?? 'png'
+    if (inferred && inferred !== format) throw new Error('browser_screenshot filename extension does not match format')
+    if (!inferred) throw new Error('browser_screenshot filename must end in .png, .jpg, or .jpeg')
+    return { file: path.join(this.config.snapshotDir, filename), format }
+  }
+
+  private async captureScreenshot(page: any, options: BrowserScreenshotOptions = {}): Promise<string> {
     fs.mkdirSync(this.config.snapshotDir, { recursive: true })
-    const file = path.join(this.config.snapshotDir, 'shot-' + Date.now() + '-' + uid().slice(0, 8) + '.png')
-    await page.screenshot({ path: file, fullPage: true })
+    if (options.target && options.clip) throw new Error('browser_screenshot cannot combine target and clip')
+    if (options.target && options.fullPage) throw new Error('browser_screenshot cannot combine target and fullPage')
+    if (options.quality !== undefined && (!Number.isInteger(options.quality) || options.quality < 0 || options.quality > 100)) {
+      throw new Error('browser_screenshot quality must be an integer from 0 to 100')
+    }
+    const { file, format } = this.screenshotFile(options)
+    if (format === 'png' && options.quality !== undefined) throw new Error('browser_screenshot quality is only supported for jpeg')
+    const screenshotOptions: Record<string, unknown> = {
+      path: file,
+      type: format,
+      ...options.quality !== undefined ? { quality: options.quality } : {},
+    }
+    if (options.clip) {
+      const { x, y, width, height } = options.clip
+      if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || width > 20_000 || height > 20_000) {
+        throw new Error('browser_screenshot clip must use finite non-negative coordinates and dimensions from 1 to 20,000')
+      }
+      screenshotOptions.clip = options.clip
+    } else if (!options.target) {
+      screenshotOptions.fullPage = options.fullPage ?? true
+    }
+    if (options.target) await this.resolveTarget(page, options.target).screenshot(screenshotOptions)
+    else await page.screenshot(screenshotOptions)
     return file
   }
 
@@ -693,8 +875,9 @@ export class BrowserService {
     return state
   }
 
-  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string } = {}): Promise<InteractiveState> {
+  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string; capture?: readonly ('console' | 'network')[] } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(url, opts)
+    this.resetCapture(opts.capture)
     page.setDefaultTimeout(30_000)
     await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
@@ -703,33 +886,70 @@ export class BrowserService {
     return this.readState(page, true)
   }
 
-  async click(selector: string, opts: { timeoutMs?: number; waitMs?: number } = {}): Promise<InteractiveState> {
+  async click(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage()
-    await page.waitForSelector(selector, { timeout: opts.timeoutMs ?? 15_000 })
-    await page.click(selector)
+    await this.resolveTarget(page, target).click({ timeout: boundedTimeout(opts.timeoutMs, 'browser_click timeoutMs') })
     if (opts.waitMs !== undefined) await page.waitForTimeout(opts.waitMs)
     else await page.waitForTimeout(500)
     return this.readState(page, true)
   }
 
-  async type(selector: string, text: string, opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
+  async type(target: BrowserTarget, text: string, opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage()
-    await page.waitForSelector(selector, { timeout: opts.timeoutMs ?? 15_000 })
-    await page.fill(selector, text)
+    await this.resolveTarget(page, target).fill(text, { timeout: boundedTimeout(opts.timeoutMs, 'browser_type timeoutMs') })
     return this.readState(page, false)
   }
 
-  async hover(selector: string, opts: { timeoutMs?: number; waitMs?: number } = {}): Promise<InteractiveState> {
+  async wait(target: BrowserTarget | undefined, opts: { urlPattern?: string; networkIdle?: boolean; timeMs?: number; state?: 'visible' | 'hidden' | 'attached' | 'detached'; timeoutMs?: number } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage()
-    const timeoutMs = opts.timeoutMs ?? 15_000
+    const modes = [target !== undefined, opts.urlPattern !== undefined, opts.networkIdle === true, opts.timeMs !== undefined].filter(Boolean)
+    if (modes.length !== 1) throw new Error('browser_wait requires exactly one target, urlPattern, networkIdle=true, or timeMs')
+    const timeout = boundedTimeout(opts.timeoutMs, 'browser_wait timeoutMs')
+    if (target !== undefined) await this.resolveTarget(page, target).waitFor({ state: opts.state ?? 'visible', timeout })
+    else if (opts.urlPattern !== undefined) await page.waitForURL(boundedString(opts.urlPattern, 'urlPattern', 2_000), { timeout })
+    else if (opts.networkIdle) await page.waitForLoadState('networkidle', { timeout })
+    else {
+      const timeMs = opts.timeMs as number
+      if (!Number.isFinite(timeMs) || timeMs < 0 || timeMs > 10_000) throw new Error('browser_wait timeMs must be between 0 and 10,000')
+      await page.waitForTimeout(timeMs)
+    }
+    return this.readState(page, false)
+  }
+
+  async press(target: BrowserTarget | undefined, key: string, opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage()
+    const value = boundedString(key, 'browser_press key', 100)
+    if (target !== undefined) await this.resolveTarget(page, target).press(value, { timeout: boundedTimeout(opts.timeoutMs, 'browser_press timeoutMs') })
+    else await page.keyboard.press(value)
+    return this.readState(page, false)
+  }
+
+  async select(target: BrowserTarget, values: readonly string[], opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
+    if (values.length < 1 || values.length > 20) throw new Error('browser_select requires 1 to 20 values')
+    values.forEach(value => boundedString(value, 'browser_select value', 2_000))
+    const page = await this.ensureActivePage()
+    await this.resolveTarget(page, target).selectOption([...values], { timeout: boundedTimeout(opts.timeoutMs, 'browser_select timeoutMs') })
+    return this.readState(page, false)
+  }
+
+  async check(target: BrowserTarget, checked = true, opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage()
+    const locator = this.resolveTarget(page, target)
+    if (checked) await locator.check({ timeout: boundedTimeout(opts.timeoutMs, 'browser_check timeoutMs') })
+    else await locator.uncheck({ timeout: boundedTimeout(opts.timeoutMs, 'browser_check timeoutMs') })
+    return this.readState(page, false)
+  }
+
+  async hover(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage()
+    const timeoutMs = boundedTimeout(opts.timeoutMs, 'browser_hover timeoutMs')
     const waitMs = Math.min(Math.max(opts.waitMs ?? 300, 0), timeoutMs)
-    await page.waitForSelector(selector, { timeout: timeoutMs })
-    await page.hover(selector)
+    await this.resolveTarget(page, target).hover({ timeout: timeoutMs })
     await page.waitForTimeout(waitMs)
     return this.readState(page, true)
   }
 
-  async setFiles(selector: string, files: readonly string[], opts: { timeoutMs?: number } = {}): Promise<FileUploadResult> {
+  async setFiles(target: BrowserTarget, files: readonly string[], opts: { timeoutMs?: number } = {}): Promise<FileUploadResult> {
     if (files.length === 0 || files.length > 20) throw new Error('browser_set_files requires 1 to 20 files')
     const resolved = files.map(file => {
       if (!path.isAbsolute(file)) throw new Error('browser_set_files requires absolute file paths: ' + file)
@@ -740,8 +960,7 @@ export class BrowserService {
     const totalBytes = resolved.reduce((total, file) => total + fs.statSync(file).size, 0)
     if (totalBytes > 512 * 1024 * 1024) throw new Error('browser_set_files total upload size exceeds 512 MiB')
     const page = await this.ensureActivePage()
-    await page.waitForSelector(selector, { timeout: opts.timeoutMs ?? 15_000 })
-    await page.setInputFiles(selector, resolved)
+    await this.resolveTarget(page, target).setInputFiles(resolved, { timeout: boundedTimeout(opts.timeoutMs, 'browser_set_files timeoutMs') })
     return { ...await this.readState(page, true), files: resolved.map(file => path.basename(file)) }
   }
 
@@ -752,15 +971,30 @@ export class BrowserService {
     const page = await this.ensureActivePage()
     const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? 15_000, 1_000), 30_000)
     let timer: ReturnType<typeof setTimeout> | undefined
+    let timedOut = false
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        void this.closePage()
-        reject(new Error('browser_evaluate timed out after ' + timeoutMs + 'ms; the active page was closed'))
+        timedOut = true
+        void (async () => {
+          try {
+            const session = await page.context().newCDPSession(page)
+            try { await session.send('Runtime.terminateExecution') } finally { await session.detach().catch(() => {}) }
+            reject(new Error('browser_evaluate timed out after ' + timeoutMs + 'ms; page JavaScript was terminated and the active page remains open'))
+          } catch (error) {
+            reject(new Error('browser_evaluate timed out after ' + timeoutMs + 'ms; unable to terminate page JavaScript without closing the active page: ' + String(error).slice(0, 200)))
+          }
+        })()
       }, timeoutMs)
     })
     try {
       const script = `(async () => {\nconst value = await (${source}\n);\nconst json = JSON.stringify(value);\nif (json === undefined) throw new Error('expression result is not JSON-serializable');\nreturn { resultJson: json.slice(0, 100000), truncated: json.length > 100000 };\n})()`
-      const result = await Promise.race([page.evaluate(script), timeout]) as { resultJson: string; truncated: boolean }
+      let result: { resultJson: string; truncated: boolean }
+      try {
+        result = await Promise.race([page.evaluate(script), timeout]) as { resultJson: string; truncated: boolean }
+      } catch (error) {
+        if (timedOut) throw new Error('browser_evaluate timed out after ' + timeoutMs + 'ms; page JavaScript was terminated and the active page remains open')
+        throw error
+      }
       return {
         url: page.url(),
         resultJson: result.resultJson,
@@ -789,9 +1023,29 @@ export class BrowserService {
     return this.readState(page, false)
   }
 
-  async screenshot(): Promise<{ path: string }> {
+  consoleMessages(opts: { level?: string; limit?: number; clear?: boolean } = {}): { enabled: boolean; records: BrowserConsoleRecord[] } {
+    const severities = ['debug', 'log', 'info', 'warning', 'error']
+    const threshold = opts.level ? severities.indexOf(opts.level) : 0
+    if (opts.level && threshold < 0) throw new Error('browser_console level must be debug, log, info, warning, or error')
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100), 1), 200)
+    const records = this.capturedConsole.filter(record => {
+      const index = severities.indexOf(record.type === 'warn' ? 'warning' : record.type)
+      return index < 0 || index >= threshold
+    }).slice(-limit)
+    if (opts.clear) this.capturedConsole = []
+    return { enabled: this.captureConsoleEnabled, records }
+  }
+
+  networkRequests(opts: { limit?: number; clear?: boolean } = {}): { enabled: boolean; records: BrowserRequestRecord[] } {
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100), 1), 200)
+    const records = this.capturedRequests.slice(-limit)
+    if (opts.clear) this.capturedRequests = []
+    return { enabled: this.captureNetworkEnabled, records }
+  }
+
+  async screenshot(options: BrowserScreenshotOptions = {}): Promise<{ path: string }> {
     const page = await this.ensureActivePage()
-    return { path: await this.captureScreenshot(page) }
+    return { path: await this.captureScreenshot(page, options) }
   }
 
   async recipe(
@@ -825,6 +1079,7 @@ export class BrowserService {
     this.activeContext = undefined
     this.activeProfile = undefined
     this.activeRulePack = undefined
+    this.resetCapture()
   }
 
   async status(): Promise<BrowserStatus> {

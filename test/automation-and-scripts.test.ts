@@ -102,6 +102,9 @@ test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating reci
   assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }).kind, 'ask')
   assert.equal(browserPolicyDecision('browser_userscript_run', { source: 'alert(1)', url: 'https://example.com/' }).kind, 'deny')
   assert.equal(browserPolicyDecision('browser_hover', { selector: '#menu' }).kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_press', { key: 'Enter' }).kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_select', { selector: '#mode', values: ['b'] }).kind, 'ask')
+  assert.equal(browserPolicyDecision('browser_check', { selector: '#enabled' }).kind, 'ask')
   assert.equal(browserPolicyDecision('browser_evaluate', { expression: 'document.title' }).kind, 'ask')
   assert.equal(browserPolicyDecision('browser_set_files', { files: ['C:\\fixture.txt'] }).kind, 'ask')
   assert.equal(browserPolicyDecision('browser_set_files', { files: [] }).kind, 'deny')
@@ -112,11 +115,11 @@ test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating reci
 })
 
 test('automation modes expose predictable tool sets and retain validation when approval is disabled', () => {
-  assert.equal(ALL_BROWSER_TOOL_NAMES.length, 24)
-  assert.equal(browserToolsForMode('read-only').length, 14)
-  assert.equal(browserToolsForMode('standard').length, 24)
-  assert.equal(browserToolsForMode('autonomous').length, 24)
-  assert.equal(browserToolsForMode('unrestricted').length, 24)
+  assert.equal(ALL_BROWSER_TOOL_NAMES.length, 30)
+  assert.equal(browserToolsForMode('read-only').length, 17)
+  assert.equal(browserToolsForMode('standard').length, 30)
+  assert.equal(browserToolsForMode('autonomous').length, 30)
+  assert.equal(browserToolsForMode('unrestricted').length, 30)
   assert.equal(browserToolsForMode('read-only').includes('browser_userscript_run'), false)
   assert.equal(browserToolsForMode('read-only').includes('browser_recipe_run'), true)
   assert.equal(browserToolsForMode('read-only').includes('browser_automation_search'), true)
@@ -186,9 +189,14 @@ test('runNode passes argv containing spaces verbatim without shell quoting', asy
 
 test('real Playwright runtime executes built-ins, recipes, and a scoped userscript', async () => {
   const snapshotDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-snapshot-'))
-  const server = http.createServer((_request, response) => {
+  const server = http.createServer((request, response) => {
+    if (request.url?.startsWith('/missing')) {
+      response.writeHead(403, { 'content-type': 'text/plain' })
+      response.end('forbidden')
+      return
+    }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    response.end('<!doctype html><title>Fixture</title><style>#menu .panel{display:none}#menu:hover .panel{display:inline}</style><main><h1>Hello DSH</h1><p id="copy">Browser automation fixture.</p><div id="menu">Menu <span class="panel">Revealed</span></div><input id="upload" type="file" onchange="document.querySelector(\'#selected\').textContent=this.files[0]?.name||\'\'"><p id="selected"></p><a href="/next">Next</a></main>')
+    response.end('<!doctype html><title>Fixture</title><style>#menu .panel{display:none}#menu:hover .panel{display:inline}</style><main><h1>Hello DSH</h1><p id="copy">Browser automation fixture.</p><div id="menu">Menu <span class="panel">Revealed</span></div><label>Search terms <input id="query" onkeydown="if(event.key===\'Enter\')document.querySelector(\'#pressed\').textContent=\'pressed\'"></label><button aria-label="Run search" onclick="document.querySelector(\'#clicked\').textContent=\'clicked\'">Run</button><p id="pressed"></p><p id="clicked"></p><label>Mode <select id="mode" aria-label="Mode"><option value="a">A</option><option value="b">B</option></select></label><label><input id="enabled" type="checkbox"> Enabled</label><input id="upload" type="file" onchange="document.querySelector(\'#selected\').textContent=this.files[0]?.name||\'\'"><p id="selected"></p><iframe id="frame" srcdoc="<label>Frame input <input id=frame-input></label>"></iframe><a href="/next">Next</a><script>console.error(\'token=fixture-secret failed\'); fetch(\'/missing?token=fixture-secret\').catch(()=>{})</script></main>')
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
@@ -201,6 +209,7 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     headless: true,
     opencliEnabled: true,
     authProfiles: { bootstrap: { storageStatePath: bootstrapStatePath, allowedDomains: ['127.0.0.1'], persistState: true } },
+    snapshotDir,
     autoInstall: false,
     verbose: false,
   }))
@@ -221,8 +230,19 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     assert.equal(JSON.parse(external.resultJson).heading, 'Hello DSH')
     assert.equal(JSON.parse(external.resultJson).input, 'runtime-only')
 
-    await service.open(url)
-    const hovered = await service.hover('#menu', { waitMs: 0 })
+    await service.open(url, { capture: ['console', 'network'] })
+    await service.wait({ text: 'Hello DSH', exact: true })
+    await service.type({ label: 'Search terms', exact: true }, 'semantic value')
+    await service.press({ label: 'Search terms', exact: true }, 'Enter')
+    await service.wait({ text: 'pressed', exact: true })
+    await service.click({ role: 'button', name: 'Run search', exact: true })
+    await service.wait({ text: 'clicked', exact: true })
+    await service.select({ label: 'Mode', exact: true }, ['b'])
+    await service.check({ label: 'Enabled', exact: true })
+    await service.type({ label: 'Frame input', exact: true, frame: { selector: '#frame' } }, 'inside frame')
+    const iframeValue = await service.evaluate(`document.querySelector('#frame').contentDocument.querySelector('#frame-input').value`)
+    assert.equal(JSON.parse(iframeValue.resultJson), 'inside frame')
+    const hovered = await service.hover({ text: 'Menu', exact: false }, { waitMs: 0 })
     assert.match(hovered.text, /Revealed/)
     const uploadPath = path.join(snapshotDir, 'fixture.txt')
     fs.writeFileSync(uploadPath, 'upload fixture', 'utf8')
@@ -241,6 +261,24 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     assert.match(evaluated.warnings.join(' '), /non-HttpOnly cookies|site rules|filesystem/)
     const capped = await service.evaluate(`'x'.repeat(100001)`)
     assert.equal(capped.truncated, true)
+    await assert.rejects(() => service.evaluate('new Promise(() => {})', { timeoutMs: 1_000 }), /active page remains open/)
+    assert.match((await service.read()).text, /Hello DSH/)
+
+    await new Promise(resolve => setTimeout(resolve, 100))
+    const consoleRecords = service.consoleMessages()
+    assert.equal(consoleRecords.enabled, true)
+    assert.match(consoleRecords.records.map(record => record.text).join(' '), /token=\[redacted\]/)
+    const requestRecords = service.networkRequests()
+    assert.equal(requestRecords.enabled, true)
+    assert.equal(requestRecords.records.some(record => record.status === 403), true)
+    assert.equal(requestRecords.records.some(record => record.url.includes('fixture-secret')), false)
+
+    const elementShot = await service.screenshot({ target: { role: 'button', name: 'Run search', exact: true }, filename: 'button.png' })
+    assert.equal(path.dirname(elementShot.path), snapshotDir)
+    assert.equal(fs.existsSync(elementShot.path), true)
+    const regionShot = await service.screenshot({ clip: { x: 0, y: 0, width: 64, height: 64 }, fullPage: false, filename: 'region.jpg', format: 'jpeg', quality: 70 })
+    assert.equal(fs.existsSync(regionShot.path), true)
+    await assert.rejects(() => service.screenshot({ filename: '../escape.png' }), /plain file name/)
 
     const assetStore = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory: path.join(snapshotDir, 'automations'), persistenceMode: 'manual' }))
     const draft = assetStore.saveDraft({ kind: 'userscript', name: 'Reusable heading reader', domains: ['127.0.0.1'], inputNames: ['query'], source: VALID_SCRIPT })
@@ -270,17 +308,18 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     assert.ok(catalog.length > 0 && catalog.length <= 5)
     assert.ok(catalog.every(item => item.site === 'reddit'))
 
+    const pngBeforeSnapshot = fs.readdirSync(snapshotDir).filter(file => file.endsWith('.png'))
     const snapshot = await service.snapshot(url, [], { outDir: snapshotDir, screenshot: false } as never)
     assert.equal(snapshot.screenshotPath, undefined)
     assert.equal(fs.existsSync(snapshot.htmlPath), true)
-    assert.deepEqual(fs.readdirSync(snapshotDir).filter(file => file.endsWith('.png')), [])
+    assert.deepEqual(fs.readdirSync(snapshotDir).filter(file => file.endsWith('.png')), pngBeforeSnapshot)
 
     const status = await service.status()
     assert.equal(status.browserRuntime, 'playwright')
     assert.equal(status.usagePolicy.maxPagesPerRun, 20)
     assert.equal(status.usageGovernor.totalRuns > 0, true)
     assert.equal(status.automationMode, 'standard')
-    assert.equal(status.exposedTools.length, 24)
+    assert.equal(status.exposedTools.length, 30)
     assert.equal(status.directInteractionPolicy, 'ask')
     assert.equal(status.pageEvaluatePolicy, 'ask')
     assert.equal(status.fileUploadPolicy, 'ask')

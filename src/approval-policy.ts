@@ -9,7 +9,7 @@ export type BrowserPolicyDecision =
   | { kind: 'deny'; reason: string }
   | { kind: 'ask'; reason: string }
 
-const DIRECT_INTERACTIONS = new Set(['browser_click', 'browser_type', 'browser_hover', 'browser_scroll'])
+const DIRECT_INTERACTIONS = new Set(['browser_click', 'browser_type', 'browser_press', 'browser_select', 'browser_check', 'browser_hover', 'browser_scroll'])
 const WEB_LOCAL_MUTATIONS = new Set(['web_cache_clear'])
 
 export function browserPolicyDecision(name: string, args: unknown, mode: AutomationMode = 'standard'): BrowserPolicyDecision {

@@ -43,15 +43,17 @@ dsh plugin --profile web add @anweat/dsh-browser@next dsh-web-search-pro@next
 ## 快速使用与适用情形
 
 安装并重启后，可先让模型调用 `browser_status`，再按任务选择工具。默认
-`automationMode: standard`：读取直接执行，点击、输入、悬停、文件上传及页面写操作走 DSH 原生一次性审批。页面脚本和本地文件上传在 `autonomous` 下仍需审批，只有 `unrestricted` 会跳过确认。
+`automationMode: standard`：读取直接执行，点击、输入、按键、选择、勾选、悬停、文件上传及页面写操作走 DSH 原生一次性审批。页面脚本和本地文件上传在 `autonomous` 下仍需审批，只有 `unrestricted` 会跳过确认。
 
 | 情形 | 推荐方式 | 关键边界 |
 |---|---|---|
 | 公开网页读取、截图 | `browser_open` → `browser_read` / `browser_screenshot` | 不需要登录态 |
-| 表单、分页、懒加载 | `browser_click` / `browser_type` / `browser_scroll` | `standard` 下审批；`autonomous` 下可直接执行 |
+| 表单、分页、懒加载 | `browser_click` / `browser_type` / `browser_press` / `browser_select` / `browser_check` / `browser_scroll` | CSS 或 role/text/label 语义定位；`standard` 下审批 |
+| SPA 条件等待 | `browser_wait` | 支持 locator、URL glob、networkidle 或最多 10 秒固定等待 |
 | 悬停菜单与提示 | `browser_hover` | 与直接页面交互使用相同审批策略 |
 | 文件上传 | `browser_set_files` | 只接受现有绝对文件路径；最多 20 个、合计 512 MiB；除 `unrestricted` 外审批会显示路径 |
 | 页面脚本表达式 | `browser_evaluate` | 使用当前页面来源和登录态；可访问 DOM、非 HttpOnly Cookie、Web Storage 和浏览器允许的网络 API |
+| 页面故障排查 | `browser_open(capture=[console,network])` → `browser_console` / `browser_requests` | 只在内存保留最多 200 条；网络仅记录失败及 4xx/5xx，不记录 body/header |
 | 登录后站点 | `authProfile` | 必须配置 `allowedDomains`；默认不回写 Cookie |
 | 固定站点增强 | `rulePack` | 只允许有界步骤；本地 init script 必须 SHA-256 固定且 ≤64KB |
 | 模型生成的多步操作 | `browser_recipe_run` | 声明式步骤；审批策略由 `automationMode` 决定 |
@@ -60,6 +62,8 @@ dsh plugin --profile web add @anweat/dsh-browser@next dsh-web-search-pro@next
 | 有限站点遍历 | `browser_crawl` | 页数、深度、并发、突发与退避始终受 `usagePolicy` 约束 |
 | Reddit/小红书等 OpenCLI 平台 | `browser_opencli_status` → `browser_opencli_catalog` → `browser_opencli_run` | 先发现精确 adapter；通用调用除 `unrestricted` 外需审批 |
 | 普通站点兼容性不佳 | `browserRuntime: patchright` | Chromium-only；建议专用 Chrome profile，不与指纹注入库叠加 |
+
+所有网页访问、交互、脚本、Cookie 使用、上传和下载都必须由调用方或操作者根据目标网站规则及适用要求判断并使用。插件只执行被请求或批准的浏览器操作，不判断具体用途是否获得网站授权，也不承担调用方的合规责任。限流、审批、域名和文件边界用于约束执行面，不能替代目标网站规则。
 
 DSH 会话示例：
 
@@ -106,19 +110,25 @@ export function apply(ctx: Context) {
 
 `unrestricted` 会允许模型直接运行外部脚本、通用 CLI 和安装命令，只应在隔离的测试 profile 或明确授权的自动化环境中使用；日常 profile 保持 `standard`。它只取消人工确认，**不会取消 `usagePolicy` 的并发、突发、页数、深度、重试与冷却保护**。模式改变后需要重启 DSH profile，工具目录才会按新配置重新注册。
 
-## 工具（最多 24 个）
+## 工具（最多 30 个）
 
 | 工具 | 作用 |
 |---|---|
-| `browser_open` | 打开 URL，返回标题/可读文本/全页截图路径（持久页会话） |
-| `browser_click` | 按 CSS 选择器点击 |
-| `browser_type` | 向 input/textarea 输入 |
-| `browser_hover` | 悬停 CSS 选择器并返回页面状态与截图 |
+| `browser_open` | 打开 URL，返回标题/可读文本/全页截图路径；可显式启用 console/network 内存捕获 |
+| `browser_click` | 按 CSS 或结构化 Playwright locator 点击 |
+| `browser_type` | 向 CSS 或语义定位的 input/textarea 输入 |
+| `browser_wait` | 等待 locator 状态、URL glob、networkidle 或固定时间 |
+| `browser_press` | 对 locator 或全局键盘发送按键 |
+| `browser_select` | 按 locator 选择一个或多个 option value |
+| `browser_check` | 按 locator 勾选或取消勾选控件 |
+| `browser_hover` | 悬停 CSS 或语义 locator 并返回页面状态与截图 |
 | `browser_set_files` | 把现有本地文件设置到 `input[type=file]`；绝对路径、数量和总大小受限 |
 | `browser_evaluate` | 在当前页执行最长 20,000 字符的 JavaScript 表达式，返回最多 100,000 字符 JSON |
+| `browser_console` | 读取本次显式捕获的脱敏 console 记录 |
+| `browser_requests` | 读取本次显式捕获的失败及 HTTP 4xx/5xx 请求；无 body/header |
 | `browser_scroll` | 纵向滚动（触发懒加载） |
 | `browser_read` | 读当前页 URL/标题/文本（不截图） |
-| `browser_screenshot` | 当前页全页截图 |
+| `browser_screenshot` | 当前页、locator 或区域截图；普通文件名固定落在 `snapshotDir` |
 | `browser_close` | 关闭当前页（下次 open 全新） |
 | `browser_status` | 运行时状态（含 automationMode、已暴露工具及各类审批策略） |
 | `browser_install` | 安装 playwright chromium（`browser_status` 报缺失时执行一次） |
@@ -205,14 +215,15 @@ return [...document.querySelectorAll('.result')].slice(0, 20).map(card => ({
 - 使用显式 URL，新建独立 Playwright context；需要登录态时只能选已限域的 `authProfile`。
 - 审批代表允许该脚本以当前站点登录身份操作页面；静态能力报告只用于解释，不是沙箱。
 
-`browser_evaluate` 是面向当前持久页的短表达式入口，不使用 UserScript 元数据。它能调用页面已有 JavaScript、读取或修改 DOM、访问非 HttpOnly Cookie 和 Web Storage，也能通过 `fetch` 等浏览器 API 发起页面来源允许的请求。插件会明确报告这些能力，但不会判断具体网站是否允许该访问；调用方应根据目标网站规则及适用要求使用并承担相应责任，插件只执行被批准的浏览器操作。表达式没有 Node.js 全局对象或直接主机文件系统权限，结果必须可 JSON 序列化，超时会关闭当前页以终止执行。需要可复用、可审阅的脚本时仍使用 UserScript 资产流程。
+`browser_evaluate` 是面向当前持久页的短表达式入口，不使用 UserScript 元数据。它能调用页面已有 JavaScript、读取或修改 DOM、访问非 HttpOnly Cookie 和 Web Storage，也能通过 `fetch` 等浏览器 API 发起页面来源允许的请求。插件会明确报告这些能力，但不会判断具体网站是否允许该访问；调用方应根据目标网站规则及适用要求使用并承担相应责任，插件只执行被批准的浏览器操作。表达式没有 Node.js 全局对象或直接主机文件系统权限，结果必须可 JSON 序列化；超时会通过 Chromium DevTools 终止页面 JavaScript，保留当前 page/context 供后续读取或导航。需要可复用、可审阅的脚本时仍使用 UserScript 资产流程。
 
 ## Cookie 与文件落盘
 
 - `authProfile` 从配置的 `storageStatePath` 载入 Cookie、localStorage 等登录态。只有 `persistState: true` 才在 context 关闭时原子回写该文件；全局兼容路径默认不会被交互会话改写。
 - `browser_evaluate` 可读取 `document.cookie`，因此能看到当前来源的非 HttpOnly Cookie；浏览器不会向页面 JavaScript 暴露 HttpOnly Cookie。除 `unrestricted` 外，每次执行都需要确认。
 - `browser_set_files` 只读取调用中列出的绝对路径并交给当前页面上传控件，不修改源文件，也不会遍历目录。除 `unrestricted` 外，即使在 `autonomous` 模式也需要确认。
-- `browser_screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；持久登录态只写配置的状态文件。`browser_evaluate` 触发的浏览器下载不会由该工具保存或返回，下载落盘需要后续单独设计显式目录和文件名规则。
+- `browser_screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；自定义截图名只允许普通文件名，拒绝绝对路径、目录分隔符和 `..`。持久登录态只写配置的状态文件。`browser_evaluate` 触发的浏览器下载不会由该工具保存或返回，下载落盘需要后续单独设计显式目录和文件名规则。
+- console/network 捕获必须由 `browser_open.capture` 显式启用，只在内存保留最多 200 条；记录文本和 URL 查询中的常见 token/cookie/password 字段会脱敏，网络只保留方法、URL、失败原因或 4xx/5xx 状态，不保存 header/body。
 
 常见读取任务优先用内置脚本：`article-clean`、`links`、`jsonld`、`forms`。它们不返回表单当前值，
 也不触发点击或网络写操作。
