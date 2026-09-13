@@ -335,9 +335,36 @@ export class BrowserService {
     if (!this.config.enabled) throw new Error('dsh-browser: browser service is disabled')
   }
 
+  private browserConnected(browser = this.browser): boolean {
+    return !!browser && (typeof browser.isConnected !== 'function' || browser.isConnected())
+  }
+
+  private clearActiveState(): void {
+    this.activeContext = undefined
+    this.activePage = undefined
+    this.activeProfile = undefined
+    this.activeRulePack = undefined
+    this.resetCapture()
+  }
+
+  private handleBrowserDisconnected(browser: any): void {
+    // A late event from an older process must not invalidate its replacement.
+    if (this.browser !== browser) return
+    this.browser = undefined
+    this.launching = undefined
+    this.clearActiveState()
+  }
+
+  private trackBrowser(browser: any): any {
+    this.browser = browser
+    browser.on?.('disconnected', () => this.handleBrowserDisconnected(browser))
+    return browser
+  }
+
   private async ensure(): Promise<any> {
     this.assertEnabled()
-    if (this.browser) return this.browser
+    if (this.browserConnected()) return this.browser
+    if (this.browser) this.handleBrowserDisconnected(this.browser)
     if (!this.launching) {
       this.launching = (async () => {
         const pw = loadBrowserRuntime(this.config.browserRuntime)
@@ -345,13 +372,13 @@ export class BrowserService {
         if (this.config.channel) launchOptions.channel = this.config.channel
         if (this.config.executablePath) launchOptions.executablePath = this.config.executablePath
         try {
-          this.browser = await pw.chromium.launch(launchOptions)
+          return this.trackBrowser(await pw.chromium.launch(launchOptions))
         } catch (error) {
           const msg = String(error)
           if (/Executable doesn't exist|playwright install|not found/i.test(msg)) {
             if (this.config.autoInstall) {
               await this.installChromium()
-              this.browser = await pw.chromium.launch(launchOptions)
+              return this.trackBrowser(await pw.chromium.launch(launchOptions))
             } else {
               throw new Error('dsh-browser: chromium is not installed for ' + this.config.browserRuntime + '. Run the browser_install tool, or: node "' + browserRuntimeCliPath(this.config.browserRuntime) + '" install chromium')
             }
@@ -359,13 +386,14 @@ export class BrowserService {
             throw error
           }
         }
-        return this.browser
-      })().catch((error: unknown) => {
-        this.launching = undefined
-        throw error
-      })
+      })()
     }
-    return this.launching
+    const launching = this.launching
+    try {
+      return await launching
+    } finally {
+      if (this.launching === launching) this.launching = undefined
+    }
   }
 
   /** Run `playwright install chromium` from the bundled playwright CLI. */
@@ -392,14 +420,24 @@ export class BrowserService {
   }
 
   private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack }> {
-    const browser = await this.ensure()
     const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
     const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
     const stateOptions = profile
       ? storageStateOptions(profile.storageStatePath, `auth profile ${profile.id}`, profile.persistState)
       : (!opts.anonymous ? storageStateOptions(this.config.storageStatePath, 'global') : {})
-    const context = await browser.newContext(stateOptions)
+    let context: any
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const browser = await this.ensure()
+      try {
+        context = await browser.newContext(stateOptions)
+        break
+      } catch (error) {
+        if (attempt > 0 || this.browserConnected(browser)) throw error
+        this.handleBrowserDisconnected(browser)
+      }
+    }
+    if (!context) throw new Error('dsh-browser: browser context could not be created after reconnecting')
     try {
       if (rulePack?.initScriptPath) await context.addInitScript({ path: rulePack.initScriptPath })
     } catch (error) {
@@ -412,7 +450,15 @@ export class BrowserService {
   private async persistAndClose(session: { context: any; profile?: ResolvedAuthProfile }): Promise<void> {
     try {
       if (session.profile?.persistState) {
-        const state = await session.context.storageState()
+        let state: unknown
+        try {
+          state = await session.context.storageState()
+        } catch (error) {
+          // A crashed browser cannot provide state. Filesystem failures below
+          // still propagate so failed persistence is never reported as success.
+          if (/target page, context or browser has been closed|browser has been closed|browser disconnected/i.test(String(error))) return
+          throw error
+        }
         fs.mkdirSync(path.dirname(session.profile.storageStatePath), { recursive: true })
         const temporary = session.profile.storageStatePath + '.tmp-' + uid().slice(0, 8)
         fs.writeFileSync(temporary, JSON.stringify(state, null, 2), { encoding: 'utf8', mode: 0o600 })
@@ -728,6 +774,7 @@ export class BrowserService {
   // ── interactive surface (one persistent context + page) ──────────────────
 
   private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string } = {}): Promise<any> {
+    if (this.activePage && (this.activePage.isClosed() || !this.browserConnected())) await this.closePage()
     if (this.activePage && !this.activePage.isClosed()) {
       if (!targetUrl) return this.activePage
       if ((opts.authProfile ?? this.config.defaultAuthProfile) === this.activeProfile?.id && opts.rulePack === this.activeRulePack?.id) {
@@ -752,6 +799,15 @@ export class BrowserService {
   }
 
   private attachCapture(page: any): void {
+    const release = () => {
+      if (this.activePage !== page) return
+      const context = this.activeContext
+      const profile = this.activeProfile
+      this.clearActiveState()
+      if (context) void this.persistAndClose({ context, ...profile ? { profile } : {} }).catch(() => {})
+    }
+    page.on('close', release)
+    page.on('crash', release)
     page.on('console', (message: any) => {
       if (!this.captureConsoleEnabled) return
       const location = message.location?.() as { url?: string } | undefined
@@ -1073,13 +1129,12 @@ export class BrowserService {
   }
 
   async closePage(): Promise<void> {
-    if (this.activePage) { await this.activePage.close().catch(() => {}) }
-    this.activePage = undefined
-    if (this.activeContext) await this.persistAndClose({ context: this.activeContext, ...this.activeProfile ? { profile: this.activeProfile } : {} })
-    this.activeContext = undefined
-    this.activeProfile = undefined
-    this.activeRulePack = undefined
-    this.resetCapture()
+    const page = this.activePage
+    const context = this.activeContext
+    const profile = this.activeProfile
+    this.clearActiveState()
+    if (page) await page.close().catch(() => {})
+    if (context) await this.persistAndClose({ context, ...profile ? { profile } : {} })
   }
 
   async status(): Promise<BrowserStatus> {
@@ -1137,8 +1192,8 @@ export class BrowserService {
       builtinScripts: BUILTIN_SCRIPTS.map(script => script.id),
       externalUserscriptsRequireApproval: ['standard', 'autonomous'].includes(this.config.automationMode),
       mutatingRecipesRequireApproval: this.config.automationMode === 'standard',
-      ...(this.activePage && !this.activePage.isClosed() ? { activeUrl: this.activePage.url() } : {}),
-      ...this.activeProfile ? { activeAuthProfile: this.activeProfile.id } : {},
+      ...(this.browserConnected() && this.activePage && !this.activePage.isClosed() ? { activeUrl: this.activePage.url() } : {}),
+      ...(this.browserConnected() && this.activePage && !this.activePage.isClosed() && this.activeProfile ? { activeAuthProfile: this.activeProfile.id } : {}),
     }
   }
 

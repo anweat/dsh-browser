@@ -20,7 +20,7 @@ import { AutomationAssetStore } from './automation-assets.ts'
 import { registerAutomationAssetRpc } from './automation-assets-rpc.ts'
 
 export const name = 'dsh-browser'
-export const inject = ['tools']
+export const inject = ['tools', 'settings']
 
 export { Config }
 export type { Config as BrowserConfig } from './config.ts'
@@ -37,26 +37,20 @@ export { ASSET_PERSISTENCE_MODES, ASSET_ACTIVATION_MODES, resolveAutomationAsset
 
 export function apply(ctx: Context, config: Config): void {
   const deployed: ResolvedConfig = resolveConfig(config)
-  let resolveSource: () => Config = () => deployed
-  ctx.inject(['settings'], (settingsCtx) => {
-    const settings = settingsCtx.settings as unknown as {
-      register?: (
-        ns: string,
-        schema: typeof Config,
-        options?: { base?: ResolvedConfig; applies?: string },
-      ) => { get: () => Config }
-    }
-    if (typeof settings?.register === 'function') {
-      const scope = settings.register('browser', Config, {
-        base: deployed,
-        // Browser processes, tool exposure, and approval hooks are deliberately
-        // startup-scoped. The next full profile start reads the persisted layer.
-        applies: 'restart',
-      })
-      resolveSource = () => scope.get()
-    }
+  const settings = ctx.settings as unknown as {
+    register: (
+      ns: string,
+      schema: typeof Config,
+      options?: { base?: ResolvedConfig; applies?: string },
+    ) => { get: () => Config }
+  }
+  const scope = settings.register('browser', Config, {
+    base: deployed,
+    // Browser processes, tool exposure, and approval hooks are deliberately
+    // startup-scoped. The next full profile start reads the persisted layer.
+    applies: 'restart',
   })
-  const resolved: ResolvedConfig = resolveConfig(resolveSource())
+  const resolved: ResolvedConfig = resolveConfig(scope.get())
   fs.mkdirSync(resolved.snapshotDir, { recursive: true })
 
   const service = new BrowserService(resolved)

@@ -198,6 +198,10 @@ export declare class BrowserService {
     constructor(config: ResolvedConfig);
     available(): boolean;
     private assertEnabled;
+    private browserConnected;
+    private clearActiveState;
+    private handleBrowserDisconnected;
+    private trackBrowser;
     private ensure;
     /** Run `playwright install chromium` from the bundled playwright CLI. */
     installChromium(): Promise<CliResult>;

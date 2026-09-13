@@ -361,6 +361,45 @@ test('real Patchright runtime is selectable and executes a trusted script', asyn
   }
 })
 
+test('browser service clears stale interactive state and relaunches after disconnect', async () => {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    response.end('<!doctype html><title>Recovery</title><main><h1>Recovered browser</h1></main>')
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('fixture server did not expose a TCP port')
+  const url = `http://127.0.0.1:${address.port}/`
+  const service = new BrowserService(resolveConfig({
+    channel: 'chromium', headless: true, opencliEnabled: false, autoInstall: false, verbose: false,
+  }))
+  const runtime = service as unknown as { browser?: { close(): Promise<void> }; activePage?: { close(): Promise<void> } }
+  try {
+    await service.open(url)
+    const firstBrowser = runtime.browser
+    assert.ok(firstBrowser)
+    await firstBrowser.close()
+    await new Promise(resolve => setTimeout(resolve, 25))
+    const disconnected = await service.status()
+    assert.equal(disconnected.activeUrl, undefined)
+    assert.equal(disconnected.activeAuthProfile, undefined)
+
+    const reopened = await service.open(url)
+    assert.match(reopened.text, /Recovered browser/)
+    assert.notEqual(runtime.browser, firstBrowser)
+
+    const page = runtime.activePage
+    assert.ok(page)
+    await page.close()
+    await new Promise(resolve => setTimeout(resolve, 25))
+    assert.equal((await service.status()).activeUrl, undefined)
+    assert.match((await service.open(url)).text, /Recovered browser/)
+  } finally {
+    await service.close()
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  }
+})
+
 test('bounded crawl backs off and retries a real 429 response', async () => {
   let requests = 0
   const observedCookies: string[] = []
