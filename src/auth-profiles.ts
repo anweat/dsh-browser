@@ -10,7 +10,7 @@ export interface ResolvedAuthProfile extends AuthProfileConfig {
   persistState: boolean
 }
 
-function hostAllowed(hostname: string, domains: readonly string[]): boolean {
+export function hostAllowed(hostname: string, domains: readonly string[]): boolean {
   const host = hostname.toLowerCase().replace(/\.$/, '')
   return domains.some(value => {
     const domain = value.toLowerCase().trim().replace(/^\*\./, '').replace(/\.$/, '')

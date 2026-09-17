@@ -22,6 +22,7 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
+    "AUDIT.md",
     "scripts",
     "LICENSE"
   ],

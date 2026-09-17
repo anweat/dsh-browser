@@ -1,5 +1,7 @@
 # dsh-browser
 
+本地整合候选的修复、工具清单与安全边界见 [AUDIT.md](AUDIT.md)。`allowedDomains` 只限制认证状态装载，不是网络防火墙或 Agent 隔离边界。
+
 自包含的浏览器运行时插件 for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）。
 
 把 **Playwright / Patchright（可选 Chromium 驱动）** 与 **OpenCLI** 作为插件自身的 npm 依赖打包（优先插件本地，缺省回退全局复用），对外提供一个 `browser` 服务 + 一组交互式浏览器工具。`dsh-web-search-pro` 通过 `inject: ['browser']` 注入该服务，驱动它的浏览器 / OpenCLI 后端——**不再依赖全局 CLI**。

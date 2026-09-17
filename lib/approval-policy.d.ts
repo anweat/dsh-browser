@@ -9,4 +9,4 @@ export type BrowserPolicyDecision = {
     kind: 'ask';
     reason: string;
 };
-export declare function browserPolicyDecision(name: string, args: unknown, mode?: AutomationMode): BrowserPolicyDecision;
+export declare function browserPolicyDecision(name: string, args: unknown, mode?: AutomationMode, assetKind?: 'recipe' | 'userscript'): BrowserPolicyDecision;

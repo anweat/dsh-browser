@@ -8,6 +8,7 @@ export interface ResolvedAuthProfile extends AuthProfileConfig {
     id: string;
     persistState: boolean;
 }
+export declare function hostAllowed(hostname: string, domains: readonly string[]): boolean;
 export declare class AuthProfileStore {
     private readonly profiles;
     constructor(profiles?: Record<string, AuthProfileConfig>);
