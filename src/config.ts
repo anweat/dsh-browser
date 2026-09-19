@@ -54,6 +54,10 @@ export interface Config {
   /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
   snapshotDir?: string
   verbose: boolean
+  /** Optional remote debugging port to expose CDP for external tools (e.g. 9222). */
+  cdpPort?: number
+  /** Additional Chromium CLI launch arguments. */
+  args?: string[]
 }
 
 export const Config: z<Config> = z.object({
@@ -117,6 +121,8 @@ export const Config: z<Config> = z.object({
   autoInstall: z.boolean().default(false),
   snapshotDir: z.string(),
   verbose: z.boolean().default(false),
+  cdpPort: z.number().description('Optional remote debugging port to expose CDP for external tools (e.g. 9222)'),
+  args: z.array(z.string()).default([]).description('Additional Chromium CLI launch arguments'),
 }) as z<Config>
 
 export interface ResolvedConfig {
@@ -136,6 +142,8 @@ export interface ResolvedConfig {
   autoInstall: boolean
   snapshotDir: string
   verbose: boolean
+  cdpPort?: number
+  args: string[]
 }
 
 export function defaultSnapshotDir(): string {
@@ -159,6 +167,8 @@ export function resolveConfig(config: Config): ResolvedConfig {
     verbose: config.verbose ?? false,
     authProfiles: config.authProfiles ?? {},
     rulePacks: config.rulePacks ?? {},
+    args: Array.isArray(config.args) ? config.args.map(String) : [],
+    ...config.cdpPort !== undefined ? { cdpPort: config.cdpPort } : {},
     ...config.defaultAuthProfile ? { defaultAuthProfile: config.defaultAuthProfile } : {},
     ...config.storageStatePath !== undefined && config.storageStatePath !== '' ? { storageStatePath: config.storageStatePath } : {},
     ...config.executablePath !== undefined && config.executablePath !== '' ? { executablePath: config.executablePath } : {},
