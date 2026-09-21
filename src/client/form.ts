@@ -4,7 +4,7 @@ import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 export type SettingField =
   | 'enabled' | 'automationMode' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
   | 'usagePolicy' | 'automationAssets' | 'autoInstall' | 'storageStatePath' | 'authProfiles' | 'defaultAuthProfile'
-  | 'rulePacks' | 'executablePath' | 'snapshotDir' | 'verbose'
+  | 'rulePacks' | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'args'
 
 export interface CardFieldState {
   text: string
@@ -46,6 +46,30 @@ const enumField = (field: SettingField, values: readonly string[]): FieldSpec =>
   field,
   format: value => typeof value === 'string' ? value : values[0] ?? '',
   parse: text => values.includes(text) ? { kind: 'set', value: text } : undefined,
+})
+
+const integerField = (field: SettingField, min: number, max: number): FieldSpec => ({
+  field,
+  format: value => typeof value === 'number' && Number.isInteger(value) ? String(value) : '',
+  parse(text) {
+    if (text.trim() === '') return { kind: 'clear' }
+    const value = Number(text)
+    return Number.isInteger(value) && value >= min && value <= max ? { kind: 'set', value } : undefined
+  },
+})
+
+const stringArrayField = (field: SettingField): FieldSpec => ({
+  field,
+  format: value => Array.isArray(value) ? JSON.stringify(value, null, 2) : '',
+  parse(text) {
+    if (text.trim() === '') return { kind: 'clear' }
+    try {
+      const value = JSON.parse(text) as unknown
+      return Array.isArray(value) && value.every(entry => typeof entry === 'string')
+        ? { kind: 'set', value }
+        : undefined
+    } catch { return undefined }
+  },
 })
 
 const jsonField = (field: SettingField, validate?: (value: Record<string, unknown>) => boolean): FieldSpec => ({
@@ -100,6 +124,8 @@ export const FIELD_SPECS: readonly FieldSpec[] = [
   enumField('automationMode', ['read-only', 'standard', 'autonomous', 'unrestricted']),
   enumField('browserRuntime', ['playwright', 'patchright']),
   textField('channel'),
+  integerField('cdpPort', 1, 65_535),
+  stringArrayField('args'),
   booleanField('headless'),
   booleanField('opencliEnabled'),
   jsonField('usagePolicy', validUsagePolicy),
