@@ -53,6 +53,10 @@ test('config schema and resolveConfig support cdpPort and args', () => {
   assert.equal(parsed.cdpPort, 9222)
   assert.deepEqual(parsed.args, ['--no-sandbox', '--disable-gpu'])
 
+  for (const invalidPort of [0, -1, 65_536, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => Config({ cdpPort: invalidPort }), TypeError)
+  }
+
   const resolved = resolveConfig({
     enabled: true,
     channel: 'chromium',
