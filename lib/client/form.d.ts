@@ -1,6 +1,6 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client';
-export type SettingField = 'enabled' | 'automationMode' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled' | 'usagePolicy' | 'automationAssets' | 'autoInstall' | 'storageStatePath' | 'authProfiles' | 'defaultAuthProfile' | 'rulePacks' | 'executablePath' | 'snapshotDir' | 'verbose';
+export type SettingField = 'enabled' | 'automationMode' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled' | 'usagePolicy' | 'automationAssets' | 'autoInstall' | 'storageStatePath' | 'authProfiles' | 'defaultAuthProfile' | 'rulePacks' | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'args';
 export interface CardFieldState {
     text: string;
     overridden: boolean;

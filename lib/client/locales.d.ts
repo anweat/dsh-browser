@@ -21,6 +21,10 @@ export declare const zh: {
     readonly browserRuntimeHint: "Patchright 仅支持 Chromium。";
     readonly channel: "浏览器通道";
     readonly channelHint: "chromium、chrome 或 msedge。Patchright 推荐 chrome。";
+    readonly cdpPort: "CDP 调试端口";
+    readonly cdpPortHint: "可选的本机远程调试端口（1–65535）；留空即关闭。";
+    readonly args: "Chromium 启动参数 JSON";
+    readonly argsHint: "可选字符串数组；仅添加你信任并理解其影响的参数。";
     readonly headless: "无头模式";
     readonly headlessHint: "Patchright 兼容性最佳配置通常是关闭无头模式。";
     readonly opencliEnabled: "启用 OpenCLI";
