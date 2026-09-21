@@ -42,6 +42,10 @@ export interface Config {
     /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
     snapshotDir?: string;
     verbose: boolean;
+    /** Optional remote debugging port to expose CDP for external tools (e.g. 9222). */
+    cdpPort?: number;
+    /** Additional Chromium CLI launch arguments. */
+    args?: string[];
 }
 export declare const Config: z<Config>;
 export interface ResolvedConfig {
@@ -61,6 +65,8 @@ export interface ResolvedConfig {
     autoInstall: boolean;
     snapshotDir: string;
     verbose: boolean;
+    cdpPort?: number;
+    args: string[];
 }
 export declare function defaultSnapshotDir(): string;
 export declare function resolveConfig(config: Config): ResolvedConfig;

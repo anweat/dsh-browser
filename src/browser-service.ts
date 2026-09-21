@@ -371,6 +371,13 @@ export class BrowserService {
         const launchOptions: Record<string, unknown> = { headless: this.config.headless }
         if (this.config.channel) launchOptions.channel = this.config.channel
         if (this.config.executablePath) launchOptions.executablePath = this.config.executablePath
+        const args: string[] = [...(this.config.args ?? [])]
+        if (this.config.cdpPort) {
+          args.push(`--remote-debugging-port=${this.config.cdpPort}`)
+        }
+        if (args.length > 0) {
+          launchOptions.args = args
+        }
         try {
           return this.trackBrowser(await pw.chromium.launch(launchOptions))
         } catch (error) {
