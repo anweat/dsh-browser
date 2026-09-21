@@ -24,7 +24,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { browserRuntimeCliPath, loadBrowserRuntime, opencliEntryPath, runOpencli, runNode, type CliResult } from './deps.ts'
 import type { ResolvedConfig } from './config.ts'
-import { AuthProfileStore, type ResolvedAuthProfile } from './auth-profiles.ts'
+import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
 import { runRecipe, type BrowserRecipeStep, type RecipeStepResult } from './automation.ts'
 import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
@@ -427,17 +427,27 @@ export class BrowserService {
   }
 
   private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack }> {
+    if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
     const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
     const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
     const stateOptions = profile
       ? storageStateOptions(profile.storageStatePath, `auth profile ${profile.id}`, profile.persistState)
       : (!opts.anonymous ? storageStateOptions(this.config.storageStatePath, 'global') : {})
+    let scopedState: unknown
+    if (profile && stateOptions.storageState) {
+      const state = JSON.parse(fs.readFileSync(stateOptions.storageState, 'utf8'))
+      scopedState = {
+        cookies: (state.cookies ?? []).filter((cookie: { domain: string }) => hostAllowed(cookie.domain.replace(/^\./, ''), profile.allowedDomains)),
+        origins: (state.origins ?? []).filter((origin: { origin: string }) => hostAllowed(new URL(origin.origin).hostname, profile.allowedDomains)),
+      }
+    }
+    const contextOptions = { ...stateOptions, ...(scopedState ? { storageState: scopedState } : {}) }
     let context: any
     for (let attempt = 0; attempt < 2; attempt++) {
       const browser = await this.ensure()
       try {
-        context = await browser.newContext(stateOptions)
+        context = await browser.newContext(contextOptions)
         break
       } catch (error) {
         if (attempt > 0 || this.browserConnected(browser)) throw error
@@ -739,6 +749,8 @@ export class BrowserService {
       await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
+      const finalValidation = validateUserscript(source, page.url())
+      if (!finalValidation.valid) throw new Error('userscript redirected outside its allowed match: ' + finalValidation.errors.join('; '))
       const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? 15_000, 1_000), 30_000)
       const timeout = new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {
@@ -781,6 +793,7 @@ export class BrowserService {
   // ── interactive surface (one persistent context + page) ──────────────────
 
   private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string } = {}): Promise<any> {
+    if (targetUrl && !['http:', 'https:'].includes(new URL(targetUrl).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
     if (this.activePage && (this.activePage.isClosed() || !this.browserConnected())) await this.closePage()
     if (this.activePage && !this.activePage.isClosed()) {
       if (!targetUrl) return this.activePage

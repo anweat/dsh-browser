@@ -12,7 +12,7 @@ export type BrowserPolicyDecision =
 const DIRECT_INTERACTIONS = new Set(['browser_click', 'browser_type', 'browser_press', 'browser_select', 'browser_check', 'browser_hover', 'browser_scroll'])
 const WEB_LOCAL_MUTATIONS = new Set(['web_cache_clear'])
 
-export function browserPolicyDecision(name: string, args: unknown, mode: AutomationMode = 'standard'): BrowserPolicyDecision {
+export function browserPolicyDecision(name: string, args: unknown, mode: AutomationMode = 'standard', assetKind?: 'recipe' | 'userscript'): BrowserPolicyDecision {
   if (!isBrowserToolExposed(name, mode) && name.startsWith('browser_')) {
     return { kind: 'deny', reason: `Browser tool ${name} is disabled by automationMode=${mode}` }
   }
@@ -74,7 +74,7 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
   }
   if (name === 'browser_automation_run') {
     if (mode === 'read-only') return { kind: 'deny', reason: `Reusable automation execution is disabled by automationMode=${mode}` }
-    if (mode === 'autonomous' || mode === 'unrestricted') return { kind: 'allow' }
+    if (mode === 'unrestricted' || (mode === 'autonomous' && assetKind === 'recipe')) return { kind: 'allow' }
     return { kind: 'ask', reason: 'Run an active reusable browser automation asset' }
   }
   if (name === 'browser_automation_develop') {

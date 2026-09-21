@@ -48,7 +48,8 @@ export function validateRecipe(steps: readonly BrowserRecipeStep[]): void {
   for (const step of steps) {
     switch (step.type) {
       case 'wait': {
-        finite(step.timeoutMs, 15_000, 0, 30_000, 'wait timeoutMs')
+        if (!['selector', 'text', 'load', 'time'].includes(step.condition)) throw new Error('unsupported wait condition')
+        finite(step.timeoutMs, 15_000, 1, 30_000, 'wait timeoutMs')
         if (step.condition === 'selector') selector(step.value)
         else if (step.condition === 'text') shortText(step.value, 'wait text', 2_000)
         else if (step.condition === 'time') finite(step.waitMs ?? Number(step.value ?? 0), 0, 0, 10_000, 'wait waitMs')
@@ -121,7 +122,7 @@ export async function runRecipe(
     let value: string | undefined
     switch (step.type) {
       case 'wait': {
-        const timeout = finite(step.timeoutMs, 15_000, 0, 30_000, 'wait timeoutMs')
+        const timeout = finite(step.timeoutMs, 15_000, 1, 30_000, 'wait timeoutMs')
         if (step.condition === 'selector') await page.locator(selector(step.value)).first().waitFor({ state: 'visible', timeout })
         else if (step.condition === 'text') await page.getByText(shortText(step.value, 'wait text', 2_000), { exact: false }).first().waitFor({ state: 'visible', timeout })
         else if (step.condition === 'load') await page.waitForLoadState('networkidle', { timeout })

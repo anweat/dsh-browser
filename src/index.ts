@@ -61,7 +61,10 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('tools/pre-execute', async (exec, next) => {
     const downstream = await next()
     if (downstream.kind !== 'allow') return downstream
-    return browserPolicyDecision(exec.name, exec.arguments, resolved.automationMode)
+    const assetId = (exec.arguments as { id?: unknown })?.id
+    const assetKind = exec.name === 'browser_automation_run' && typeof assetId === 'string'
+      ? assets.get(assetId)?.kind : undefined
+    return browserPolicyDecision(exec.name, exec.arguments, resolved.automationMode, assetKind)
   })
 
   // Provide the `browser` service so consumers (web-search-pro) can inject it.

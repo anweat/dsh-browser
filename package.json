@@ -1,6 +1,6 @@
 {
   "name": "@anweat/dsh-browser",
-  "version": "0.1.14-alpha.2",
+  "version": "0.1.15-alpha.1",
   "description": "Self-contained browser runtime plugin for DeepSeek Harness (scoped @anweat) — bundles Playwright (chromium) and OpenCLI as plugin-local dependencies (with global-reuse fallback), exposes a `browser` service and interactive browser tools.",
   "license": "MIT",
   "type": "module",
@@ -22,6 +22,7 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
+    "AUDIT.md",
     "scripts",
     "LICENSE"
   ],
@@ -86,7 +87,7 @@
     }
   },
   "dependencies": {
-    "@jackwener/opencli": "^1.8.6",
+    "@jackwener/opencli": "^1.8.7",
     "patchright": "^1.62.1",
     "playwright": "^1.60.0"
   },
