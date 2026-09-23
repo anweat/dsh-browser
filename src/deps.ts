@@ -139,6 +139,26 @@ export function opencliEntryPath(): string {
   return path.join(dir, bin)
 }
 
+/** Electron's process.execPath points to the desktop app, not a Node CLI. */
+function nodeExecutable(env: NodeJS.ProcessEnv): string | undefined {
+  const override = env.DSH_BROWSER_NODE?.trim()
+  if (override) return override
+  if (/(?:^|[/\\])node(?:\.exe)?$/i.test(process.execPath)) return process.execPath
+
+  const searchPath = env.PATH ?? env.Path ?? env.path ?? ''
+  const delimiter = process.platform === 'win32' ? ';' : ':'
+  const filename = process.platform === 'win32' ? 'node.exe' : 'node'
+  for (const entry of searchPath.split(delimiter)) {
+    const dir = entry.trim().replace(/^"|"$/g, '')
+    if (!dir) continue
+    const candidate = path.join(dir, filename)
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate
+    } catch { /* try next PATH entry */ }
+  }
+  return undefined
+}
+
 /**
  * Run a Node.js script with piped stdio capture (bundled opencli / playwright
  * CLI). Mirrors web-search-pro's runCli contract.
@@ -148,6 +168,15 @@ export function runNode(
   args: string[],
   opts: { timeoutMs?: number; signal: AbortSignal | undefined; maxOutput?: number; cwd?: string; env?: Record<string, string> } = { signal: undefined },
 ): Promise<CliResult> {
+  const env = { ...process.env, ...opts.env }
+  const executable = nodeExecutable(env)
+  if (!executable) {
+    return Promise.resolve({
+      code: -1, stdout: '',
+      stderr: 'dsh-browser: Node.js executable not found; install Node.js or set DSH_BROWSER_NODE to its full path',
+      timedOut: false,
+    })
+  }
   return new Promise((resolve) => {
     const maxOutput = opts.maxOutput ?? 4 * 1024 * 1024
     let stdout = ''
@@ -170,15 +199,18 @@ export function runNode(
     timer = opts.timeoutMs ? setTimeout(() => finish(-1, true), opts.timeoutMs) : undefined
     // spawn() is used without a shell, so argv must be passed verbatim. Adding
     // shell quotes here would make those quote characters part of the value.
-    child = spawn(process.execPath, [script, ...args], {
-      env: { ...process.env, ...opts.env },
+    child = spawn(executable, [script, ...args], {
+      env,
       cwd: opts.cwd,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     child.stdout?.on('data', (d: Buffer) => { if (stdout.length < maxOutput) stdout += d.toString('utf8') })
     child.stderr?.on('data', (d: Buffer) => { if (stderr.length < maxOutput) stderr += d.toString('utf8') })
-    child.on('error', () => finish(-1, false))
+    child.on('error', (error) => {
+      stderr += 'dsh-browser: failed to start Node.js: ' + error.message
+      finish(-1, false)
+    })
     child.on('close', (code) => finish(code ?? -1, false))
     if (opts.signal?.aborted) onAbort()
     else opts.signal?.addEventListener('abort', onAbort)

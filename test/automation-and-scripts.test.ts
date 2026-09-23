@@ -189,6 +189,49 @@ test('runNode passes argv containing spaces verbatim without shell quoting', asy
   }
 })
 
+test('runNode uses real Node when hosted by Electron', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-electron-'))
+  const fakeElectron = path.join(dir, 'DSH Desktop')
+  const script = path.join(dir, 'output.mjs')
+  const originalExecPath = Object.getOwnPropertyDescriptor(process, 'execPath')!
+  fs.writeFileSync(fakeElectron, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  fs.writeFileSync(script, 'process.stdout.write("node script ran")', 'utf8')
+  try {
+    Object.defineProperty(process, 'execPath', { ...originalExecPath, value: fakeElectron })
+    const result = await runNode(script, [], { signal: undefined, timeoutMs: 5_000 })
+    assert.equal(result.code, 0)
+    assert.equal(result.stdout, 'node script ran')
+  } finally {
+    Object.defineProperty(process, 'execPath', originalExecPath)
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runNode resolves node.exe from Windows PATH and reports a missing Node', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-win-node-'))
+  const script = path.join(dir, 'output.mjs')
+  const nodeExe = path.join(dir, 'node.exe')
+  const originalExecPath = Object.getOwnPropertyDescriptor(process, 'execPath')!
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
+  fs.writeFileSync(script, 'process.stdout.write("windows node ran")', 'utf8')
+  fs.symlinkSync(process.execPath, nodeExe)
+  try {
+    Object.defineProperty(process, 'execPath', { ...originalExecPath, value: path.join(dir, 'DSH Desktop.exe') })
+    Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' })
+    const found = await runNode(script, [], { signal: undefined, timeoutMs: 5_000, env: { PATH: dir } })
+    assert.equal(found.code, 0)
+    assert.equal(found.stdout, 'windows node ran')
+
+    const missing = await runNode(script, [], { signal: undefined, env: { PATH: '' } })
+    assert.equal(missing.code, -1)
+    assert.match(missing.stderr, /Node\.js executable not found.*DSH_BROWSER_NODE/)
+  } finally {
+    Object.defineProperty(process, 'execPath', originalExecPath)
+    Object.defineProperty(process, 'platform', originalPlatform)
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('real Playwright runtime executes built-ins, recipes, and a scoped userscript', async () => {
   const snapshotDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-snapshot-'))
   const server = http.createServer((request, response) => {

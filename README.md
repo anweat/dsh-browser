@@ -11,9 +11,9 @@
 | 插件发布通道 | DSH 基线 | 兼容承诺 |
 |---|---|---|
 | npm `latest`（`0.1.12`） | `dsh-v0.1.1-rc.2` 至 `dsh-v0.1.2-rc.1` | 已验证维护基线 |
-| npm `next` 候选（`0.1.13-alpha.1`） | `dsh-v0.1.5-alpha.1` | 精确依赖与真实 profile 验收目标 |
+| npm `next` 候选（`0.1.15-alpha.2`） | `dsh-v0.1.5-alpha.1` | 精确依赖与真实 profile 验收目标 |
 
-`0.1.13-alpha.1` 使用 DSH 新客户端分包：状态存储来自
+`0.1.15-alpha.2` 使用 DSH 新客户端分包：状态存储来自
 `dsh-client-store`，设置契约来自 `dsh-client-ui-settings`，客户端 Context
 来自 Cordis。该候选不会覆盖 npm `latest`。
 
@@ -345,6 +345,8 @@ opencli doctor
 ```
 
 健康状态应同时包含 daemon running、extension connected 和一个 connected Chrome profile。仅安装 npm 包不等于 Browser Bridge 可用；Chrome 扩展断开时，OpenCLI 社区搜索会明确失败，而普通 Playwright 浏览器工具不受影响。
+
+在 DSH Desktop（Electron）中，插件会从 `PATH` 查找真正的 Node.js 可执行文件来运行内置 OpenCLI 和浏览器运行时 CLI。若 `browser_opencli_status` 报告找不到 Node.js，可在启动 DSH Desktop 的环境中设置 `DSH_BROWSER_NODE` 为 `node.exe` 的绝对路径，然后重启 Desktop。
 
 插件内先调用 `browser_opencli_status`，不要只看 `browser_status.opencliEnabled`。后者表示配置开关，
 前者才是真实连接。通用调用以 argv 数组传入，不经过 shell，也不会自行拼接引号：
