@@ -19,8 +19,12 @@
 
 启动期设置解析对宿主版本自适应：旧宿主仍提供 `settings.register(ns, schema, opts)`
 时沿用 live scope；`dsh-v0.1.7-rc.2` 起移除了该方法，设置页改由 Loader 条目的
-`Config` schema 直接派生，插件改为读取宿主注入的条目配置。因此同一份构建可跨上述
-两个基线运行，不会因 `settings.register is not a function` 中止 fiber。
+`Config` schema 直接派生，插件改为读取宿主注入的条目配置。
+
+浏览器设置卡片则只适配 `dsh-v0.1.7-rc.2`：`SettingsScope`/`ctx.settingsScope`
+（≤ `dsh-v0.1.5-alpha.1`）与 `ConfigForm`/`ctx.configForms`（`dsh-v0.1.7-rc.2`+）
+是互斥的客户端契约，没有一份源码能同时编译两者，因此 `devDependencies` 锁定
+`0.1.7-rc.2`。Host 半边的自适应是优雅降级，不是受支持目标。
 
 ## 安装
 
