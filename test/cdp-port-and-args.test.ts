@@ -46,10 +46,12 @@ test('config schema and resolveConfig support cdpPort and args', () => {
   assert.equal(defaults.cdpPort, undefined)
   assert.deepEqual(defaults.args, [])
 
-  const parsed = Config({
+  // Configurable fields are `.volatile()`, so the schema result carries live
+  // references; `resolveConfig` is the boundary that normalizes them.
+  const parsed = resolveConfig(Config({
     cdpPort: 9222,
     args: ['--no-sandbox', '--disable-gpu'],
-  })
+  }) as unknown as Config)
   assert.equal(parsed.cdpPort, 9222)
   assert.deepEqual(parsed.args, ['--no-sandbox', '--disable-gpu'])
 

@@ -56,27 +56,37 @@ test('real browser handles primitives and hidden uploads; redirects cannot expan
   }
 })
 
-test('asset API validates envelopes and unregisters every exact route', async () => {
-  const routes = new Map<string, any>(); const disposers: (() => void)[] = []
+test('asset API registers its own channel and never intercepts the shared one', async () => {
+  let channel: string | undefined
+  let handler: any
+  const disposers: (() => void)[] = []
   const ctx: any = {
     inject(_names: unknown, setup: (ctx: unknown) => void) { setup(ctx) },
     effect(setup: () => () => void) { disposers.push(setup()) },
-    connection: { fetch: { register(route: any) {
-      assert.equal(routes.has(route.path), false); routes.set(route.path, route)
-      return () => { routes.delete(route.path) }
-    } } },
+    connection: { rpc: {
+      handle(ch: string, h: unknown) {
+        channel = ch; handler = h
+        return async () => { channel = undefined; handler = undefined }
+      },
+      // Registering on `/api` anyway would replace the shared channel's
+      // fallback and 404 every other plugin's endpoint, so fail loudly here.
+      intercept() { throw new Error('must not intercept the shared /api channel') },
+    } },
   }
   registerAutomationAssetRpc(ctx, { snapshot: () => ({ assets: [] }) } as never, {} as never)
-  assert.equal(routes.size, 8)
-  const route = routes.get('/api/dsh-browser-assets/snapshot')
-  const request = (body: unknown) => route.fetch(new Request('http://localhost/api/dsh-browser-assets/snapshot', { method: 'POST', body: JSON.stringify(body) }))
-  const invalid = await request({ method: 'wrong' })
-  assert.equal(invalid.status, 200)
-  assert.equal((await invalid.json()).result.error.code, 'gateway/bad-request')
-  const response = await request({ type: 'client-request', rpcId: 'test', method: 'dsh-browser-assets/snapshot', payload: {} })
-  assert.deepEqual(await response.json(), { type: 'server-response', rpcId: 'test', result: { ok: true, value: { assets: [] } } })
+  assert.equal(channel, '/dsh-browser-assets', 'the plugin must own a private channel')
+  assert.ok(handler, 'the channel handler was not registered')
+
+  // The Host transport owns envelope decoding, authentication, and the Peer
+  // scope, so the handler receives an endpoint relative to the channel.
+  const peer = { id: 'test-peer', ctx: {} as never, dispose: async () => {} }
+  const ok = await handler('snapshot', {}, new AbortController().signal, peer)
+  assert.deepEqual(ok, { ok: true, value: { assets: [] } })
+  const unknown = await handler('unknown', {}, new AbortController().signal, peer)
+  assert.equal(unknown.ok, false)
+  assert.equal(unknown.error.code, 'not-found')
   for (const dispose of disposers) dispose()
-  assert.equal(routes.size, 0)
+  assert.equal(channel, undefined, 'the channel survived disposal')
 })
 
 test('auth profiles filter foreign storage; domains are admission rules, not a network firewall', async () => {

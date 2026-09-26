@@ -6,17 +6,18 @@ import type { AutomationAsset, AutomationAssetStatus, AutomationAssetStore } fro
 import type { BrowserService } from './browser-service.ts'
 import { executeAutomationAsset } from './automation-execution.ts'
 
-const CHANNEL = '/api'
+/**
+ * This plugin's own logical RPC channel.
+ *
+ * NOT the shared `/api`: `intercept('/api', …)` does not share that channel, it
+ * REPLACES its fallback — the interceptor's `matches` gate becomes the only
+ * route resolution, so every other plugin's endpoint (`settings/describe`,
+ * `session/list`, …) starts returning 404 and the whole Web UI loses its API.
+ * A plugin that owns its endpoints registers a private channel instead.
+ */
+const CHANNEL = '/dsh-browser-assets'
 const PREFIX = 'dsh-browser-assets'
 const ENDPOINTS = ['snapshot', 'get', 'save', 'summarize', 'dismiss', 'validate', 'test', 'status'] as const
-
-function failure(rpcId: string, message: string): Response {
-  return Response.json({
-    type: 'server-response',
-    rpcId,
-    result: { ok: false, error: { code: 'gateway/bad-request', message, details: {} } },
-  })
-}
 
 function record(payload: unknown): Record<string, unknown> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('request payload must be an object')
@@ -32,23 +33,28 @@ function stringField(payload: Record<string, unknown>, name: string): string {
 
 export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService): void {
   ctx.inject(['connection'], (connectionCtx) => {
+    // Register the channel with the Host transport rather than hand-rolling the
+    // client-request/server-response envelope on an exact Fetch route. The
+    // transport owns envelope decoding, the admission/authentication fence, the
+    // cancellation signal, and the Peer scope the handler receives — none of
+    // which a manual route can reconstruct.
     const connection = (connectionCtx as unknown as {
       connection: {
-        fetch: {
-          register(route: {
-            path: string
-            methods: readonly ['POST']
-            requestBody: 'buffered'
-            fetch(request: Request): Promise<Response>
-          }): () => Promise<void>
+        rpc: {
+          /** Register one authenticated absolute channel prefix owned by this plugin. */
+          handle(channel: string, handler: ConnectionRpcHandler): () => Promise<void>
         }
       }
     }).connection
     const handler: ConnectionRpcHandler = async (endpoint, rawPayload) => {
       try {
+        // The transport hands the handler the endpoint relative to the channel,
+        // so a request to `/dsh-browser-assets/snapshot` arrives as `snapshot`.
+        // Accept a prefixed form too, so either address style keeps working.
+        const leaf = endpoint.startsWith(PREFIX + '/') ? endpoint.slice(PREFIX.length + 1) : endpoint
         const payload = record(rawPayload)
         let value: unknown
-        switch (endpoint) {
+        switch (leaf) {
           case 'snapshot': value = store.snapshot(); break
           case 'get': value = store.get(stringField(payload, 'id')) ?? null; break
           case 'save': value = store.saveDraft(payload.asset as Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>); break
@@ -68,36 +74,9 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
         return { ok: false, error: { code: 'bad-request' as const, message: String(error instanceof Error ? error.message : error).slice(0, 500), details: {} } }
       }
     }
-    for (const endpoint of ENDPOINTS) {
-      const method = `${PREFIX}/${endpoint}`
-      connectionCtx.effect(() => connection.fetch.register({
-        path: `${CHANNEL}/${method}`,
-        methods: ['POST'],
-        requestBody: 'buffered',
-        fetch: async (request) => {
-          let body: unknown
-          try {
-            body = await request.json()
-          } catch {
-            return new Response('body is not JSON', { status: 400 })
-          }
-          const rpcId = typeof body === 'object' && body !== null
-            && typeof (body as { rpcId?: unknown }).rpcId === 'string'
-            ? (body as { rpcId: string }).rpcId
-            : 'invalid-request'
-          if (typeof body !== 'object' || body === null
-            || (body as { type?: unknown }).type !== 'client-request'
-            || (body as { method?: unknown }).method !== method) {
-            return failure(rpcId, 'invalid RPC request')
-          }
-          try {
-            const result = await handler(endpoint, (body as { payload?: unknown }).payload, request.signal)
-            return Response.json({ type: 'server-response', rpcId, result })
-          } catch (error) {
-            return failure(rpcId, String(error instanceof Error ? error.message : error).slice(0, 500))
-          }
-        },
-      }), `dsh-browser: ${method} RPC route`)
-    }
+    connectionCtx.effect(
+      () => connection.rpc.handle(CHANNEL, handler),
+      'dsh-browser: automation asset RPC channel',
+    )
   })
 }

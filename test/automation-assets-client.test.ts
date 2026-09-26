@@ -35,19 +35,21 @@ test('client loads summaries first and fetches source only after explicit select
       channels.push(channel)
       endpoints.push(endpoint)
       payloads.push(payload)
-      return { ok: true, value: ['get', 'test', 'validate'].some(name => endpoint.endsWith(`/${name}`)) ? asset : snapshot }
+      return { ok: true, value: ['get', 'test', 'validate'].includes(endpoint) ? asset : snapshot }
     },
   } as unknown as ClientConnectionRpc
   const controller = new AutomationAssetsController(rpc)
   await controller.refresh()
   assert.equal(controller.snapshot().selected, undefined)
-  assert.equal(endpoints.includes('dsh-browser-assets/get'), false)
+  assert.equal(endpoints.includes('get'), false)
   await controller.select(asset.id)
   assert.equal(controller.snapshot().selected?.source?.includes('return document.title'), true)
-  assert.equal(endpoints.filter(endpoint => endpoint === 'dsh-browser-assets/get').length, 1)
+  assert.equal(endpoints.filter(endpoint => endpoint === 'get').length, 1)
   await controller.inject().testAutomationAsset(asset.id, 'https://example.com/', { query: 'one' })
-  const testIndex = endpoints.indexOf('dsh-browser-assets/test')
+  const testIndex = endpoints.indexOf('test')
   assert.deepEqual(payloads[testIndex], { id: asset.id, url: 'https://example.com/', inputs: { query: 'one' } })
-  assert.deepEqual(new Set(channels), new Set(['/api']))
+  // The plugin's own channel, never the shared `/api` one: intercepting that
+  // replaces its fallback and 404s every other plugin's endpoint.
+  assert.deepEqual(new Set(channels), new Set(['/dsh-browser-assets']))
   controller.dispose()
 })

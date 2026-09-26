@@ -11,11 +11,20 @@
 | 插件发布通道 | DSH 基线 | 兼容承诺 |
 |---|---|---|
 | npm `latest`（`0.1.12`） | `dsh-v0.1.1-rc.2` 至 `dsh-v0.1.2-rc.1` | 已验证维护基线 |
-| npm `next` 候选（`0.1.15-alpha.2`） | `dsh-v0.1.5-alpha.1` | 精确依赖与真实 profile 验收目标 |
+| npm `next` 候选（`0.1.15-alpha.2`） | `dsh-v0.1.5-alpha.1` 至 `dsh-v0.1.7-rc.2` | 精确依赖与真实 profile 验收目标 |
 
 `0.1.15-alpha.2` 使用 DSH 新客户端分包：状态存储来自
 `dsh-client-store`，设置契约来自 `dsh-client-ui-settings`，客户端 Context
 来自 Cordis。该候选不会覆盖 npm `latest`。
+
+启动期设置解析对宿主版本自适应：旧宿主仍提供 `settings.register(ns, schema, opts)`
+时沿用 live scope；`dsh-v0.1.7-rc.2` 起移除了该方法，设置页改由 Loader 条目的
+`Config` schema 直接派生，插件改为读取宿主注入的条目配置。
+
+浏览器设置卡片则只适配 `dsh-v0.1.7-rc.2`：`SettingsScope`/`ctx.settingsScope`
+（≤ `dsh-v0.1.5-alpha.1`）与 `ConfigForm`/`ctx.configForms`（`dsh-v0.1.7-rc.2`+）
+是互斥的客户端契约，没有一份源码能同时编译两者，因此 `devDependencies` 锁定
+`0.1.7-rc.2`。Host 半边的自适应是优雅降级，不是受支持目标。
 
 ## 安装
 
@@ -27,7 +36,8 @@ dsh plugin --profile web add ./dsh-browser
 dsh --profile web
 ```
 
-> npm `latest` 延续现有维护基线；本开发分支精确适配 `dsh-v0.1.5-alpha.1`。
+> npm `latest` 延续现有维护基线；本开发分支精确适配 `dsh-v0.1.5-alpha.1`，
+> 并已通过 `dsh-v0.1.7-rc.2` 的真实 profile 验收。
 > 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
