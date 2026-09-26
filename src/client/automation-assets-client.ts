@@ -22,6 +22,9 @@ function localStore<T>(initial: T): SnapshotStore<T> {
   }
 }
 
+/** This plugin's private RPC channel, matching the Host half. */
+const CHANNEL = '/dsh-browser-assets'
+
 export class AutomationAssetsController {
   private readonly store = localStore<AutomationAssetsState>({ loading: true, busy: false, failed: false })
   private disposed = false
@@ -72,7 +75,10 @@ export class AutomationAssetsController {
   }
 
   private async call<T>(endpoint: string, payload: unknown): Promise<T> {
-    const result = await this.rpc.call('/api', `dsh-browser-assets/${endpoint}`, payload)
+    // The plugin's own logical channel: the shared `/api` channel is reserved
+    // for host-composed endpoints, and intercepting it there replaced the whole
+    // channel's fallback (see automation-assets-rpc.ts).
+    const result = await this.rpc.call(CHANNEL, endpoint, payload)
     if (!result.ok) throw new Error(result.error.message)
     return result.value as T
   }

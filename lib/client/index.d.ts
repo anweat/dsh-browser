@@ -1,6 +1,6 @@
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import type { Context } from './context-types.ts';
-import { type BrowserCardState, type SettingField } from './form.ts';
+import { type BrowserCardState } from './form.ts';
 import { SETTINGS_NAMESPACE } from './settings-namespace.ts';
 import { type AutomationAssetsState } from './automation-assets-client.ts';
 import type { AutomationAsset, AutomationAssetStatus } from '../automation-assets.ts';
@@ -9,9 +9,11 @@ export declare const inject: string[];
 export declare const NS = "dsh-browser.card";
 export { SETTINGS_NAMESPACE };
 export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
+    /** Which view the Plugins page is asking for: the one-liner or the form body. */
+    view: 'summary' | 'page';
     useBrowserSettings: <R>(selector: (snapshot: BrowserCardState) => R) => R;
-    edit: (field: SettingField, text: string) => void;
-    resetField: (field: SettingField) => void;
+    edit: (field: string, text: string) => void;
+    resetField: (field: string) => void;
     save: () => void;
     discard: () => void;
     useAutomationAssets: <R>(selector: (snapshot: AutomationAssetsState) => R) => R;

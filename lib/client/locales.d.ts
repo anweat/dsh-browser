@@ -76,6 +76,9 @@ export declare const zh: {
     readonly verbose: "详细日志";
     readonly verboseHint: "输出启动和诊断信息。";
     readonly reset: "恢复部署值";
+    readonly overridden: "已覆盖";
+    readonly invalidNumber: "请填写数字，留空表示使用默认值。";
+    readonly unavailable: "该插件当前未加载，暂时无法配置。";
     readonly invalid: "值无效，请检查格式或范围。";
     readonly invalidJson: "JSON 或数值范围无效。";
     readonly restart: "保存后完整重启 profile，运行时和工具目录才会重新注册。";

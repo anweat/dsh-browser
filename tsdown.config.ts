@@ -1,7 +1,11 @@
 import type { UserConfig } from 'tsdown'
 
 const PLUGIN_ID = '@anweat/dsh-browser'
-const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-slots'] as const
+// The client module table: requireable by name at runtime like `react`.
+// `dsh-client-ui-primitives` carries the shared settings-form chrome every
+// generated settings page uses, and `dsh-client-ui-plugin-manager` declares the
+// `plugins.item` slot this card registers into.
+const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-plugin-manager'] as const
 
 export default {
   name: `${PLUGIN_ID}/client`, entry: { client: 'src/client/index.ts' }, outDir: 'lib', format: 'cjs', platform: 'browser', dts: false, sourcemap: true, clean: false,

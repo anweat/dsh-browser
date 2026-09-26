@@ -60,18 +60,29 @@ export interface Config {
   args?: string[]
 }
 
-export const Config: z<Config> = z.object({
-  enabled: z.boolean().default(true),
-  channel: z.string().default('chromium'),
-  browserRuntime: z.string().default('playwright'),
-  headless: z.boolean().default(true),
-  storageStatePath: z.string(),
+// The `as unknown as z<Config>` is required because a `.volatile()` field
+// resolves to a live `Volatile<T>` handle rather than a plain `T`, so the
+// schema's inferred output no longer overlaps `Config` structurally. The cast
+// is honest about that: `resolveConfig` still normalizes handles to plain
+// values at the boundary every consumer reads through.
+export const Config = z.object({
+  // `.volatile()` is what makes a field appear on the generated settings page:
+  // `volatileForm(schema)` keeps only fields with a marked nearest volatile
+  // ancestor and returns undefined for a whole schema with none, in which case
+  // the entry is skipped entirely and no page exists. Fields left unmarked stay
+  // composition-only (not editable live), which is deliberate for the ones
+  // carrying hash-pinned scripts.
+  enabled: z.boolean().default(true).volatile(),
+  channel: z.string().default('chromium').volatile(),
+  browserRuntime: z.string().default('playwright').volatile(),
+  headless: z.boolean().default(true).volatile(),
+  storageStatePath: z.string().volatile(),
   authProfiles: z.dict(z.object({
     storageStatePath: z.string(),
     allowedDomains: z.array(z.string()).default([]),
     persistState: z.boolean().default(false),
-  })),
-  defaultAuthProfile: z.string(),
+  })).volatile(),
+  defaultAuthProfile: z.string().volatile(),
   rulePacks: z.dict(z.object({
     matches: z.array(z.string()).default([]),
     initScriptPath: z.string(),
@@ -86,9 +97,9 @@ export const Config: z<Config> = z.object({
       waitMs: z.number(),
     })).default([]),
   })),
-  executablePath: z.string(),
-  opencliEnabled: z.boolean().default(true),
-  automationMode: z.string().default('standard'),
+  executablePath: z.string().volatile(),
+  opencliEnabled: z.boolean().default(true).volatile(),
+  automationMode: z.string().default('standard').volatile(),
   usagePolicy: z.object({
     minDelayMs: z.number().default(750),
     maxConcurrency: z.number().default(2),
@@ -98,7 +109,7 @@ export const Config: z<Config> = z.object({
     retryLimit: z.number().default(2),
     backoffBaseMs: z.number().default(1000),
     cooldownMs: z.number().default(30000),
-  }),
+  }).volatile(),
   automationAssets: z.object({
     enabled: z.boolean().default(true),
     directory: z.string(),
@@ -117,13 +128,13 @@ export const Config: z<Config> = z.object({
     catalogTokenBudget: z.number().default(800),
     modelDevelopmentEnabled: z.boolean().default(true),
     maxModelDraftWritesPerSession: z.number().default(3),
-  }),
-  autoInstall: z.boolean().default(false),
-  snapshotDir: z.string(),
-  verbose: z.boolean().default(false),
-  cdpPort: z.number().min(1).max(65_535).step(1).description('Optional remote debugging port to expose CDP for external tools (e.g. 9222)'),
-  args: z.array(z.string()).default([]).description('Additional Chromium CLI launch arguments'),
-}) as z<Config>
+  }).volatile(),
+  autoInstall: z.boolean().default(false).volatile(),
+  snapshotDir: z.string().volatile(),
+  verbose: z.boolean().default(false).volatile(),
+  cdpPort: z.number().min(1).max(65_535).step(1).description('Optional remote debugging port to expose CDP for external tools (e.g. 9222)').volatile(),
+  args: z.array(z.string()).default([]).description('Additional Chromium CLI launch arguments').volatile(),
+}) as unknown as z<Config>
 
 export interface ResolvedConfig {
   enabled: boolean
@@ -151,26 +162,57 @@ export function defaultSnapshotDir(): string {
   return path.join(home, 'data', 'browser', 'snapshots')
 }
 
+/**
+ * The shared volatile-reference brand (`cosmokit`'s `Symbol.for` key). Detected
+ * through the global symbol rather than by importing cosmokit: it is a
+ * transitive dependency of schemastery and is not always hoisted, while the
+ * symbol identity is guaranteed across ESM/CJS copies of the library.
+ */
+const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
+
+/** Whether a resolved config field is a live volatile reference. */
+function isVolatileRef(value: unknown): value is { get(): unknown } {
+  return typeof value === 'object' && value !== null && VOLATILE_WRITE in value
+}
+
+/**
+ * Read a config field as a plain value.
+ *
+ * A `.volatile()` field resolves to a live handle rather than a value, so it
+ * must be unwrapped with `.get()` before any consumer that expects data.
+ */
+function plain<T>(value: T | undefined): T | undefined {
+  return isVolatileRef(value) ? value.get() as T : value
+}
+
 export function resolveConfig(config: Config): ResolvedConfig {
-  const snapshotDir = config.snapshotDir ?? defaultSnapshotDir()
+  // Normalize every field at this one boundary, so nothing downstream — the
+  // router, the tools, or the settings page's own baseline — ever sees a handle.
+  const c = config as unknown as Record<string, unknown>
+  const read = <T>(field: string, fallback: T): T => {
+    const value = plain(c[field] as T | undefined)
+    return value === undefined ? fallback : value
+  }
+  const optional = <T>(field: string): T | undefined => plain(c[field] as T | undefined)
+  const snapshotDir = optional<string>('snapshotDir') ?? defaultSnapshotDir()
   return {
-    enabled: config.enabled ?? true,
-    channel: config.channel ?? 'chromium',
-    browserRuntime: resolveBrowserRuntime(config.browserRuntime),
-    headless: config.headless ?? true,
-    opencliEnabled: config.opencliEnabled ?? true,
-    automationMode: resolveAutomationMode(config.automationMode),
-    usagePolicy: resolveUsagePolicy(config.usagePolicy),
-    automationAssets: resolveAutomationAssetPolicy(config.automationAssets),
-    autoInstall: config.autoInstall ?? false,
+    enabled: read('enabled', true),
+    channel: read('channel', 'chromium'),
+    browserRuntime: resolveBrowserRuntime(plain(c.browserRuntime)),
+    headless: read('headless', true),
+    opencliEnabled: read('opencliEnabled', true),
+    automationMode: resolveAutomationMode(optional<string>('automationMode')),
+    usagePolicy: resolveUsagePolicy(optional<Partial<UsagePolicyInput>>('usagePolicy')),
+    automationAssets: resolveAutomationAssetPolicy(optional<Partial<AutomationAssetPolicyInput>>('automationAssets')),
+    autoInstall: read('autoInstall', false),
     snapshotDir,
-    verbose: config.verbose ?? false,
-    authProfiles: config.authProfiles ?? {},
-    rulePacks: config.rulePacks ?? {},
-    args: Array.isArray(config.args) ? config.args.map(String) : [],
-    ...config.cdpPort !== undefined ? { cdpPort: config.cdpPort } : {},
-    ...config.defaultAuthProfile ? { defaultAuthProfile: config.defaultAuthProfile } : {},
-    ...config.storageStatePath !== undefined && config.storageStatePath !== '' ? { storageStatePath: config.storageStatePath } : {},
-    ...config.executablePath !== undefined && config.executablePath !== '' ? { executablePath: config.executablePath } : {},
+    verbose: read('verbose', false),
+    authProfiles: read('authProfiles', {}),
+    rulePacks: read('rulePacks', {}),
+    args: Array.isArray(plain(c.args)) ? (plain(c.args) as string[]).map(String) : [],
+    ...optional<number>('cdpPort') !== undefined ? { cdpPort: optional<number>('cdpPort') } : {},
+    ...optional<string>('defaultAuthProfile') ? { defaultAuthProfile: optional<string>('defaultAuthProfile') } : {},
+    ...optional<string>('storageStatePath') ? { storageStatePath: optional<string>('storageStatePath') } : {},
+    ...optional<string>('executablePath') ? { executablePath: optional<string>('executablePath') } : {},
   }
 }
