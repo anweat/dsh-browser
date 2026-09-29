@@ -418,7 +418,10 @@ test('browser service clears stale interactive state and relaunches after discon
   const service = new BrowserService(resolveConfig({
     channel: 'chromium', headless: true, opencliEnabled: false, autoInstall: false, verbose: false,
   }))
-  const runtime = service as unknown as { browser?: { close(): Promise<void> }; activePage?: { close(): Promise<void> } }
+  // Interactive state is per session now, so reach the shared bucket that the
+  // session-less calls in this test use.
+  const runtime = service as unknown as { browser?: { close(): Promise<void> } }
+  const sharedPage = () => service.sessionState(undefined)?.page as { close(): Promise<void> } | undefined
   try {
     await service.open(url)
     const firstBrowser = runtime.browser
@@ -433,7 +436,7 @@ test('browser service clears stale interactive state and relaunches after discon
     assert.match(reopened.text, /Recovered browser/)
     assert.notEqual(runtime.browser, firstBrowser)
 
-    const page = runtime.activePage
+    const page = sharedPage()
     assert.ok(page)
     await page.close()
     await new Promise(resolve => setTimeout(resolve, 25))

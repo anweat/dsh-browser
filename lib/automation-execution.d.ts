@@ -5,6 +5,8 @@ export interface AutomationExecutionOptions {
     signal?: AbortSignal;
     authProfile?: string;
     rulePack?: string;
+    /** Session key, so an asset run uses the calling session's page bucket. */
+    session?: string;
 }
 export interface AutomationExecutionResult {
     asset: AutomationAsset;
