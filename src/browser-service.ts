@@ -31,6 +31,7 @@ import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, 
 import { configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
+import { installDialogGuard } from './dialogs.ts'
 
 export interface RenderRule {
   hostname: string
@@ -358,6 +359,9 @@ export class BrowserService {
   private trackBrowser(browser: any): any {
     this.browser = browser
     browser.on?.('disconnected', () => this.handleBrowserDisconnected(browser))
+    // Any dialog opened while this browser is live is auto-closed by the guard instead of
+    // by playwright-core's unhandled auto-dismiss promise (see dialogs.ts).
+    installDialogGuard(browser)
     return browser
   }
 
