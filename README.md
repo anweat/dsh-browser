@@ -108,6 +108,42 @@ export function apply(ctx: Context) {
 
 服务接口（结构性，无需共享类型包）见 `src/browser-service.ts`。
 
+### 跨 session 隔离
+
+`browser` 服务是**单实例**：`apply()` 只 `ctx.provide` 一次，所有消费者拿到同一个
+`BrowserService`。因此交互式页面状态不能是全局的。
+
+宿主在工具执行时带上 `exec.agent`，它是 session 身份（`agent.session.id`，
+基础契约里也声明 `agent.id: SessionId`）。插件据此为每个 session 分配独立的
+`BrowserContext` + `Page`：
+
+- **共享**：浏览器**进程**。启动 N 个 Chromium 代价高昂，而一个进程开 N 个
+  `BrowserContext` 正是 Chromium 自身的多配置文件模型。
+- **隔离**：每个 session 的 `BrowserContext`、页面、auth profile、rule pack、
+  以及 console / network 抓取缓冲。
+
+注意隔离单位是 **context 而不是标签页**：同一个 context 里的多个标签页共享
+cookie 与 storage，跨 session 串号正是要防的事。
+
+由此得到的行为边界：
+
+| 工具 | 作用域 |
+|---|---|
+| `browser_open` / `click` / `type` / `press` / `select` / `check` / `hover` / `set_files` / `evaluate` / `scroll` / `read` / `wait` / `screenshot` / `browser_close` | 仅调用方 session |
+| `browser_console` / `browser_requests` | 仅返回调用方 session 抓到的记录 |
+| `browser_status` 的 `activeUrl` | 仅报告调用方 session 的页面 |
+| `render` / `snapshot` / `searchResults` / `crawl` / OpenCLI | 每次调用自建临时 context，本就无共享状态 |
+
+`browser_close` 关闭的是**调用方**的页面，不影响其他 session；插件卸载时
+`close()` 才整体拆掉所有 session 的 context 与进程。
+
+会话槽位上限由 `maxSessions`（默认 8）控制，超出后关闭最久未使用的 session。
+读取类调用（`browser_status` / `browser_console` / `browser_requests`）**不会**
+创建槽位，也不会触发淘汰——否则一次查询就会挤掉别人的页面。
+
+不带 `exec.agent` 的调用方（例如其他插件直接消费服务）落在共享桶里，行为与
+引入隔离之前一致。
+
 ## 自动化自由度
 
 `automationMode` 控制模型可见的工具集合和执行审批。建议从 `standard` 开始，仅在完全只读任务或受控自动化环境中切换：
@@ -300,6 +336,7 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
           catalogTokenBudget: 800
           modelDevelopmentEnabled: true
           maxModelDraftWritesPerSession: 3
+        maxSessions: 8           # 同时持有 context+page 的 session 上限，超出淘汰最久未使用者
         storageStatePath: ''     # Playwright 登录态 JSON（复用已登录会话）
         authProfiles:
           forum:

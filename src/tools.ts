@@ -9,6 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './config.ts'
 import type { BrowserLocatorSpec, BrowserService, BrowserTarget, InteractiveState } from './browser-service.ts'
+import { sessionKeyFor } from './browser-service.ts'
 import type { BrowserRecipeStep } from './automation.ts'
 import { configuredBrowserTools } from './freedom.ts'
 import type { AutomationAsset, AutomationAssetStore } from './automation-assets.ts'
@@ -195,7 +196,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
       }
       if (args.action === 'test') {
         if (!args.id || !args.url) throw new Error('automation development test requires id and url')
-        const result = await executeAutomationAsset(service, assets, args.id, args.url, args.inputs, 'draft', { signal: exec.signal, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {} })
+        const result = await executeAutomationAsset(service, assets, args.id, args.url, args.inputs, 'draft', { signal: exec.signal, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {}, session: sessionKeyFor(exec.agent) })
         const raw = JSON.stringify(result.value)
         return developmentResult('test', { id: result.asset.id, testStatus: result.asset.testStatus, testMessage: result.asset.testMessage, resultJson: raw.slice(0, 50_000), truncated: raw.length > 50_000 }, result.asset)
       }
@@ -230,7 +231,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     isConcurrencySafe: () => false,
     async execute(args, exec) {
       if (!assets) throw new Error('automation assets are unavailable')
-      const result = await executeAutomationAsset(service, assets, args.id, args.url, args.inputs, 'active', { signal: exec.signal, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {} })
+      const result = await executeAutomationAsset(service, assets, args.id, args.url, args.inputs, 'active', { signal: exec.signal, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {}, session: sessionKeyFor(exec.agent) })
       const raw = JSON.stringify(result.value)
       return { assetId: result.asset.id, kind: result.asset.kind, resultJson: raw.slice(0, 100_000), truncated: raw.length > 100_000 }
     },
@@ -238,7 +239,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: 'browser_open',
-    description: 'Open a URL in the persistent browser page and return the rendered title, readable text, and a full-page screenshot path. Optional bounded capture stores console messages and failed/4xx/5xx requests in memory without bodies or headers. ' + COMPLIANCE_NOTICE,
+    description: 'Open a URL in this session\'s browser page and return the rendered title, readable text, and a full-page screenshot path. Each session gets its own page and context, so concurrent sessions never see each other\'s page, cookies, or captured traffic. Optional bounded capture stores console messages and failed/4xx/5xx requests in memory without bodies or headers. ' + COMPLIANCE_NOTICE,
     parameters: {
       url: { type: 'string', required: true, description: 'The HTTP(S) URL to open.' },
       waitMs: { type: 'number', description: 'Extra settle time in ms after load.' },
@@ -261,8 +262,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 60_000,
     isConcurrencySafe: () => false,
-    async execute(args) {
-      return service.open(args.url, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {}, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {}, ...args.capture ? { capture: args.capture as ('console' | 'network')[] } : {} })
+    async execute(args, exec) {
+      return service.open(args.url, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {}, ...args.authProfile ? { authProfile: args.authProfile } : {}, ...args.rulePack ? { rulePack: args.rulePack } : {}, ...args.capture ? { capture: args.capture as ('console' | 'network')[] } : {}, session: sessionKeyFor(exec.agent) })
     },
   }))
 
@@ -288,8 +289,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) {
-      return service.click(toolTarget(args)!)
+    async execute(args, exec) {
+      return service.click(toolTarget(args)!, { session: sessionKeyFor(exec.agent) })
     },
   }))
 
@@ -316,8 +317,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) {
-      return service.type(toolTarget(args)!, args.text)
+    async execute(args, exec) {
+      return service.type(toolTarget(args)!, args.text, { session: sessionKeyFor(exec.agent) })
     },
   }))
 
@@ -336,12 +337,13 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     output: { schema: INTERACTIVE_OUTPUT_SCHEMA, render: (_args, value) => renderState(value as InteractiveState) },
     timeoutMs: 35_000,
     isConcurrencySafe: () => false,
-    async execute(args) {
+    async execute(args, exec) {
       const target = toolTarget(args, false)
       return service.wait(target, {
         ...args.state ? { state: args.state } : {}, ...args.urlPattern ? { urlPattern: args.urlPattern } : {},
         ...args.networkIdle !== undefined ? { networkIdle: args.networkIdle } : {}, ...args.timeMs !== undefined ? { timeMs: args.timeMs } : {},
         ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {},
+        session: sessionKeyFor(exec.agent),
       })
     },
   }))
@@ -358,7 +360,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     output: { schema: INTERACTIVE_OUTPUT_SCHEMA, render: (_args, value) => renderState(value as InteractiveState) },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) { return service.press(toolTarget(args, false), args.key, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {} }) },
+    async execute(args, exec) { return service.press(toolTarget(args, false), args.key, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: sessionKeyFor(exec.agent) }) },
   }))
 
   register(defineTool({
@@ -372,7 +374,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     output: { schema: INTERACTIVE_OUTPUT_SCHEMA, render: (_args, value) => renderState(value as InteractiveState) },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) { return service.select(toolTarget(args)!, args.values, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {} }) },
+    async execute(args, exec) { return service.select(toolTarget(args)!, args.values, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: sessionKeyFor(exec.agent) }) },
   }))
 
   register(defineTool({
@@ -386,7 +388,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     output: { schema: INTERACTIVE_OUTPUT_SCHEMA, render: (_args, value) => renderState(value as InteractiveState) },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) { return service.check(toolTarget(args)!, args.checked ?? true, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {} }) },
+    async execute(args, exec) { return service.check(toolTarget(args)!, args.checked ?? true, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: sessionKeyFor(exec.agent) }) },
   }))
 
   register(defineTool({
@@ -407,7 +409,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) { return service.hover(toolTarget(args)!, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {} }) },
+    async execute(args, exec) { return service.hover(toolTarget(args)!, { ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {}, session: sessionKeyFor(exec.agent) }) },
   }))
 
   register(defineTool({
@@ -432,7 +434,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) { return service.setFiles(toolTarget(args)!, args.files) },
+    async execute(args, exec) { return service.setFiles(toolTarget(args)!, args.files, { session: sessionKeyFor(exec.agent) }) },
   }))
 
   register(defineTool({
@@ -456,7 +458,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 35_000,
     isConcurrencySafe: () => false,
-    async execute(args) { return service.evaluate(args.expression, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {} }) },
+    async execute(args, exec) { return service.evaluate(args.expression, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: sessionKeyFor(exec.agent) }) },
   }))
 
   register(defineTool({
@@ -474,7 +476,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     } }, render: (_args, value) => [{ type: 'text', text: value.enabled ? (value.records.map(record => `[${record.type}] ${record.text}${record.url ? ` (${record.url})` : ''}`).join('\n') || 'No captured console messages.') : 'Console capture is disabled; reopen with capture=[console].' }] },
     timeoutMs: 10_000,
     isConcurrencySafe: () => true,
-    async execute(args) { return service.consoleMessages(args) },
+    async execute(args, exec) { return service.consoleMessages({ ...args, session: sessionKeyFor(exec.agent) }) },
   }))
 
   register(defineTool({
@@ -491,7 +493,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     } }, render: (_args, value) => [{ type: 'text', text: value.enabled ? (value.records.map(record => `${record.method} ${record.status ?? 'FAILED'} ${record.url}${record.failure ? ` — ${record.failure}` : ''}`).join('\n') || 'No failed or HTTP 4xx/5xx requests captured.') : 'Network capture is disabled; reopen with capture=[network].' }] },
     timeoutMs: 10_000,
     isConcurrencySafe: () => true,
-    async execute(args) { return service.networkRequests(args) },
+    async execute(args, exec) { return service.networkRequests({ ...args, session: sessionKeyFor(exec.agent) }) },
   }))
 
   register(defineTool({
@@ -515,8 +517,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 20_000,
     isConcurrencySafe: () => false,
-    async execute(args) {
-      return service.scroll(args.deltaY ?? 2000)
+    async execute(args, exec) {
+      return service.scroll(args.deltaY ?? 2000, { session: sessionKeyFor(exec.agent) })
     },
   }))
 
@@ -539,8 +541,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 20_000,
     isConcurrencySafe: () => false,
-    async execute() {
-      return service.read()
+    async execute(_args, exec) {
+      return service.read({ session: sessionKeyFor(exec.agent) })
     },
   }))
 
@@ -570,35 +572,36 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => false,
-    async execute(args) {
+    async execute(args, exec) {
       const target = toolTarget(args, false)
       return service.screenshot({
         ...target ? { target } : {},
         ...args.clip ? { clip: args.clip } : {}, ...args.fullPage !== undefined ? { fullPage: args.fullPage } : {},
         ...args.format ? { format: args.format } : {}, ...args.quality !== undefined ? { quality: args.quality } : {},
         ...args.filename ? { filename: args.filename } : {},
+        session: sessionKeyFor(exec.agent),
       })
     },
   }))
 
   register(defineTool({
     name: 'browser_close',
-    description: 'Close the current browser page (and its context). The next browser_open starts a fresh page.',
+    description: 'Close this session\'s browser page (and its context). Other sessions\' pages are untouched, and the next browser_open in this session starts a fresh page.',
     parameters: {},
     output: {
       schema: { type: 'object', additionalProperties: false, properties: { closed: { type: 'boolean', required: true } } },
       render: () => [{ type: 'text', text: 'Browser page closed.' }],
     },
     timeoutMs: 15_000,
-    async execute() {
-      await service.closePage()
+    async execute(_args, exec) {
+      await service.closePage(service.sessionState(exec.agent))
       return { closed: true }
     },
   }))
 
   register(defineTool({
     name: 'browser_status',
-    description: 'Report the browser runtime status: enabled, channel, headless, whether chromium is installed, whether the bundled OpenCLI is enabled, and the active page URL.',
+    description: 'Report the browser runtime status: enabled, channel, headless, whether chromium is installed, whether the bundled OpenCLI is enabled, and this session\'s active page URL. A page opened by another session is not reported.',
     parameters: {},
     output: {
       schema: {
@@ -663,8 +666,8 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     },
     timeoutMs: 15_000,
     isConcurrencySafe: () => true,
-    async execute() {
-      return service.status()
+    async execute(_args, exec) {
+      return service.status({ session: sessionKeyFor(exec.agent) })
     },
   }))
 
@@ -865,6 +868,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
           ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {},
           ...args.authProfile ? { authProfile: args.authProfile } : {},
           ...args.rulePack ? { rulePack: args.rulePack } : {},
+          session: sessionKeyFor(exec.agent),
         })
         assets?.recordRecipe(result.url, steps, sessionId(exec), true)
         return result

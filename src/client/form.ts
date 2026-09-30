@@ -17,7 +17,7 @@ import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, Settings
 export type SectionField =
   | 'enabled' | 'automationMode' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
   | 'autoInstall' | 'storageStatePath' | 'defaultAuthProfile'
-  | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort'
+  | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'maxSessions'
 
 /** Retained name for callers that predate the section/JSON split. */
 export type SettingField = SectionField
@@ -129,6 +129,7 @@ export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   enumField('browserRuntime', ['playwright', 'patchright']),
   textField('channel'),
   rangedNumberField('cdpPort', 1, 65_535),
+  rangedNumberField('maxSessions', 1, 64),
   booleanField('headless'),
   booleanField('opencliEnabled'),
   booleanField('autoInstall'),
