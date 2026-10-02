@@ -2,34 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EXTRACT_MODES, WAIT_CONDITIONS, runRecipe, validateRecipe, validateRecipeEnums, type BrowserRecipeStep } from '../src/automation.ts'
 import { DeadlineError, RecipeAssertionError, mapError } from '../src/actions/errors.ts'
-
-type Behavior = Record<string, Partial<Record<string, (...args: any[]) => unknown>>>
-
-/** A page whose locators run scripted behaviour per selector and record every call. */
-function fakePage(behavior: Behavior = {}) {
-  const log: string[] = []
-  const locatorFor = (key: string): any => {
-    const locator: any = { first: () => locator, locator: () => locator }
-    for (const method of ['click', 'fill', 'pressSequentially', 'press', 'selectOption', 'check', 'uncheck', 'hover', 'waitFor', 'innerText', 'innerHTML', 'getAttribute', 'evaluateAll']) {
-      locator[method] = async (...args: unknown[]) => {
-        log.push(`${method}:${key}`)
-        const scripted = behavior[key]?.[method]
-        if (scripted) return scripted(...args)
-        return method === 'innerText' || method === 'innerHTML' ? 'text' : method === 'evaluateAll' ? [] : undefined
-      }
-    }
-    return locator
-  }
-  const page = {
-    locator: (selector: string) => locatorFor(selector),
-    getByText: (text: string) => locatorFor('text=' + text),
-    waitForLoadState: async () => { log.push('waitForLoadState') },
-    waitForTimeout: async () => { log.push('waitForTimeout') },
-    keyboard: { press: async (key: string) => { log.push('keyboard:' + key) } },
-    mouse: { wheel: async () => { log.push('wheel') } },
-  }
-  return { page, log }
-}
+import { fakePage } from './fake-page.ts'
 
 const timeout = (what: string, ms = 1000): Error =>
   Object.assign(new Error(`locator.${what}: Timeout ${ms}ms exceeded.\nCall log:\n  - waiting for locator('x')`), { name: 'TimeoutError' })

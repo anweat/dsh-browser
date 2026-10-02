@@ -65,6 +65,8 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
           case 'validate': value = store.validate(stringField(payload, 'id')); break
           case 'test': {
             const result = await executeAutomationAsset(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputs, 'draft')
+            // The review UI shows a failed replay as an error, as it did when a failure threw.
+            if (!result.succeeded) throw new Error(result.execution.failedStep?.message ?? result.execution.message ?? 'Runtime replay did not complete.')
             value = result.asset
             break
           }

@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { BrowserRecipeStep } from './automation.ts'
+import { validateRecipeEnums, type BrowserRecipeStep } from './automation.ts'
 import { validateUserscript } from './scripts.ts'
 
 export const ASSET_PERSISTENCE_MODES = ['off', 'manual', 'suggest', 'auto-draft'] as const
@@ -13,6 +13,14 @@ export const ASSET_ACTIVATION_MODES = ['manual', 'auto-tested'] as const
 export type AssetActivationMode = typeof ASSET_ACTIVATION_MODES[number]
 export type AutomationAssetKind = 'recipe' | 'userscript'
 export type AutomationAssetStatus = 'draft' | 'active' | 'archived'
+/**
+ * How strongly the last passing test confirmed the result. `verified`: a recipe
+ * with assert steps ran and every one held. `legacy-unverified`: the steps ran
+ * without raising, but nothing checked the outcome (recipes without an assert
+ * step, UserScripts, and every asset saved before B2). A missing value on stored
+ * data means `legacy-unverified`.
+ */
+export type EvidenceLevel = 'verified' | 'legacy-unverified'
 
 export interface AutomationAssetPolicyInput {
   enabled?: boolean
@@ -83,6 +91,8 @@ export interface AutomationAsset {
   revision: number
   testStatus: 'untested' | 'passed' | 'failed'
   testMessage?: string
+  /** Optional on stored data; absent means `legacy-unverified`. Set only by a passing runtime test. */
+  evidenceLevel?: EvidenceLevel
   successCount: number
   failureCount: number
   createdAt: string
@@ -358,6 +368,8 @@ export class AutomationAssetStore {
     const tags = [...new Set((input.tags ?? []).map(value => cap(String(value), 40)).filter(Boolean))].slice(0, 20)
     const declaredInputNames = [...new Set((input.inputNames ?? []).map(value => cap(String(value), 40)).filter(value => /^[a-zA-Z][\w-]*$/.test(value)))].slice(0, 20)
     if (kind === 'recipe' && (!Array.isArray(input.recipe) || input.recipe.length < 1 || input.recipe.length > 25)) throw new Error('recipe asset requires 1 to 25 steps')
+    // Unknown extract modes and wait conditions never reach storage; assets already stored are not re-checked.
+    if (kind === 'recipe') validateRecipeEnums(input.recipe!)
     if (kind === 'userscript') {
       const validation = validateUserscript(String(input.source ?? ''))
       if (!validation.valid) throw new Error('userscript is invalid: ' + validation.errors.join('; '))
@@ -435,12 +447,16 @@ export class AutomationAssetStore {
     this.write()
   }
 
-  noteTestResult(id: string, ok: boolean, url: string): void {
+  noteTestResult(id: string, ok: boolean, url: string, evidenceLevel: EvidenceLevel = 'legacy-unverified'): void {
     const asset = this.requireAsset(id)
     if (asset.status !== 'draft') throw new Error('only draft automation assets can record test results')
     const domain = safeDomain(url)
     asset.testStatus = ok ? 'passed' : 'failed'
-    asset.testMessage = ok ? `Runtime replay passed on ${domain}.` : `Runtime replay failed on ${domain}.`
+    if (ok) asset.evidenceLevel = evidenceLevel
+    else delete asset.evidenceLevel
+    asset.testMessage = !ok ? `Runtime replay failed on ${domain}.`
+      : evidenceLevel === 'verified' ? `Runtime replay passed on ${domain}; every assert step held.`
+        : `Runtime replay passed on ${domain}; no assert step checked the result (legacy-unverified).`
     asset.updatedAt = nowIso()
     this.write()
   }
