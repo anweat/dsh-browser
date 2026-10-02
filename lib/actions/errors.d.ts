@@ -22,6 +22,15 @@ export declare class DeadlineError extends Error {
 export declare function abortedByDeadline(signal: AbortSignal | undefined): boolean;
 /** True for a Playwright timeout (waiting for a locator, an actionability check, or a navigation). */
 export declare function isTimeoutError(error: unknown): boolean;
+/**
+ * True when a failure proves the action never touched an element: the locator
+ * never matched anything (a timeout whose call log only says "waiting for
+ * locator", or a frame that does not exist). A timeout after the element was
+ * resolved and the action began says nothing about whether it took effect, so
+ * it is not this. Judged from Playwright's call log; a timeout without a call
+ * log is treated as "unknown", never as "never reached".
+ */
+export declare function neverReachedElement(error: unknown): boolean;
 /** Map any thrown value to a structured error body. */
 export declare function mapError(error: unknown, action: string, opts?: {
     signal?: AbortSignal;

@@ -1,5 +1,6 @@
 /** Bounded, local automation-asset lifecycle and retrieval. */
-import { type BrowserRecipeStep } from './automation.ts';
+import { type AnyRecipeStep, type BrowserRecipeStep } from './automation.ts';
+import { type InputSpec, type OutputSpec, type PendingDisambiguation, type Postcondition } from './automation-v2.ts';
 export declare const ASSET_PERSISTENCE_MODES: readonly ["off", "manual", "suggest", "auto-draft"];
 export type AssetPersistenceMode = typeof ASSET_PERSISTENCE_MODES[number];
 export declare const ASSET_ACTIVATION_MODES: readonly ["manual", "auto-tested"];
@@ -75,8 +76,24 @@ export interface AutomationAsset {
     domains: string[];
     tags: string[];
     inputNames: string[];
-    recipe?: BrowserRecipeStep[];
+    /** v1 steps (`selector`, first match) or, when `schemaVersion` is 2, {@link BrowserRecipeStepV2}. */
+    recipe?: AnyRecipeStep[];
     source?: string;
+    /** Recipe schema. Absent means 1: `.first()` locating and the v1 fill rule, unchanged. */
+    schemaVersion?: 1 | 2;
+    /** v2: typed inputs. When present they are validated and converted at run time. */
+    inputSchema?: InputSpec[];
+    /** v2: named, typed outputs of `extract` steps with `as`. */
+    outputSchema?: OutputSpec[];
+    /** v2: conditions that must hold after the steps for the result to count as verified. */
+    postconditions?: Postcondition[];
+    /** v2: recorded only; not enforced yet. */
+    requiredCapabilities?: string[];
+    /** v2 converted from v1: steps that still take the first match and should be made unique. Derived from the recipe on save. */
+    pendingDisambiguation?: PendingDisambiguation[];
+    /** Set when this draft was converted from another asset; the source is never modified. */
+    sourceAssetId?: string;
+    sourceRevision?: number;
     revision: number;
     testStatus: 'untested' | 'passed' | 'failed';
     testMessage?: string;
@@ -97,6 +114,10 @@ export interface AutomationAssetSummary {
     domains: string[];
     tags: string[];
     inputNames: string[];
+    /** Only present for schema v2 assets. */
+    schemaVersion?: 2;
+    /** v2 assets: the typed inputs a caller must pass to automation.run. */
+    inputSchema?: InputSpec[];
     revision: number;
     testStatus: AutomationAsset['testStatus'];
     successCount: number;
@@ -136,11 +157,13 @@ export declare class AutomationAssetStore {
     summarizeCandidate(id: string): AutomationAsset;
     dismissCandidate(id: string): void;
     saveDraft(input: Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>): AutomationAsset;
+    /** Validate the v2 steps and asset-level fields of a draft about to be saved. Throws RecipeValidationError. */
+    private checkV2;
     validate(id: string): AutomationAsset;
     setStatus(id: string, status: AutomationAssetStatus): AutomationAsset;
     search(query: string, domain?: string, status?: AutomationAssetStatus | 'all', kind?: AutomationAssetKind): AutomationAssetSummary[];
     noteRun(id: string, ok: boolean): void;
-    noteTestResult(id: string, ok: boolean, url: string, evidenceLevel?: EvidenceLevel): void;
+    noteTestResult(id: string, ok: boolean, url: string, evidenceLevel?: EvidenceLevel, failureReason?: string): void;
     assertTarget(asset: AutomationAsset, url: string): void;
     private requireAsset;
     private prune;

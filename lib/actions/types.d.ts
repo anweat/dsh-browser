@@ -12,10 +12,11 @@ import type { ResolvedConfig } from '../config.ts';
 import type { BrowserService } from '../browser-service.ts';
 import type { AutomationAssetStore } from '../automation-assets.ts';
 import type { AutomationDevelopmentService } from '../automation-development.ts';
+import type { LocatorAmbiguity } from '../locator.ts';
 export declare const ACTION_GROUPS: readonly ["runtime", "target", "observe", "act", "inspect", "script", "automation", "crawl", "opencli"];
 export type ActionGroup = typeof ACTION_GROUPS[number];
 /** Shared sub-schemas defined once and referenced by name from parameters. */
-export type SharedSchemaName = 'locator' | 'frame' | 'recipeStep';
+export type SharedSchemaName = 'locator' | 'frame' | 'recipeStep' | 'recipeLocator' | 'postcondition' | 'inputSpec' | 'outputSpec';
 /**
  * One parameter node. The shape is deliberately a subset of the Host's tool
  * parameter DSL, so the same nodes feed the flat tool projection unchanged
@@ -105,6 +106,8 @@ export interface ActionErrorBody {
     hint?: string;
     /** Compact parameter schema, attached to INVALID_ARGS so the model can fix the call at once. */
     schema?: string;
+    /** The first matches of an ambiguous locator (LOCATOR_AMBIGUOUS): role, name, text snippet, visibility. */
+    candidates?: LocatorAmbiguity;
 }
 /**
  * How an executor tells the dispatcher that a returned value is not a plain

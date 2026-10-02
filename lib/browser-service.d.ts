@@ -22,11 +22,13 @@ import { type CliResult } from './deps.ts';
 import type { ResolvedConfig } from './config.ts';
 import { type ResolvedAuthProfile } from './auth-profiles.ts';
 import { type ResolvedRulePack } from './rule-packs.ts';
-import { type BrowserRecipeStep, type RecipeRunResult, type RecipeStepResult } from './automation.ts';
+import { type AnyRecipeStep, type RecipeRunResult, type RecipeStepResult } from './automation.ts';
+import type { OutputSpec, Postcondition } from './automation-v2.ts';
 import { type UserscriptValidation } from './scripts.ts';
 import { type AutomationMode } from './freedom.ts';
 import { type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts';
 import { UsageGovernor } from './usage-policy.ts';
+import { type BrowserTarget } from './locator.ts';
 export interface RenderRule {
     hostname: string;
     contentSelectors: string[];
@@ -62,6 +64,8 @@ export interface InteractiveState {
     title: string;
     text: string;
     screenshotPath?: string;
+    /** The page the action ran on closed itself (a popup's own close button): url/title/text describe the page the session fell back to, or are empty. */
+    closedPage?: true;
 }
 /** The page state after a recipe, plus what the run did ({@link RecipeRunResult}). */
 export interface RecipeServiceResult extends InteractiveState, RecipeRunResult {
@@ -86,21 +90,7 @@ export interface EvaluateResult {
 export interface FileUploadResult extends InteractiveState {
     files: string[];
 }
-export interface BrowserFrameSpec {
-    selector?: string;
-    name?: string;
-    url?: string;
-}
-export interface BrowserLocatorSpec {
-    selector?: string;
-    role?: string;
-    name?: string;
-    text?: string;
-    label?: string;
-    exact?: boolean;
-    frame?: BrowserFrameSpec;
-}
-export type BrowserTarget = string | BrowserLocatorSpec;
+export type { BrowserFrameSpec, BrowserLocatorSpec, BrowserTarget } from './locator.ts';
 export interface BrowserConsoleRecord {
     type: string;
     text: string;
@@ -206,7 +196,15 @@ export interface BrowserStatus {
  */
 interface SessionState {
     context?: any;
+    /** The ACTIVE page: the one every action targets. Always one of `pages` while set. */
     page?: any;
+    /** Every open page of this session's context (the page it opened plus popups), in the order they appeared. */
+    pages: {
+        id: string;
+        page: any;
+    }[];
+    /** Counter behind the `t1`, `t2`, ... target ids of this session. */
+    nextTarget: number;
     profile?: ResolvedAuthProfile;
     rulePack?: ResolvedRulePack;
     captureConsole: boolean;
@@ -367,9 +365,18 @@ export declare class BrowserService {
      * or mutating another's page, cookies, console or network log.
      */
     private ensureActivePage;
-    private attachCapture;
+    /**
+     * Add a page to the session's list and wire its capture and close handling.
+     * Idempotent: the context 'page' event and the explicit call both land here.
+     */
+    private trackPage;
     private resetCapture;
     private resolveTarget;
+    /**
+     * Run an action on a strict locator. More than one match performs nothing and
+     * fails with LOCATOR_AMBIGUOUS plus a summary of the first candidates.
+     */
+    private onTarget;
     private screenshotFile;
     private captureScreenshot;
     private readState;
@@ -386,6 +393,16 @@ export declare class BrowserService {
         session?: string;
     }): Promise<InteractiveState>;
     type(target: BrowserTarget, text: string, opts?: {
+        timeoutMs?: number;
+        session?: string;
+    }): Promise<InteractiveState>;
+    /** Type key by key (pressSequentially), so per-key handlers fire; unlike `type`, which replaces the whole value. */
+    typeKeys(target: BrowserTarget, text: string, opts?: {
+        delayMs?: number;
+        timeoutMs?: number;
+        session?: string;
+    }): Promise<InteractiveState>;
+    clear(target: BrowserTarget, opts?: {
         timeoutMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
@@ -422,6 +439,27 @@ export declare class BrowserService {
         timeoutMs?: number;
         session?: string;
     }): Promise<EvaluateResult>;
+    /**
+     * The pages this session holds: the one it opened plus any popup that page
+     * (or a later one) opened in the same context. Pure query: it never creates
+     * a bucket and never changes the active page.
+     */
+    listTargets(opts?: {
+        session?: string;
+    }): Promise<{
+        targets: {
+            id: string;
+            url: string;
+            title: string;
+            active: boolean;
+        }[];
+    }>;
+    /** Make one of this session's pages the active page: every later action, read, and screenshot targets it. */
+    selectTarget(id: string, opts?: {
+        session?: string;
+    }): Promise<InteractiveState & {
+        id: string;
+    }>;
     scroll(deltaY: number, opts?: {
         waitMs?: number;
         session?: string;
@@ -463,7 +501,7 @@ export declare class BrowserService {
      * once that step has returned. The caller therefore still holds the session
      * (browser_call is serialized per agent) until the page is quiet again.
      */
-    recipe(steps: readonly BrowserRecipeStep[], opts?: {
+    recipe(steps: readonly AnyRecipeStep[], opts?: {
         url?: string;
         waitMs?: number;
         authProfile?: string;
@@ -471,6 +509,14 @@ export declare class BrowserService {
         signal?: AbortSignal;
         session?: string;
         legacyRecipe?: boolean;
+        /** 2: strict LocatorSpec steps, goto/clear, postconditions (see src/automation-v2.ts). Default 1. */
+        schemaVersion?: 1 | 2;
+        postconditions?: readonly Postcondition[];
+        outputSchema?: readonly OutputSpec[];
+        /** v2 goto may land on these domains. */
+        allowedDomains?: readonly string[];
+        /** v2 goto may also stay on the origin the recipe started on (inline recipes; stored assets are limited to their domains). */
+        gotoSameOrigin?: boolean;
     }): Promise<RecipeServiceResult>;
     /**
      * Close one session's page.
@@ -486,4 +532,3 @@ export declare class BrowserService {
     }): Promise<BrowserStatus>;
     close(): Promise<void>;
 }
-export {};
