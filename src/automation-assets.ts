@@ -4,7 +4,12 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { validateRecipeEnums, type BrowserRecipeStep } from './automation.ts'
+import { validateRecipeEnums, type AnyRecipeStep, type BrowserRecipeStep } from './automation.ts'
+import { RecipeValidationError } from './actions/errors.ts'
+import {
+  normalizeInputSchema, normalizeOutputSchema, normalizePostconditions, normalizeRequiredCapabilities, pendingDisambiguation, placeholderNames, validateRecipeV2,
+  hostInDomains, type BrowserRecipeStepV2, type InputSpec, type OutputSpec, type PendingDisambiguation, type Postcondition,
+} from './automation-v2.ts'
 import { validateUserscript } from './scripts.ts'
 
 export const ASSET_PERSISTENCE_MODES = ['off', 'manual', 'suggest', 'auto-draft'] as const
@@ -86,8 +91,24 @@ export interface AutomationAsset {
   domains: string[]
   tags: string[]
   inputNames: string[]
-  recipe?: BrowserRecipeStep[]
+  /** v1 steps (`selector`, first match) or, when `schemaVersion` is 2, {@link BrowserRecipeStepV2}. */
+  recipe?: AnyRecipeStep[]
   source?: string
+  /** Recipe schema. Absent means 1: `.first()` locating and the v1 fill rule, unchanged. */
+  schemaVersion?: 1 | 2
+  /** v2: typed inputs. When present they are validated and converted at run time. */
+  inputSchema?: InputSpec[]
+  /** v2: named, typed outputs of `extract` steps with `as`. */
+  outputSchema?: OutputSpec[]
+  /** v2: conditions that must hold after the steps for the result to count as verified. */
+  postconditions?: Postcondition[]
+  /** v2: recorded only; not enforced yet. */
+  requiredCapabilities?: string[]
+  /** v2 converted from v1: steps that still take the first match and should be made unique. Derived from the recipe on save. */
+  pendingDisambiguation?: PendingDisambiguation[]
+  /** Set when this draft was converted from another asset; the source is never modified. */
+  sourceAssetId?: string
+  sourceRevision?: number
   revision: number
   testStatus: 'untested' | 'passed' | 'failed'
   testMessage?: string
@@ -109,6 +130,8 @@ export interface AutomationAssetSummary {
   domains: string[]
   tags: string[]
   inputNames: string[]
+  /** Only present for schema v2 assets. */
+  schemaVersion?: 2
   revision: number
   testStatus: AutomationAsset['testStatus']
   successCount: number
@@ -240,7 +263,7 @@ function candidateFingerprint(domain: string, steps: BrowserRecipeStep[]): strin
 
 function summary(asset: AutomationAsset): AutomationAssetSummary {
   const { id, kind, status, name, description, domains, tags, inputNames, revision, testStatus, successCount, failureCount, updatedAt, lastRunAt } = asset
-  return { id, kind, status, name, description, domains: [...domains], tags: [...tags], inputNames: [...inputNames], revision, testStatus, successCount, failureCount, updatedAt, ...lastRunAt ? { lastRunAt } : {} }
+  return { id, kind, status, name, description, domains: [...domains], tags: [...tags], inputNames: [...inputNames], ...asset.schemaVersion === 2 ? { schemaVersion: 2 as const } : {}, revision, testStatus, successCount, failureCount, updatedAt, ...lastRunAt ? { lastRunAt } : {} }
 }
 
 function persistedState(value: unknown): PersistedState {
@@ -260,6 +283,7 @@ function persistedState(value: unknown): PersistedState {
     || !Array.isArray(asset.tags) || asset.tags.length > 20 || !Array.isArray(asset.inputNames) || asset.inputNames.length > 20
     || (asset.kind === 'recipe' && (!Array.isArray(asset.recipe) || asset.recipe.length < 1 || asset.recipe.length > 25))
     || (asset.kind === 'userscript' && (typeof asset.source !== 'string' || Buffer.byteLength(asset.source, 'utf8') > 64 * 1024))
+    || (asset.schemaVersion !== undefined && ![1, 2].includes(asset.schemaVersion))
     || !Number.isInteger(asset.revision) || !Number.isFinite(Date.parse(asset.createdAt)) || !Number.isFinite(Date.parse(asset.updatedAt)))
   if (malformedCandidate || malformedAsset) throw new Error('persisted asset entries are malformed')
   return { version: 1, candidates: state.candidates, assets: state.assets }
@@ -364,20 +388,38 @@ export class AutomationAssetStore {
     const name = cap(input.name, 120)
     if (!name) throw new Error('automation asset name is required')
     const kind = input.kind
+    const schemaVersion = input.schemaVersion ?? existing?.schemaVersion ?? 1
+    if (schemaVersion !== 1 && schemaVersion !== 2) throw new RecipeValidationError('schemaVersion must be 1 or 2')
     const domains = [...new Set((input.domains ?? []).map(value => cap(String(value).toLowerCase(), 255)).filter(Boolean))].slice(0, 20)
     const tags = [...new Set((input.tags ?? []).map(value => cap(String(value), 40)).filter(Boolean))].slice(0, 20)
     const declaredInputNames = [...new Set((input.inputNames ?? []).map(value => cap(String(value), 40)).filter(value => /^[a-zA-Z][\w-]*$/.test(value)))].slice(0, 20)
     if (kind === 'recipe' && (!Array.isArray(input.recipe) || input.recipe.length < 1 || input.recipe.length > 25)) throw new Error('recipe asset requires 1 to 25 steps')
+    const hasV2Fields = [input.inputSchema, input.outputSchema, input.postconditions, input.requiredCapabilities].some(value => value !== undefined)
+    if (kind === 'userscript' && (schemaVersion === 2 || hasV2Fields)) throw new RecipeValidationError('schemaVersion 2 and inputSchema/outputSchema/postconditions/requiredCapabilities apply to recipe assets only')
+    if (kind === 'recipe' && schemaVersion === 1 && hasV2Fields) throw new RecipeValidationError('inputSchema, outputSchema, postconditions and requiredCapabilities need schemaVersion 2')
     // Unknown extract modes and wait conditions never reach storage; assets already stored are not re-checked.
-    if (kind === 'recipe') validateRecipeEnums(input.recipe!)
+    if (kind === 'recipe' && schemaVersion === 1) validateRecipeEnums(input.recipe as BrowserRecipeStep[])
+    const v2 = kind === 'recipe' && schemaVersion === 2 ? this.checkV2(input, domains) : undefined
     if (kind === 'userscript') {
       const validation = validateUserscript(String(input.source ?? ''))
       if (!validation.valid) throw new Error('userscript is invalid: ' + validation.errors.join('; '))
     }
-    const inputNames = kind === 'recipe' ? recipeInputNames(input.recipe!) : declaredInputNames
+    const inputNames = v2 ? v2.inputNames : kind === 'recipe' ? recipeInputNames(input.recipe as BrowserRecipeStep[]) : declaredInputNames
+    const sourceAssetId = input.sourceAssetId ?? existing?.sourceAssetId
+    const sourceRevision = input.sourceRevision ?? existing?.sourceRevision
+    if (sourceAssetId !== undefined && (typeof sourceAssetId !== 'string' || sourceAssetId.length > 80 || !Number.isInteger(sourceRevision))) throw new RecipeValidationError('sourceAssetId needs a string id and an integer sourceRevision')
     const asset: AutomationAsset = {
       id: existing?.id ?? uid(), kind, status: 'draft', name, description: cap(String(input.description ?? ''), 500), domains, tags, inputNames,
       ...kind === 'recipe' ? { recipe: structuredClone(input.recipe!) } : { source: String(input.source) },
+      ...v2 ? {
+        schemaVersion: 2 as const,
+        ...v2.inputSchema ? { inputSchema: v2.inputSchema } : {},
+        ...v2.outputSchema ? { outputSchema: v2.outputSchema } : {},
+        ...v2.postconditions ? { postconditions: v2.postconditions } : {},
+        ...v2.requiredCapabilities ? { requiredCapabilities: v2.requiredCapabilities } : {},
+        ...v2.pending.length ? { pendingDisambiguation: v2.pending } : {},
+      } : {},
+      ...sourceAssetId !== undefined ? { sourceAssetId, sourceRevision: sourceRevision! } : {},
       revision: (existing?.revision ?? 0) + 1, testStatus: 'untested', successCount: existing?.successCount ?? 0, failureCount: existing?.failureCount ?? 0,
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, ...existing?.lastRunAt ? { lastRunAt: existing.lastRunAt } : {},
     }
@@ -387,10 +429,52 @@ export class AutomationAssetStore {
     return structuredClone(asset)
   }
 
+  /** Validate the v2 steps and asset-level fields of a draft about to be saved. Throws RecipeValidationError. */
+  private checkV2(input: Partial<AutomationAsset>, domains: readonly string[]): {
+    inputNames: string[]; inputSchema?: InputSpec[]; outputSchema?: OutputSpec[]; postconditions?: Postcondition[]; requiredCapabilities?: string[]; pending: PendingDisambiguation[]
+  } {
+    try {
+      const steps = input.recipe as BrowserRecipeStepV2[]
+      validateRecipeV2(steps)
+      const gotos = steps.filter(step => step.type === 'goto')
+      if (gotos.length && domains.length === 0) throw new Error('a recipe with goto steps must declare domains: goto may only go to the asset\'s domains')
+      for (const step of gotos) {
+        if (/\{\{/.test(step.url!)) continue // a placeholder host is checked when the recipe runs
+        const host = new URL(step.url!).hostname
+        if (!hostInDomains(host, domains)) throw new Error(`goto ${host} is not allowed on this asset: it is outside its domains (${domains.join(', ')})`)
+      }
+      const inputSchema = input.inputSchema !== undefined ? normalizeInputSchema(input.inputSchema) : undefined
+      const outputSchema = input.outputSchema !== undefined ? normalizeOutputSchema(input.outputSchema, steps) : undefined
+      const postconditions = input.postconditions !== undefined ? normalizePostconditions(input.postconditions, steps) : undefined
+      const requiredCapabilities = input.requiredCapabilities !== undefined ? normalizeRequiredCapabilities(input.requiredCapabilities) : undefined
+      const used = placeholderNames(steps, postconditions ?? [])
+      if (inputSchema) {
+        const declared = new Set(inputSchema.map(spec => spec.name))
+        const undeclared = used.filter(name => !declared.has(name))
+        if (undeclared.length) throw new Error(`the recipe uses {{${undeclared.join('}}, {{')}}} but inputSchema does not declare it`)
+      } else if (used.length > 20) throw new Error('recipe exceeds 20 reusable inputs')
+      return {
+        inputNames: inputSchema ? inputSchema.map(spec => spec.name) : used.slice(0, 20),
+        ...inputSchema ? { inputSchema } : {}, ...outputSchema ? { outputSchema } : {}, ...postconditions ? { postconditions } : {},
+        ...requiredCapabilities ? { requiredCapabilities } : {},
+        pending: pendingDisambiguation(steps),
+      }
+    } catch (error) {
+      throw error instanceof RecipeValidationError ? error : new RecipeValidationError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   validate(id: string): AutomationAsset {
     const asset = this.requireAsset(id)
     let message = 'Recipe structure is valid; runtime replay is still required.'
-    if (asset.kind === 'recipe') normalizeRecipeForCandidate(asset.recipe ?? [])
+    if (asset.kind === 'recipe' && asset.schemaVersion === 2) {
+      this.checkV2(asset, asset.domains)
+      const hasAssert = (asset.recipe as BrowserRecipeStepV2[]).some(step => step.type === 'assert')
+      const notes: string[] = []
+      if (asset.pendingDisambiguation?.length) notes.push(`${asset.pendingDisambiguation.length} step(s) still take the first match (explicitFirst): make their locators unique`)
+      if (!hasAssert && !asset.postconditions?.length) notes.push('no assert step or postcondition: a test cannot pass until one checks the result')
+      message = 'Recipe v2 structure is valid; runtime replay is still required.' + (notes.length ? ' ' + notes.join('; ') + '.' : '')
+    } else if (asset.kind === 'recipe') normalizeRecipeForCandidate((asset.recipe ?? []) as BrowserRecipeStep[])
     else {
       const validation = validateUserscript(asset.source ?? '')
       if (!validation.valid) throw new Error(validation.errors.join('; '))
@@ -447,14 +531,14 @@ export class AutomationAssetStore {
     this.write()
   }
 
-  noteTestResult(id: string, ok: boolean, url: string, evidenceLevel: EvidenceLevel = 'legacy-unverified'): void {
+  noteTestResult(id: string, ok: boolean, url: string, evidenceLevel: EvidenceLevel = 'legacy-unverified', failureReason?: string): void {
     const asset = this.requireAsset(id)
     if (asset.status !== 'draft') throw new Error('only draft automation assets can record test results')
     const domain = safeDomain(url)
     asset.testStatus = ok ? 'passed' : 'failed'
     if (ok) asset.evidenceLevel = evidenceLevel
     else delete asset.evidenceLevel
-    asset.testMessage = !ok ? `Runtime replay failed on ${domain}.`
+    asset.testMessage = !ok ? (failureReason ?? `Runtime replay failed on ${domain}.`)
       : evidenceLevel === 'verified' ? `Runtime replay passed on ${domain}; every assert step held.`
         : `Runtime replay passed on ${domain}; no assert step checked the result (legacy-unverified).`
     asset.updatedAt = nowIso()

@@ -1,6 +1,7 @@
 /** Shared guarded execution for active assets and draft runtime replay. */
 
-import type { BrowserRecipeStep, RecipeRunResult } from './automation.ts'
+import type { AnyRecipeStep, BrowserRecipeStep, RecipeRunResult } from './automation.ts'
+import { coerceInputs, materializeDeep, type BrowserRecipeStepV2 } from './automation-v2.ts'
 import type { AutomationAsset, AutomationAssetStore, EvidenceLevel } from './automation-assets.ts'
 import type { BrowserService } from './browser-service.ts'
 import { mapError } from './actions/errors.ts'
@@ -57,8 +58,8 @@ function materialize(value: string, inputs: Record<string, string>): string {
   })
 }
 
-function materializeRecipe(steps: BrowserRecipeStep[], inputs: Record<string, string>): BrowserRecipeStep[] {
-  return steps.map(step => {
+function materializeRecipe(steps: AnyRecipeStep[], inputs: Record<string, string>): BrowserRecipeStep[] {
+  return (steps as BrowserRecipeStep[]).map(step => {
     const copy = structuredClone(step) as Record<string, unknown>
     for (const key of ['value', 'text']) if (typeof copy[key] === 'string') copy[key] = materialize(copy[key], inputs)
     return copy as unknown as BrowserRecipeStep
@@ -76,6 +77,13 @@ export function automationInputs(asset: AutomationAsset, raw: unknown): Record<s
   return inputs
 }
 
+/** A v2 asset can only count as tested when something checks the business result. */
+const NO_VERIFIER = 'The steps ran, but this v2 recipe has no assert step and no postcondition, so nothing verified the result and the test cannot pass. Add an assert step or a postcondition that proves the outcome, save, and test again.'
+
+function hasVerifier(asset: AutomationAsset): boolean {
+  return (asset.recipe as BrowserRecipeStepV2[] | undefined ?? []).some(step => step.type === 'assert') || (asset.postconditions?.length ?? 0) > 0
+}
+
 export async function executeAutomationAsset(
   service: BrowserService,
   store: AutomationAssetStore,
@@ -87,14 +95,24 @@ export async function executeAutomationAsset(
 ): Promise<AutomationExecutionResult> {
   const asset = store.get(id)
   if (!asset || asset.status !== requiredStatus) throw new Error(`${requiredStatus} automation asset not found`)
-  const inputs = automationInputs(asset, rawInputs)
+  const v2 = asset.kind === 'recipe' && asset.schemaVersion === 2
+  // v2 assets with an inputSchema validate and convert inputs by type; everything else keeps the v1 string rules.
+  const inputs = v2 && asset.inputSchema ? coerceInputs(asset.inputSchema, rawInputs) : automationInputs(asset, rawInputs)
   store.assertTarget(asset, url)
   let value: unknown
   let run: RecipeRunResult
   try {
     if (asset.kind === 'recipe') {
       // legacyRecipe: stored assets keep their pre-B2 behaviour for an unknown extract mode (reported as legacyFallback).
-      const result = await service.recipe(materializeRecipe(asset.recipe ?? [], inputs), { url, signal: options.signal, legacyRecipe: true, ...options.authProfile ? { authProfile: options.authProfile } : {}, ...options.rulePack ? { rulePack: options.rulePack } : {}, session: options.session })
+      const common = { url, signal: options.signal, ...options.authProfile ? { authProfile: options.authProfile } : {}, ...options.rulePack ? { rulePack: options.rulePack } : {}, session: options.session }
+      const result = v2
+        ? await service.recipe(materializeDeep(asset.recipe ?? [], inputs) as unknown as BrowserRecipeStep[], {
+          ...common, schemaVersion: 2,
+          ...asset.postconditions ? { postconditions: materializeDeep(asset.postconditions, inputs) } : {},
+          ...asset.outputSchema ? { outputSchema: asset.outputSchema } : {},
+          allowedDomains: asset.domains,
+        })
+        : await service.recipe(materializeRecipe(asset.recipe ?? [], inputs), { ...common, legacyRecipe: true })
       ;({ run, page: value } = splitRecipeResult(result))
     } else {
       try {
@@ -117,9 +135,16 @@ export async function executeAutomationAsset(
     else store.noteTestResult(asset.id, false, url)
     throw error
   }
-  const succeeded = run.executionStatus === 'completed' && run.validationStatus !== 'failed'
+  let succeeded = run.executionStatus === 'completed' && run.validationStatus !== 'failed'
   const evidenceLevel: EvidenceLevel = run.validationStatus === 'passed' ? 'verified' : 'legacy-unverified'
+  let failureReason: string | undefined
+  if (requiredStatus === 'draft' && v2 && succeeded && !hasVerifier(asset)) {
+    // v1 keeps its old gate (a passing test without asserts is legacy-unverified); a v2 asset must verify its result.
+    succeeded = false
+    failureReason = NO_VERIFIER
+    run = { ...run, message: NO_VERIFIER }
+  }
   if (requiredStatus === 'active') store.noteRun(asset.id, succeeded)
-  else store.noteTestResult(asset.id, succeeded, url, evidenceLevel)
+  else store.noteTestResult(asset.id, succeeded, url, evidenceLevel, failureReason)
   return { asset: store.get(asset.id)!, value, execution: { ...run, evidenceLevel }, succeeded }
 }

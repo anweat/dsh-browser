@@ -26,7 +26,8 @@ import { browserRuntimeCliPath, loadBrowserRuntime, opencliEntryPath, runOpencli
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
-import { runRecipe, type BrowserRecipeStep, type RecipeRunResult, type RecipeStepResult } from './automation.ts'
+import { runRecipe, type AnyRecipeStep, type BrowserRecipeStep, type RecipeRunResult, type RecipeStepResult, type RunRecipeOptions } from './automation.ts'
+import type { OutputSpec, Postcondition } from './automation-v2.ts'
 import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
@@ -1354,8 +1355,18 @@ export class BrowserService {
    * (browser_call is serialized per agent) until the page is quiet again.
    */
   async recipe(
-    steps: readonly BrowserRecipeStep[],
-    opts: { url?: string; waitMs?: number; authProfile?: string; rulePack?: string; signal?: AbortSignal; session?: string; legacyRecipe?: boolean } = {},
+    steps: readonly AnyRecipeStep[],
+    opts: {
+      url?: string; waitMs?: number; authProfile?: string; rulePack?: string; signal?: AbortSignal; session?: string; legacyRecipe?: boolean
+      /** 2: strict LocatorSpec steps, goto/clear, postconditions (see src/automation-v2.ts). Default 1. */
+      schemaVersion?: 1 | 2
+      postconditions?: readonly Postcondition[]
+      outputSchema?: readonly OutputSpec[]
+      /** v2 goto may land on these domains. */
+      allowedDomains?: readonly string[]
+      /** v2 goto may also stay on the origin the recipe started on (inline recipes; stored assets are limited to their domains). */
+      gotoSameOrigin?: boolean
+    } = {},
   ): Promise<RecipeServiceResult> {
     const existing = this.peek(opts.session)?.page
     if (!opts.url && (!existing || existing.isClosed())) throw new Error('browser recipe requires url or an active target.open page')
@@ -1367,7 +1378,25 @@ export class BrowserService {
       await applyRuleSteps(page, this.state(opts.session).rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
     }
-    const run = await runRecipe(page, steps, () => this.captureScreenshot(page), opts.signal, { legacy: opts.legacyRecipe })
+    const options: RunRecipeOptions = { legacy: opts.legacyRecipe }
+    if (opts.schemaVersion === 2) {
+      let startOrigin: string | undefined
+      try { startOrigin = new URL(page.url()).origin } catch { /* about:blank has no origin */ }
+      Object.assign(options, {
+        schemaVersion: 2,
+        ...opts.postconditions ? { postconditions: opts.postconditions } : {},
+        ...opts.outputSchema ? { outputSchema: opts.outputSchema } : {},
+        ...opts.allowedDomains ? { allowedDomains: opts.allowedDomains } : {},
+        ...opts.gotoSameOrigin && startOrigin && startOrigin !== 'null' ? { sameOrigin: startOrigin } : {},
+        // Same navigation path as target.open: usage governor, settle, rule steps.
+        goto: async (target: string) => {
+          await this.navigate(page, target, { waitUntil: 'domcontentloaded', timeout: 30_000 }, opts.signal)
+          await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
+          await applyRuleSteps(page, this.state(opts.session).rulePack)
+        },
+      } satisfies RunRecipeOptions)
+    }
+    const run = await runRecipe(page, steps, () => this.captureScreenshot(page), opts.signal, options)
     const state = await this.readState(page, false).catch((): InteractiveState => ({ url: page.isClosed() ? '' : page.url(), title: '', text: '' }))
     return { ...state, ...run, steps: run.completedSteps }
   }
