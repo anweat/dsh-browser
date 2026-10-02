@@ -57,6 +57,7 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
       rulePack: { type: 'string' },
     },
     approval: 'asset-develop', readOnly: true, mutating: false, concurrencySafe: false, timeoutMs: 30_000, settleMs: RECIPE_SETTLE_MS,
+    errors: ['VALIDATION_FAILED', 'OUTCOME_UNKNOWN'],
     examples: [{ args: { action: 'get', id: 'asset-id' } }],
     async execute(args, ctx) {
       const { assets, development } = ctx
@@ -111,6 +112,7 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
       authProfile: { type: 'string' }, rulePack: { type: 'string' },
     },
     approval: 'asset-run', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 120_000, settleMs: RECIPE_SETTLE_MS,
+    errors: ['VALIDATION_FAILED', 'OUTCOME_UNKNOWN'],
     examples: [{ args: { id: 'asset-id', url: 'https://example.com/search', inputs: { query: 'dsh' } } }],
     async execute(args, ctx) {
       if (!ctx.assets) throw new ActionUnavailableError('automation assets are unavailable')
@@ -137,6 +139,7 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
       steps: { type: 'array', required: true, items: { ref: 'recipeStep' } },
     },
     approval: 'recipe', readOnly: true, mutating: true, concurrencySafe: false, timeoutMs: 120_000, settleMs: RECIPE_SETTLE_MS,
+    errors: ['VALIDATION_FAILED', 'OUTCOME_UNKNOWN', 'INVALID_RECIPE'],
     examples: [{ args: { url: 'https://example.com/', steps: [{ type: 'extract', selector: 'main', mode: 'text', limit: 5 }] } }],
     async execute(args, ctx) {
       const steps = args.steps as BrowserRecipeStep[]

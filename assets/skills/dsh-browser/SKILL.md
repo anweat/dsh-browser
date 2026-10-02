@@ -70,8 +70,12 @@ A wrong argument returns `INVALID_ARGS` with the schema attached. Fix the call a
 | `NOT_ACTIONABLE` | the element is hidden, disabled, or covered: wait or dismiss the overlay |
 | `TARGET_CLOSED` | call `target.open` again |
 | `DEADLINE` | with `executionStatus: "outcome_unknown"` the action may have taken effect: verify with `observe.read`, never resubmit blindly |
-| `CANCELLED` | the call was stopped; do not assume it completed |
+| `OUTCOME_UNKNOWN` | a step that changes the page (click, fill, press, select, check) timed out, so it may or may not have happened: check the real state with `observe.read`, never resend a submit |
+| `VALIDATION_FAILED` | the steps ran but an `assert` did not hold, so the result is not confirmed: read the page, then fix the recipe or the assert; earlier steps are not undone and must not be repeated blindly |
+| `CANCELLED` | the call was stopped; steps that already ran stay done (see `effects` in the result) |
 | `POLICY_DENIED` / `CAPABILITY_UNAVAILABLE` | not allowed or not set up here (for example Chromium missing: `runtime.install`) |
+
+Recipe runs (`automation.run_recipe`, `automation.run`, `automation.develop` test) put the whole run in `result` even when `ok` is false: `executionStatus` (`completed`, `failed`, `cancelled`, `outcome_unknown`), `validationStatus` (`not_checked`, `passed`, `failed`), `completedSteps`, `failedStep`, `effects` (`none`, `observed`, `unknown`), `outputs`. `ok` is true only when the run completed and no assert failed. `completed` with `not_checked` means the steps ran, not that the result is right; add an `assert`. If `effects` is not `none`, earlier steps already changed something and nothing is rolled back (`references/recipes.md`).
 
 For a submit, purchase, or any irreversible step, confirm the business result on the page after the call (confirmation text, new URL, changed list) before telling the user it worked.
 

@@ -203,7 +203,9 @@ cookie 与 storage，跨 session 串号正是要防的事。
 { "ok": false, "action": "act.click", "executionStatus": "failed", "error": { "code": "LOCATOR_NOT_FOUND", "message": "<Playwright 原始信息>", "hint": "…" } }
 ```
 
-错误码：`INVALID_ARGS`、`UNKNOWN_ACTION`、`CAPABILITY_UNAVAILABLE`、`POLICY_DENIED`、`LOCATOR_NOT_FOUND`、`LOCATOR_AMBIGUOUS`、`NOT_ACTIONABLE`、`TARGET_CLOSED`、`DEADLINE`、`CANCELLED`、`NOT_FOUND`、`ACTION_FAILED`。会产生副作用的动作超时时 `executionStatus` 为 `outcome_unknown`，调用方应先核验页面再决定是否重试。
+错误码：`INVALID_ARGS`、`UNKNOWN_ACTION`、`CAPABILITY_UNAVAILABLE`、`POLICY_DENIED`、`LOCATOR_NOT_FOUND`、`LOCATOR_AMBIGUOUS`、`NOT_ACTIONABLE`、`TARGET_CLOSED`、`DEADLINE`、`CANCELLED`、`NOT_FOUND`、`ACTION_FAILED`，以及 recipe 专用的 `VALIDATION_FAILED`、`OUTCOME_UNKNOWN`、`INVALID_RECIPE`。会产生副作用的动作超时时 `executionStatus` 为 `outcome_unknown`，调用方应先核验页面再决定是否重试。
+
+**recipe 的执行结果**：`automation.run_recipe`、`automation.run`、`automation.develop` 的 `test` 总是把完整的运行报告放在 `result` 里，失败时也一样（此时 `ok` 为 false，并附带 `error`）：`executionStatus`（`completed` / `failed` / `cancelled` / `outcome_unknown`）、`validationStatus`（`not_checked` / `passed` / `failed`）、`completedSteps`、`failedStep{index, action, errorCode, message}`、`effects`（`none` / `observed` / `unknown`）、`outputs`。`ok` 只在“执行完成且没有断言失败”时为 true。fill、type、click、press、select、check 视为有副作用：它们超时则 `executionStatus` 为 `outcome_unknown`、`effects` 为 `unknown`。取消和整体 deadline 在每一步开始前以及最后一步之后检查；正在执行的 Playwright 步骤无法中断，调用会等它返回，已完成的步骤不回滚，session 页面保持打开。测试或运行只有在执行完成且没有断言失败时才算通过；没有 `assert` 步骤的旧式 recipe 仍可通过测试，但资产记为 `evidenceLevel: 'legacy-unverified'`。
 
 **审批按动作判断**：Host 的审批理由写明动作和关键参数（例如 `act.click role="button" name="Submit"`），`browser_index` 直接放行，`browser_call` 解析出动作后适用与下表相同的规则，不可用的动作在 `browser_call` 中再拒绝一次。Host 里按工具名设置的“总是允许”不会跳过插件策略。
 
