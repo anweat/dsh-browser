@@ -14,7 +14,7 @@ import { registerAutomationAssetRpc } from '../src/automation-assets-rpc.ts'
 test('waits cannot disable timeouts and primitive writes retain approvals', () => {
   assert.throws(() => validateRecipe([{ type: 'wait', condition: 'selector', value: '#missing', timeoutMs: 0 }]), /timeoutMs/)
   assert.throws(() => validateRecipe([{ type: 'wait', condition: 'unknown' } as never]), /condition/)
-  for (const name of ['browser_press', 'browser_select', 'browser_check']) {
+  for (const name of ['act.press', 'act.select', 'act.check']) {
     assert.equal(browserPolicyDecision(name, {}, 'read-only').kind, 'deny')
     assert.equal(browserPolicyDecision(name, {}, 'standard').kind, 'ask')
     assert.equal(browserPolicyDecision(name, {}, 'autonomous').kind, 'allow')
@@ -38,11 +38,15 @@ test('real browser handles primitives and hidden uploads; redirects cannot expan
   try {
     await assert.rejects(service.open('file:///fixture.txt'), /HTTP/)
     await service.open(base)
-    const call = (name: string, args: unknown) => definitions.get(name).execute(args, { signal: new AbortController().signal })
-    await call('browser_wait', { selector: 'p', timeoutMs: 1000 })
-    await call('browser_press', { selector: '#q', key: 'Enter' })
-    await call('browser_select', { selector: '#s', values: ['b'] })
-    await call('browser_check', { selector: '#c', checked: true })
+    const call = async (action: string, args: unknown) => {
+      const reply = await definitions.get('browser_call').execute({ action, args }, { signal: new AbortController().signal })
+      assert.equal(reply.ok, true, JSON.stringify(reply))
+      return reply
+    }
+    await call('act.wait', { selector: 'p', timeoutMs: 1000 })
+    await call('act.press', { selector: '#q', key: 'Enter' })
+    await call('act.select', { selector: '#s', values: ['b'] })
+    await call('act.check', { selector: '#c', checked: true })
     const file = path.join(dir, 'fixture.txt'); fs.writeFileSync(file, 'fixture')
     await service.setFiles('#f', [file], { timeoutMs: 1000 })
     const state = await service.evaluate('({enter:document.body.dataset.enter,selected:document.querySelector("#s").value,checked:document.querySelector("#c").checked,files:document.querySelector("#f").files.length})')

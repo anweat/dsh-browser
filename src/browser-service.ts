@@ -28,7 +28,7 @@ import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
 import { runRecipe, type BrowserRecipeStep, type RecipeStepResult } from './automation.ts'
 import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
-import { configuredBrowserTools, type AutomationMode } from './freedom.ts'
+import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
 
@@ -173,7 +173,10 @@ export interface BrowserStatus {
   opencliInstalled: boolean
   opencliEntryPath?: string
   automationMode: AutomationMode
+  /** Tool names registered for the model under the configured toolSurface. */
   exposedTools: string[]
+  /** Browser actions (`group.action`) the model can run. */
+  exposedActions: string[]
   directInteractionPolicy: 'deny' | 'ask' | 'allow'
   mutatingRecipePolicy: 'deny' | 'ask' | 'allow'
   externalUserscriptPolicy: 'deny' | 'ask' | 'allow'
@@ -319,8 +322,8 @@ function redactCaptureUrl(value: string): string {
  *
  * A single `BrowserService` instance is provided to every consumer, so before
  * this existed two concurrent sessions shared one `activePage`: whichever
- * session called `browser_open` last owned the page, and the other session's
- * `browser_read` / `browser_evaluate` / `browser_console` then operated on a
+ * session called `target.open` last owned the page, and the other session's
+ * `observe.read` / `script.evaluate` / `inspect.console` then operated on a
  * page it never opened — including the other session's cookies and DOM.
  *
  * State is therefore keyed by session. The browser PROCESS stays shared on
@@ -415,7 +418,7 @@ export class BrowserService {
    * The state bucket belonging to a tool execution's session.
    *
    * Tools use this for the few operations that act on the bucket itself
-   * (`browser_close`) rather than passing a key into a method.
+   * (`target.close`) rather than passing a key into a method.
    */
   sessionState(agent: SessionIdentity | undefined): SessionState | undefined {
     return this.peek(sessionKeyFor(agent))
@@ -452,7 +455,7 @@ export class BrowserService {
   /**
    * Look up an existing bucket WITHOUT creating one and WITHOUT evicting.
    *
-   * Queries (`browser_status`, `browser_console`, `browser_requests`) must go
+   * Queries (`runtime.status`, `inspect.console`, `inspect.requests`) must go
    * through this, not {@link state}. Creating a bucket for a session that only
    * *asks* a question would both leak a slot and push a live session past the
    * limit, so a read could evict the very page it was trying to describe.
@@ -540,7 +543,7 @@ export class BrowserService {
               await this.installChromium()
               return this.trackBrowser(await pw.chromium.launch(launchOptions))
             } else {
-              throw new Error('dsh-browser: chromium is not installed for ' + this.config.browserRuntime + '. Run the browser_install tool, or: node "' + browserRuntimeCliPath(this.config.browserRuntime) + '" install chromium')
+              throw new Error('dsh-browser: chromium is not installed for ' + this.config.browserRuntime + '. Run the runtime.install action, or: node "' + browserRuntimeCliPath(this.config.browserRuntime) + '" install chromium')
             }
           } else {
             throw error
@@ -1068,25 +1071,25 @@ export class BrowserService {
   private screenshotFile(options: BrowserScreenshotOptions): { file: string; format: 'png' | 'jpeg' } {
     const filename = options.filename ?? `shot-${Date.now()}-${uid().slice(0, 8)}.${options.format === 'jpeg' ? 'jpg' : 'png'}`
     if (filename !== path.basename(filename) || !/^[\w.() -]{1,160}$/.test(filename)) {
-      throw new Error('browser_screenshot filename must be a plain file name inside snapshotDir')
+      throw new Error('observe.screenshot filename must be a plain file name inside snapshotDir')
     }
     const extension = path.extname(filename).toLowerCase()
     const inferred = extension === '.jpg' || extension === '.jpeg' ? 'jpeg' : extension === '.png' ? 'png' : undefined
     const format = options.format ?? inferred ?? 'png'
-    if (inferred && inferred !== format) throw new Error('browser_screenshot filename extension does not match format')
-    if (!inferred) throw new Error('browser_screenshot filename must end in .png, .jpg, or .jpeg')
+    if (inferred && inferred !== format) throw new Error('observe.screenshot filename extension does not match format')
+    if (!inferred) throw new Error('observe.screenshot filename must end in .png, .jpg, or .jpeg')
     return { file: path.join(this.config.snapshotDir, filename), format }
   }
 
   private async captureScreenshot(page: any, options: BrowserScreenshotOptions = {}): Promise<string> {
     fs.mkdirSync(this.config.snapshotDir, { recursive: true })
-    if (options.target && options.clip) throw new Error('browser_screenshot cannot combine target and clip')
-    if (options.target && options.fullPage) throw new Error('browser_screenshot cannot combine target and fullPage')
+    if (options.target && options.clip) throw new Error('observe.screenshot cannot combine target and clip')
+    if (options.target && options.fullPage) throw new Error('observe.screenshot cannot combine target and fullPage')
     if (options.quality !== undefined && (!Number.isInteger(options.quality) || options.quality < 0 || options.quality > 100)) {
-      throw new Error('browser_screenshot quality must be an integer from 0 to 100')
+      throw new Error('observe.screenshot quality must be an integer from 0 to 100')
     }
     const { file, format } = this.screenshotFile(options)
-    if (format === 'png' && options.quality !== undefined) throw new Error('browser_screenshot quality is only supported for jpeg')
+    if (format === 'png' && options.quality !== undefined) throw new Error('observe.screenshot quality is only supported for jpeg')
     const screenshotOptions: Record<string, unknown> = {
       path: file,
       type: format,
@@ -1095,7 +1098,7 @@ export class BrowserService {
     if (options.clip) {
       const { x, y, width, height } = options.clip
       if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || width > 20_000 || height > 20_000) {
-        throw new Error('browser_screenshot clip must use finite non-negative coordinates and dimensions from 1 to 20,000')
+        throw new Error('observe.screenshot clip must use finite non-negative coordinates and dimensions from 1 to 20,000')
       }
       screenshotOptions.clip = options.clip
     } else if (!options.target) {
@@ -1131,7 +1134,7 @@ export class BrowserService {
 
   async click(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    await this.resolveTarget(page, target).click({ timeout: boundedTimeout(opts.timeoutMs, 'browser_click timeoutMs') })
+    await this.resolveTarget(page, target).click({ timeout: boundedTimeout(opts.timeoutMs, 'act.click timeoutMs') })
     if (opts.waitMs !== undefined) await page.waitForTimeout(opts.waitMs)
     else await page.waitForTimeout(500)
     return this.readState(page, true)
@@ -1139,21 +1142,21 @@ export class BrowserService {
 
   async type(target: BrowserTarget, text: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    await this.resolveTarget(page, target).fill(text, { timeout: boundedTimeout(opts.timeoutMs, 'browser_type timeoutMs') })
+    await this.resolveTarget(page, target).fill(text, { timeout: boundedTimeout(opts.timeoutMs, 'act.fill timeoutMs') })
     return this.readState(page, false)
   }
 
   async wait(target: BrowserTarget | undefined, opts: { urlPattern?: string; networkIdle?: boolean; timeMs?: number; state?: 'visible' | 'hidden' | 'attached' | 'detached'; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     const modes = [target !== undefined, opts.urlPattern !== undefined, opts.networkIdle === true, opts.timeMs !== undefined].filter(Boolean)
-    if (modes.length !== 1) throw new Error('browser_wait requires exactly one target, urlPattern, networkIdle=true, or timeMs')
-    const timeout = boundedTimeout(opts.timeoutMs, 'browser_wait timeoutMs')
+    if (modes.length !== 1) throw new Error('act.wait requires exactly one target, urlPattern, networkIdle=true, or timeMs')
+    const timeout = boundedTimeout(opts.timeoutMs, 'act.wait timeoutMs')
     if (target !== undefined) await this.resolveTarget(page, target).waitFor({ state: opts.state ?? 'visible', timeout })
     else if (opts.urlPattern !== undefined) await page.waitForURL(boundedString(opts.urlPattern, 'urlPattern', 2_000), { timeout })
     else if (opts.networkIdle) await page.waitForLoadState('networkidle', { timeout })
     else {
       const timeMs = opts.timeMs as number
-      if (!Number.isFinite(timeMs) || timeMs < 0 || timeMs > 10_000) throw new Error('browser_wait timeMs must be between 0 and 10,000')
+      if (!Number.isFinite(timeMs) || timeMs < 0 || timeMs > 10_000) throw new Error('act.wait timeMs must be between 0 and 10,000')
       await page.waitForTimeout(timeMs)
     }
     return this.readState(page, false)
@@ -1161,31 +1164,31 @@ export class BrowserService {
 
   async press(target: BrowserTarget | undefined, key: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    const value = boundedString(key, 'browser_press key', 100)
-    if (target !== undefined) await this.resolveTarget(page, target).press(value, { timeout: boundedTimeout(opts.timeoutMs, 'browser_press timeoutMs') })
+    const value = boundedString(key, 'act.press key', 100)
+    if (target !== undefined) await this.resolveTarget(page, target).press(value, { timeout: boundedTimeout(opts.timeoutMs, 'act.press timeoutMs') })
     else await page.keyboard.press(value)
     return this.readState(page, false)
   }
 
   async select(target: BrowserTarget, values: readonly string[], opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
-    if (values.length < 1 || values.length > 20) throw new Error('browser_select requires 1 to 20 values')
-    values.forEach(value => boundedString(value, 'browser_select value', 2_000))
+    if (values.length < 1 || values.length > 20) throw new Error('act.select requires 1 to 20 values')
+    values.forEach(value => boundedString(value, 'act.select value', 2_000))
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    await this.resolveTarget(page, target).selectOption([...values], { timeout: boundedTimeout(opts.timeoutMs, 'browser_select timeoutMs') })
+    await this.resolveTarget(page, target).selectOption([...values], { timeout: boundedTimeout(opts.timeoutMs, 'act.select timeoutMs') })
     return this.readState(page, false)
   }
 
   async check(target: BrowserTarget, checked = true, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     const locator = this.resolveTarget(page, target)
-    if (checked) await locator.check({ timeout: boundedTimeout(opts.timeoutMs, 'browser_check timeoutMs') })
-    else await locator.uncheck({ timeout: boundedTimeout(opts.timeoutMs, 'browser_check timeoutMs') })
+    if (checked) await locator.check({ timeout: boundedTimeout(opts.timeoutMs, 'act.check timeoutMs') })
+    else await locator.uncheck({ timeout: boundedTimeout(opts.timeoutMs, 'act.check timeoutMs') })
     return this.readState(page, false)
   }
 
   async hover(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    const timeoutMs = boundedTimeout(opts.timeoutMs, 'browser_hover timeoutMs')
+    const timeoutMs = boundedTimeout(opts.timeoutMs, 'act.hover timeoutMs')
     const waitMs = Math.min(Math.max(opts.waitMs ?? 300, 0), timeoutMs)
     await this.resolveTarget(page, target).hover({ timeout: timeoutMs })
     await page.waitForTimeout(waitMs)
@@ -1193,24 +1196,24 @@ export class BrowserService {
   }
 
   async setFiles(target: BrowserTarget, files: readonly string[], opts: { timeoutMs?: number; session?: string } = {}): Promise<FileUploadResult> {
-    if (files.length === 0 || files.length > 20) throw new Error('browser_set_files requires 1 to 20 files')
+    if (files.length === 0 || files.length > 20) throw new Error('act.upload requires 1 to 20 files')
     const resolved = files.map(file => {
-      if (!path.isAbsolute(file)) throw new Error('browser_set_files requires absolute file paths: ' + file)
+      if (!path.isAbsolute(file)) throw new Error('act.upload requires absolute file paths: ' + file)
       const real = fs.realpathSync(file)
-      if (!fs.statSync(real).isFile()) throw new Error('browser_set_files path is not a file: ' + file)
+      if (!fs.statSync(real).isFile()) throw new Error('act.upload path is not a file: ' + file)
       return real
     })
     const totalBytes = resolved.reduce((total, file) => total + fs.statSync(file).size, 0)
-    if (totalBytes > 512 * 1024 * 1024) throw new Error('browser_set_files total upload size exceeds 512 MiB')
+    if (totalBytes > 512 * 1024 * 1024) throw new Error('act.upload total upload size exceeds 512 MiB')
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    await this.resolveTarget(page, target).setInputFiles(resolved, { timeout: boundedTimeout(opts.timeoutMs, 'browser_set_files timeoutMs') })
+    await this.resolveTarget(page, target).setInputFiles(resolved, { timeout: boundedTimeout(opts.timeoutMs, 'act.upload timeoutMs') })
     return { ...await this.readState(page, true), files: resolved.map(file => path.basename(file)) }
   }
 
   async evaluate(expression: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<EvaluateResult> {
     const source = expression.trim()
-    if (!source) throw new Error('browser_evaluate requires a JavaScript expression')
-    if (source.length > 20_000) throw new Error('browser_evaluate expression exceeds 20,000 characters')
+    if (!source) throw new Error('script.evaluate requires a JavaScript expression')
+    if (source.length > 20_000) throw new Error('script.evaluate expression exceeds 20,000 characters')
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? 15_000, 1_000), 30_000)
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -1222,9 +1225,9 @@ export class BrowserService {
           try {
             const session = await page.context().newCDPSession(page)
             try { await session.send('Runtime.terminateExecution') } finally { await session.detach().catch(() => {}) }
-            reject(new Error('browser_evaluate timed out after ' + timeoutMs + 'ms; page JavaScript was terminated and the active page remains open'))
+            reject(new Error('script.evaluate timed out after ' + timeoutMs + 'ms; page JavaScript was terminated and the active page remains open'))
           } catch (error) {
-            reject(new Error('browser_evaluate timed out after ' + timeoutMs + 'ms; unable to terminate page JavaScript without closing the active page: ' + String(error).slice(0, 200)))
+            reject(new Error('script.evaluate timed out after ' + timeoutMs + 'ms; unable to terminate page JavaScript without closing the active page: ' + String(error).slice(0, 200)))
           }
         })()
       }, timeoutMs)
@@ -1235,7 +1238,7 @@ export class BrowserService {
       try {
         result = await Promise.race([page.evaluate(script), timeout]) as { resultJson: string; truncated: boolean }
       } catch (error) {
-        if (timedOut) throw new Error('browser_evaluate timed out after ' + timeoutMs + 'ms; page JavaScript was terminated and the active page remains open')
+        if (timedOut) throw new Error('script.evaluate timed out after ' + timeoutMs + 'ms; page JavaScript was terminated and the active page remains open')
         throw error
       }
       return {
@@ -1269,10 +1272,10 @@ export class BrowserService {
   consoleMessages(opts: { level?: string; limit?: number; clear?: boolean; session?: string } = {}): { enabled: boolean; records: BrowserConsoleRecord[] } {
     const severities = ['debug', 'log', 'info', 'warning', 'error']
     const threshold = opts.level ? severities.indexOf(opts.level) : 0
-    if (opts.level && threshold < 0) throw new Error('browser_console level must be debug, log, info, warning, or error')
+    if (opts.level && threshold < 0) throw new Error('inspect.console level must be debug, log, info, warning, or error')
     const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100), 1), 200)
     // A session that never captured has nothing to report; reading must not
-    // mint it a bucket, or `browser_console` would evict someone's page.
+    // mint it a bucket, or `inspect.console` would evict someone's page.
     const state = this.peek(opts.session) ?? newSessionState()
     const records = state.capturedConsole.filter(record => {
       const index = severities.indexOf(record.type === 'warn' ? 'warning' : record.type)
@@ -1300,7 +1303,7 @@ export class BrowserService {
     opts: { url?: string; waitMs?: number; authProfile?: string; rulePack?: string; signal?: AbortSignal; session?: string } = {},
   ): Promise<RecipeRunResult> {
     const existing = this.peek(opts.session)?.page
-    if (!opts.url && (!existing || existing.isClosed())) throw new Error('browser recipe requires url or an active browser_open page')
+    if (!opts.url && (!existing || existing.isClosed())) throw new Error('browser recipe requires url or an active target.open page')
     const page = await this.ensureActivePage(opts.url, opts)
     if (opts.url) {
       page.setDefaultTimeout(30_000)
@@ -1369,7 +1372,7 @@ export class BrowserService {
         ]
       : []
     if (!chromiumInstalled && chromiumExecutablePath && (this.config.channel === 'chromium' || !!this.config.executablePath)) {
-      runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath}. Run browser_install for ${this.config.browserRuntime}.`)
+      runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath}. Run runtime.install for ${this.config.browserRuntime}.`)
     }
     if (this.config.opencliEnabled && !opencliInstalled) runtimeWarnings.push('OpenCLI is enabled but its package entry is not installed.')
     return {
@@ -1382,7 +1385,8 @@ export class BrowserService {
       opencliInstalled,
       ...resolvedOpencliEntryPath ? { opencliEntryPath: resolvedOpencliEntryPath } : {},
       automationMode: this.config.automationMode,
-      exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets, this.config.enabled),
+      exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets, this.config.enabled, this.config.toolSurface),
+      exposedActions: configuredBrowserActions(this.config.automationMode, this.config.automationAssets, this.config.enabled),
       directInteractionPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
       mutatingRecipePolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'standard' ? 'ask' : 'allow',
       externalUserscriptPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',

@@ -10,7 +10,7 @@ import { browserPolicyDecision } from '../src/approval-policy.ts'
 import { loadBrowserRuntime, runNode } from '../src/deps.ts'
 import { BrowserService } from '../src/browser-service.ts'
 import { resolveConfig } from '../src/config.ts'
-import { ALL_BROWSER_TOOL_NAMES, browserToolsForMode, configuredBrowserTools, resolveAutomationMode } from '../src/freedom.ts'
+import { ALL_BROWSER_ACTION_NAMES, browserActionsForMode, configuredBrowserActions, configuredBrowserTools, resolveAutomationMode } from '../src/freedom.ts'
 import { AutomationAssetStore, resolveAutomationAssetPolicy } from '../src/automation-assets.ts'
 import { executeAutomationAsset } from '../src/automation-execution.ts'
 import { registerTools } from '../src/tools.ts'
@@ -23,13 +23,16 @@ const VALID_SCRIPT = `// ==UserScript==
 return { heading: document.querySelector('h1')?.textContent || '', input: __DSH_INPUTS__.query || '' }`
 
 test('registered tool schemas do not expose host prompt template groups', () => {
-  const registered: unknown[] = []
-  const ctx = { tools: { register: (tool: unknown) => registered.push(tool) } }
+  for (const toolSurface of ['indexed', 'flat'] as const) {
+    const registered: unknown[] = []
+    const ctx = { tools: { register: (tool: unknown) => registered.push(tool) } }
 
-  registerTools(ctx as never, resolveConfig({ automationMode: 'unrestricted' }), {} as never)
+    registerTools(ctx as never, resolveConfig({ automationMode: 'unrestricted', toolSurface }), {} as never)
 
-  const unsafe = registered.filter(tool => /\{\{[^{}]+\}\}/.test(JSON.stringify(tool)))
-  assert.deepEqual(unsafe, [])
+    assert.ok(registered.length >= 2, `${toolSurface} registered tools`)
+    const unsafe = registered.filter(tool => /\{\{[^{}]+\}\}/.test(JSON.stringify(tool)))
+    assert.deepEqual(unsafe, [], toolSurface)
+  }
 })
 
 test('userscript metadata is scoped, hashed, and capability-reported', () => {
@@ -96,18 +99,18 @@ test('recipes bound steps and distinguish read-only from mutating flows', () => 
 })
 
 test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating recipes', () => {
-  assert.equal(browserPolicyDecision('browser_userscript_run', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_opencli_run', { args: ['reddit', 'search', 'dsh'] }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'extract', selector: 'main' }] }).kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_userscript_run', { source: 'alert(1)', url: 'https://example.com/' }).kind, 'deny')
-  assert.equal(browserPolicyDecision('browser_hover', { selector: '#menu' }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_press', { key: 'Enter' }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_select', { selector: '#mode', values: ['b'] }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_check', { selector: '#enabled' }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_evaluate', { expression: 'document.title' }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_set_files', { files: ['C:\\fixture.txt'] }).kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_set_files', { files: [] }).kind, 'deny')
+  assert.equal(browserPolicyDecision('script.run_userscript', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }).kind, 'ask')
+  assert.equal(browserPolicyDecision('opencli.run', { args: ['reddit', 'search', 'dsh'] }).kind, 'ask')
+  assert.equal(browserPolicyDecision('automation.run_recipe', { steps: [{ type: 'extract', selector: 'main' }] }).kind, 'allow')
+  assert.equal(browserPolicyDecision('automation.run_recipe', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }).kind, 'ask')
+  assert.equal(browserPolicyDecision('script.run_userscript', { source: 'alert(1)', url: 'https://example.com/' }).kind, 'deny')
+  assert.equal(browserPolicyDecision('act.hover', { selector: '#menu' }).kind, 'ask')
+  assert.equal(browserPolicyDecision('act.press', { key: 'Enter' }).kind, 'ask')
+  assert.equal(browserPolicyDecision('act.select', { selector: '#mode', values: ['b'] }).kind, 'ask')
+  assert.equal(browserPolicyDecision('act.check', { selector: '#enabled' }).kind, 'ask')
+  assert.equal(browserPolicyDecision('script.evaluate', { expression: 'document.title' }).kind, 'ask')
+  assert.equal(browserPolicyDecision('act.upload', { files: ['C:\\fixture.txt'] }).kind, 'ask')
+  assert.equal(browserPolicyDecision('act.upload', { files: [] }).kind, 'deny')
   assert.equal(browserPolicyDecision('web_deps', { action: 'check' }, 'standard').kind, 'allow')
   assert.equal(browserPolicyDecision('web_deps', { action: 'install', backend: 'yt-dlp' }, 'standard').kind, 'ask')
   assert.equal(browserPolicyDecision('web_cache_clear', {}, 'standard').kind, 'ask')
@@ -115,45 +118,51 @@ test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating reci
 })
 
 test('automation modes expose predictable tool sets and retain validation when approval is disabled', () => {
-  assert.equal(ALL_BROWSER_TOOL_NAMES.length, 30)
-  assert.equal(browserToolsForMode('read-only').length, 17)
-  assert.equal(browserToolsForMode('standard').length, 30)
-  assert.equal(browserToolsForMode('autonomous').length, 30)
-  assert.equal(browserToolsForMode('unrestricted').length, 30)
-  assert.equal(browserToolsForMode('read-only').includes('browser_userscript_run'), false)
-  assert.equal(browserToolsForMode('read-only').includes('browser_recipe_run'), true)
-  assert.equal(browserToolsForMode('read-only').includes('browser_automation_search'), true)
-  assert.equal(browserToolsForMode('read-only').includes('browser_automation_develop'), true)
-  assert.equal(browserToolsForMode('read-only').includes('browser_automation_run'), false)
-  assert.equal(configuredBrowserTools('standard', { modelDevelopmentEnabled: false }).includes('browser_automation_develop'), false)
+  // The 30 former tools map onto 30 actions, plus target.list.
+  assert.equal(ALL_BROWSER_ACTION_NAMES.length, 31)
+  assert.equal(browserActionsForMode('read-only').length, 18)
+  assert.equal(browserActionsForMode('standard').length, 31)
+  assert.equal(browserActionsForMode('autonomous').length, 31)
+  assert.equal(browserActionsForMode('unrestricted').length, 31)
+  assert.equal(browserActionsForMode('read-only').includes('script.run_userscript'), false)
+  assert.equal(browserActionsForMode('read-only').includes('automation.run_recipe'), true)
+  assert.equal(browserActionsForMode('read-only').includes('automation.search'), true)
+  assert.equal(browserActionsForMode('read-only').includes('automation.develop'), true)
+  assert.equal(browserActionsForMode('read-only').includes('automation.run'), false)
+  assert.equal(configuredBrowserActions('standard', { modelDevelopmentEnabled: false }).includes('automation.develop'), false)
+  assert.deepEqual(configuredBrowserActions('standard', { modelDevelopmentEnabled: true }, false), [])
+  // The model-visible tool names are the surface, not the actions.
+  assert.deepEqual(configuredBrowserTools('read-only', { modelDevelopmentEnabled: true }), ['browser_index', 'browser_call'])
   assert.deepEqual(configuredBrowserTools('standard', { modelDevelopmentEnabled: true }, false), [])
+  assert.equal(configuredBrowserTools('standard', { modelDevelopmentEnabled: true }, true, 'flat').length, 31)
+  assert.equal(configuredBrowserTools('read-only', { modelDevelopmentEnabled: true }, true, 'flat').length, 18)
 
-  assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'read-only').kind, 'deny')
-  assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'standard').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_click', { selector: 'button' }, 'autonomous').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_evaluate', { expression: 'document.title' }, 'autonomous').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_set_files', { files: ['C:\\fixture.txt'] }, 'autonomous').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_evaluate', { expression: 'document.title' }, 'unrestricted').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_set_files', { files: ['C:\\fixture.txt'] }, 'unrestricted').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_evaluate', { expression: 'document.title' }, 'read-only').kind, 'deny')
-  assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }, 'read-only').kind, 'deny')
-  assert.equal(browserPolicyDecision('browser_recipe_run', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }, 'autonomous').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_automation_run', { id: 'asset' }, 'read-only').kind, 'deny')
-  assert.equal(browserPolicyDecision('browser_automation_run', { id: 'asset' }, 'standard').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_automation_run', { id: 'asset' }, 'autonomous').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_automation_run', { id: 'asset' }, 'autonomous', 'recipe').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_automation_run', { id: 'asset' }, 'autonomous', 'userscript').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'get' }, 'read-only').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'save' }, 'read-only').kind, 'deny')
-  assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'save' }, 'standard').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'test' }, 'autonomous').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_automation_develop', { action: 'test' }, 'unrestricted').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_userscript_run', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'autonomous').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_opencli_run', { args: ['browser', 'research', 'state'] }, 'autonomous').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_install', {}, 'autonomous').kind, 'ask')
-  assert.equal(browserPolicyDecision('browser_userscript_run', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'unrestricted').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_opencli_run', { args: ['browser', 'research', 'state'] }, 'unrestricted').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_install', {}, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('act.click', { selector: 'button' }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('act.click', { selector: 'button' }, 'standard').kind, 'ask')
+  assert.equal(browserPolicyDecision('act.click', { selector: 'button' }, 'autonomous').kind, 'allow')
+  assert.equal(browserPolicyDecision('script.evaluate', { expression: 'document.title' }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('act.upload', { files: ['C:\\fixture.txt'] }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('script.evaluate', { expression: 'document.title' }, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('act.upload', { files: ['C:\\fixture.txt'] }, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('script.evaluate', { expression: 'document.title' }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('automation.run_recipe', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('automation.run_recipe', { steps: [{ type: 'fill', selector: '#q', value: 'dsh' }] }, 'autonomous').kind, 'allow')
+  assert.equal(browserPolicyDecision('automation.run', { id: 'asset' }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('automation.run', { id: 'asset' }, 'standard').kind, 'ask')
+  assert.equal(browserPolicyDecision('automation.run', { id: 'asset' }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('automation.run', { id: 'asset' }, 'autonomous', 'recipe').kind, 'allow')
+  assert.equal(browserPolicyDecision('automation.run', { id: 'asset' }, 'autonomous', 'userscript').kind, 'ask')
+  assert.equal(browserPolicyDecision('automation.develop', { action: 'get' }, 'read-only').kind, 'allow')
+  assert.equal(browserPolicyDecision('automation.develop', { action: 'save' }, 'read-only').kind, 'deny')
+  assert.equal(browserPolicyDecision('automation.develop', { action: 'save' }, 'standard').kind, 'ask')
+  assert.equal(browserPolicyDecision('automation.develop', { action: 'test' }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('automation.develop', { action: 'test' }, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('script.run_userscript', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('opencli.run', { args: ['browser', 'research', 'state'] }, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('runtime.install', {}, 'autonomous').kind, 'ask')
+  assert.equal(browserPolicyDecision('script.run_userscript', { source: VALID_SCRIPT, url: 'http://127.0.0.1/' }, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('opencli.run', { args: ['browser', 'research', 'state'] }, 'unrestricted').kind, 'allow')
+  assert.equal(browserPolicyDecision('runtime.install', {}, 'unrestricted').kind, 'allow')
   assert.equal(browserPolicyDecision('web_deps', { action: 'install' }, 'read-only').kind, 'deny')
   assert.equal(browserPolicyDecision('web_deps', { action: 'install' }, 'autonomous').kind, 'ask')
   assert.equal(browserPolicyDecision('web_deps', { action: 'install' }, 'unrestricted').kind, 'allow')
@@ -161,7 +170,7 @@ test('automation modes expose predictable tool sets and retain validation when a
   assert.equal(browserPolicyDecision('web_cache_clear', {}, 'autonomous').kind, 'allow')
   assert.equal(browserPolicyDecision('web_rule', { action: 'remove' }, 'autonomous').kind, 'allow')
   assert.equal(browserPolicyDecision('web_rule', { action: 'list' }, 'read-only').kind, 'allow')
-  assert.equal(browserPolicyDecision('browser_userscript_run', { source: 'alert(1)', url: 'https://example.com/' }, 'unrestricted').kind, 'deny')
+  assert.equal(browserPolicyDecision('script.run_userscript', { source: 'alert(1)', url: 'https://example.com/' }, 'unrestricted').kind, 'deny')
   assert.throws(() => resolveAutomationMode('anything-goes'), /automationMode/)
 })
 
@@ -364,7 +373,8 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     assert.equal(status.usagePolicy.maxPagesPerRun, 20)
     assert.equal(status.usageGovernor.totalRuns > 0, true)
     assert.equal(status.automationMode, 'standard')
-    assert.equal(status.exposedTools.length, 30)
+    assert.deepEqual(status.exposedTools, ['browser_index', 'browser_call'])
+    assert.equal(status.exposedActions.length, 31)
     assert.equal(status.directInteractionPolicy, 'ask')
     assert.equal(status.pageEvaluatePolicy, 'ask')
     assert.equal(status.fileUploadPolicy, 'ask')

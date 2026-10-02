@@ -8,7 +8,7 @@ import os from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import type { AuthProfileConfig } from './auth-profiles.ts'
 import type { RulePackConfig } from './rule-packs.ts'
-import { resolveAutomationMode, type AutomationMode } from './freedom.ts'
+import { resolveAutomationMode, resolveToolSurface, type AutomationMode, type ToolSurface } from './freedom.ts'
 import { resolveUsagePolicy, type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts'
 import { resolveAutomationAssetPolicy, type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts'
 
@@ -45,6 +45,12 @@ export interface Config {
   opencliEnabled: boolean
   /** Model-facing tool exposure and approval level. */
   automationMode: AutomationMode
+  /**
+   * How browser capabilities reach the model: `indexed` (default) exposes two
+   * small tools, `browser_index` + `browser_call`; `flat` registers one tool per
+   * action (a much larger always-on context cost).
+   */
+  toolSurface?: ToolSurface
   /** Approval-independent traffic buffering and bounded crawl budgets. */
   usagePolicy?: UsagePolicyInput
   /** Reusable automation capture, review, activation, and retrieval policy. */
@@ -106,6 +112,7 @@ export const Config = z.object({
   executablePath: z.string().volatile(),
   opencliEnabled: z.boolean().default(true).volatile(),
   automationMode: z.string().default('standard').volatile(),
+  toolSurface: z.string().default('indexed').volatile(),
   usagePolicy: z.object({
     minDelayMs: z.number().default(750),
     maxConcurrency: z.number().default(2),
@@ -155,6 +162,7 @@ export interface ResolvedConfig {
   executablePath?: string
   opencliEnabled: boolean
   automationMode: AutomationMode
+  toolSurface: ToolSurface
   usagePolicy: UsagePolicy
   automationAssets: AutomationAssetPolicy
   autoInstall: boolean
@@ -210,6 +218,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     headless: read('headless', true),
     opencliEnabled: read('opencliEnabled', true),
     automationMode: resolveAutomationMode(optional<string>('automationMode')),
+    toolSurface: resolveToolSurface(optional<string>('toolSurface')),
     usagePolicy: resolveUsagePolicy(optional<Partial<UsagePolicyInput>>('usagePolicy')),
     automationAssets: resolveAutomationAssetPolicy(optional<Partial<AutomationAssetPolicyInput>>('automationAssets')),
     autoInstall: read('autoInstall', false),

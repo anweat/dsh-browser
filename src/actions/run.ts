@@ -1,0 +1,137 @@
+/**
+ * Action dispatch: validate arguments, check availability, run the executor
+ * under a deadline, and wrap everything in the result envelope.
+ *
+ * Both tool surfaces call {@link runAction}, so the envelope and the error
+ * codes are identical whether the model reaches an action through
+ * `browser_call` or through a flat per-action tool.
+ * @module dsh-browser/actions/run
+ */
+
+import type { ActionContext, ActionEnvelope, ActionErrorBody, ExecutionStatus } from './types.ts'
+import { ACTIONS, findAction } from './registry.ts'
+import { actionUnavailableReason, type AutomationMode, type ExposureOptions } from '../freedom.ts'
+import { compactSchema, validateArgs } from './schema.ts'
+import { hintFor, mapError } from './errors.ts'
+
+/** Serialized-result cap; larger results get their longest strings shortened. */
+export const RESULT_CHAR_LIMIT = 100_000
+
+export interface RunEnvironment {
+  mode: AutomationMode
+  options: ExposureOptions
+  enabled: boolean
+}
+
+function failure(action: string, executionStatus: ExecutionStatus, error: ActionErrorBody): ActionEnvelope {
+  return { ok: false, action, executionStatus, error }
+}
+
+/** Normalize an executor's return value into an object result. */
+function asResult(value: unknown): Record<string, unknown> {
+  // A JSON round trip drops `undefined` members, which the Host's lossless-JSON output check would reject.
+  const plain = JSON.parse(JSON.stringify(value ?? null)) as unknown
+  if (plain !== null && typeof plain === 'object' && !Array.isArray(plain)) return plain as Record<string, unknown>
+  if (Array.isArray(plain)) return { items: plain }
+  return { value: plain }
+}
+
+/**
+ * Shorten the longest string fields until the serialized result fits. The
+ * result stays valid JSON; the envelope reports how much text was dropped.
+ */
+export function truncateResult(result: Record<string, unknown>, limit = RESULT_CHAR_LIMIT): { result: Record<string, unknown>; truncation?: { omitted: number; reason: string } } {
+  if (JSON.stringify(result).length <= limit) return { result }
+  let omitted = 0
+  const copy = structuredClone(result)
+  const strings: { holder: Record<string, unknown> | unknown[]; key: string | number; length: number }[] = []
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach((entry, index) => { if (typeof entry === 'string') strings.push({ holder: value, key: index, length: entry.length }); else walk(entry) })
+    else if (value && typeof value === 'object') {
+      for (const [key, entry] of Object.entries(value)) {
+        if (typeof entry === 'string') strings.push({ holder: value as Record<string, unknown>, key, length: entry.length })
+        else walk(entry)
+      }
+    }
+  }
+  walk(copy)
+  strings.sort((a, b) => b.length - a.length)
+  for (const slot of strings) {
+    const size = JSON.stringify(copy).length
+    if (size <= limit) break
+    const text = (slot.holder as Record<string | number, string>)[slot.key]!
+    const excess = size - limit
+    const keep = Math.max(200, text.length - excess - 80)
+    if (keep >= text.length) continue
+    omitted += text.length - keep
+    ;(slot.holder as Record<string | number, string>)[slot.key] = text.slice(0, keep) + '…[truncated]'
+  }
+  return { result: copy, truncation: { omitted, reason: `result exceeded ${limit} characters; longest text fields were shortened` } }
+}
+
+function withDeadline<T>(run: (signal: AbortSignal) => Promise<T>, timeoutMs: number, parent: AbortSignal): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
+  const controller = new AbortController()
+  const onAbort = (): void => controller.abort(parent.reason)
+  if (parent.aborted) controller.abort(parent.reason)
+  else parent.addEventListener('abort', onAbort, { once: true })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<{ timedOut: true }>(resolve => {
+    timer = setTimeout(() => { controller.abort(new Error('deadline')); resolve({ timedOut: true }) }, timeoutMs)
+  })
+  const work = run(controller.signal).then(value => ({ timedOut: false as const, value }))
+  // If the deadline wins, the work may still reject later; swallow it.
+  work.catch(() => {})
+  return Promise.race([work, deadline]).finally(() => {
+    clearTimeout(timer)
+    parent.removeEventListener('abort', onAbort)
+  })
+}
+
+/**
+ * Run one action and return the envelope. Never throws: every failure is a
+ * structured error the model can act on.
+ */
+export async function runAction(name: unknown, rawArgs: unknown, ctx: ActionContext, env: RunEnvironment): Promise<ActionEnvelope> {
+  const label = typeof name === 'string' ? name : String(name)
+  const action = findAction(name)
+  if (!action) {
+    const close = typeof name === 'string' ? ACTIONS.filter(candidate => candidate.name.includes(name.split('.').pop() ?? name) || name.includes(candidate.group)).slice(0, 5).map(candidate => candidate.name) : []
+    return failure(label, 'failed', {
+      code: 'UNKNOWN_ACTION',
+      message: `Unknown action: ${label}`,
+      hint: `Actions are named group.action. Call browser_index() to list groups${close.length ? `; similar: ${close.join(', ')}` : ''}.`,
+    })
+  }
+  const unavailable = actionUnavailableReason(action, env.mode, env.options, env.enabled)
+  if (unavailable) {
+    return failure(action.name, 'failed', { code: 'POLICY_DENIED', message: `Action ${action.name} is ${unavailable}`, hint: hintFor('POLICY_DENIED')! })
+  }
+  const validation = validateArgs(action.params, rawArgs)
+  if (!validation.ok) {
+    return failure(action.name, 'failed', {
+      code: 'INVALID_ARGS',
+      message: validation.errors.join('; '),
+      hint: 'Fix the arguments to match the schema below and call again.',
+      schema: compactSchema(action.name, action.params),
+    })
+  }
+  if (ctx.signal.aborted) return failure(action.name, 'cancelled', { code: 'CANCELLED', message: 'cancelled before start', hint: hintFor('CANCELLED')! })
+
+  try {
+    const outcome = await withDeadline(signal => action.execute(validation.value, { ...ctx, signal }), action.timeoutMs, ctx.signal)
+    if (outcome.timedOut) {
+      // The work may still finish after the deadline, so a side-effecting action has an unknown outcome.
+      const status: ExecutionStatus = action.mutating ? 'outcome_unknown' : 'failed'
+      return failure(action.name, status, {
+        code: 'DEADLINE',
+        message: `${action.name} did not finish within ${action.timeoutMs} ms`,
+        hint: action.mutating ? 'Outcome unknown: verify the page state with observe.read before retrying; do not blindly repeat a submit.' : hintFor('DEADLINE')!,
+      })
+    }
+    const { result, truncation } = truncateResult(asResult(outcome.value))
+    return { ok: true, action: action.name, executionStatus: 'completed', result, ...truncation ? { truncation } : {} }
+  } catch (error) {
+    const body = mapError(error, action.name, { signal: ctx.signal })
+    return failure(action.name, body.code === 'CANCELLED' ? 'cancelled' : 'failed', body)
+  }
+}
