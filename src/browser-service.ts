@@ -26,7 +26,7 @@ import { browserRuntimeCliPath, loadBrowserRuntime, opencliEntryPath, runOpencli
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
-import { runRecipe, type BrowserRecipeStep, type RecipeStepResult } from './automation.ts'
+import { runRecipe, type BrowserRecipeStep, type RecipeRunResult, type RecipeStepResult } from './automation.ts'
 import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
@@ -81,7 +81,9 @@ export interface InteractiveState {
   screenshotPath?: string
 }
 
-export interface RecipeRunResult extends InteractiveState {
+/** The page state after a recipe, plus what the run did ({@link RecipeRunResult}). */
+export interface RecipeServiceResult extends InteractiveState, RecipeRunResult {
+  /** Same array as `completedSteps`; kept for service consumers written before B2. */
   steps: RecipeStepResult[]
 }
 
@@ -1298,10 +1300,22 @@ export class BrowserService {
     return { path: await this.captureScreenshot(page, options) }
   }
 
+  /**
+   * Run a recipe on the session's page.
+   *
+   * A business failure comes back as a value (`executionStatus`, `failedStep`,
+   * `completedSteps`, `effects`), never as an exception; only problems before
+   * any step ran (no page, navigation failure, a malformed recipe) throw.
+   *
+   * Cancelling stops this recipe only: the session page stays open and usable.
+   * A step that is already running cannot be interrupted, so the call returns
+   * once that step has returned. The caller therefore still holds the session
+   * (browser_call is serialized per agent) until the page is quiet again.
+   */
   async recipe(
     steps: readonly BrowserRecipeStep[],
-    opts: { url?: string; waitMs?: number; authProfile?: string; rulePack?: string; signal?: AbortSignal; session?: string } = {},
-  ): Promise<RecipeRunResult> {
+    opts: { url?: string; waitMs?: number; authProfile?: string; rulePack?: string; signal?: AbortSignal; session?: string; legacyRecipe?: boolean } = {},
+  ): Promise<RecipeServiceResult> {
     const existing = this.peek(opts.session)?.page
     if (!opts.url && (!existing || existing.isClosed())) throw new Error('browser recipe requires url or an active target.open page')
     const page = await this.ensureActivePage(opts.url, opts)
@@ -1312,15 +1326,9 @@ export class BrowserService {
       await applyRuleSteps(page, this.state(opts.session).rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
     }
-    const onAbort = () => void this.closePage(this.state(opts.session))
-    if (opts.signal?.aborted) onAbort()
-    else opts.signal?.addEventListener('abort', onAbort)
-    try {
-      const results = await runRecipe(page, steps, () => this.captureScreenshot(page), opts.signal)
-      return { ...await this.readState(page, false), steps: results }
-    } finally {
-      opts.signal?.removeEventListener('abort', onAbort)
-    }
+    const run = await runRecipe(page, steps, () => this.captureScreenshot(page), opts.signal, { legacy: opts.legacyRecipe })
+    const state = await this.readState(page, false).catch((): InteractiveState => ({ url: page.isClosed() ? '' : page.url(), title: '', text: '' }))
+    return { ...state, ...run, steps: run.completedSteps }
   }
 
   /**
