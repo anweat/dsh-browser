@@ -344,3 +344,20 @@ test('toolSurface defaults to indexed and rejects unknown values', () => {
   assert.equal(resolveConfig({ toolSurface: 'flat' } as never).toolSurface, 'flat')
   assert.throws(() => resolveConfig({ toolSurface: 'deferred' } as never), /toolSurface must be one of/)
 })
+
+test('the indexed always-on surface stays inside the 1.5k-token budget and every disclosure layer inside 1k', async () => {
+  const modelFacing = (toolSurface: 'indexed' | 'flat', automationMode = 'unrestricted') => {
+    const tools: any[] = []
+    registerTools({ tools: { register: (tool: any) => tools.push(tool) } } as never, resolveConfig({ automationMode, toolSurface } as never), {} as never)
+    return tools
+  }
+  const size = (tools: any[]) => tools.reduce((sum, tool) => sum + JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.parameters }).length, 0)
+  const indexed = modelFacing('indexed')
+  assert.ok(size(indexed) <= 5_250, `indexed L0 is ${size(indexed)} chars (budget 5250 = 1.5k tokens)`)
+  assert.ok(size(modelFacing('flat')) > size(indexed) * 10, 'the flat surface carries every action up front')
+  const index = indexed.find(tool => tool.name === 'browser_index')
+  for (const input of [{}, ...ACTION_GROUPS.map(group => ({ group })), ...ACTIONS.map(action => ({ action: action.name }))]) {
+    const text = (await index.execute(input, {})).text as string
+    assert.ok(text.length <= 3_500, `${JSON.stringify(input)} is ${text.length} chars (budget 1k tokens)`)
+  }
+})

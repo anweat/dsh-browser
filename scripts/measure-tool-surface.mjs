@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-// Measures the model-facing tool surface: every tool the plugin registers,
-// serialized as { name, description, parameters } (what the host sends to the
-// model; output schemas and renderers stay host-side and are reported
-// separately for information only). Prints the tool count, total characters,
-// an estimated token count (chars / 3.5) and a per-tool ranking.
+// Measures the model-facing tool surface for BOTH tool surfaces: every tool the
+// plugin registers, serialized as { name, description, parameters } (what the
+// host sends to the model; output schemas and renderers stay host-side and are
+// reported separately for information only). Also measures what the indexed
+// surface discloses on demand: the browser_index() root, each group listing,
+// and one action's full schema.
+//
+// Prints, per surface: tool count, total characters, an estimated token count
+// (chars / 3.5) and a per-tool ranking, then the progressive-disclosure sizes.
+// The indexed L0 budget from the tool-system design is 1.5k tokens (~5.2k chars);
+// the script reports whether it is met and exits 1 when it is not.
 //
 // Usage: node scripts/measure-tool-surface.mjs [--mode <read-only|standard|autonomous|unrestricted>] [--json]
 //   --mode  automation mode to register under. Default `unrestricted`, which
-//           exposes every tool (the full surface); omit nothing else.
+//           exposes every action (the full surface).
 //   --json  machine-readable output (for budgets in later milestones).
 //
 // It measures the TypeScript sources, not lib/, so it never reports a stale
@@ -17,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 
 const CHARS_PER_TOKEN = 3.5
+const INDEXED_L0_BUDGET_TOKENS = 1500
 const root = fileURLToPath(new URL('..', import.meta.url))
 
 // The sources use parameter properties, which need type *transformation*, so
@@ -33,11 +40,19 @@ const mode = modeIndex >= 0 ? args[modeIndex + 1] : 'unrestricted'
 
 const { registerTools } = await import(pathToFileURL(path.join(root, 'src/tools.ts')).href)
 const { resolveConfig } = await import(pathToFileURL(path.join(root, 'src/config.ts')).href)
+const { ACTION_GROUPS } = await import(pathToFileURL(path.join(root, 'src/actions/types.ts')).href)
 
-function collect(automationMode) {
+const tokens = chars => Math.round(chars / CHARS_PER_TOKEN)
+
+function register(automationMode, toolSurface, runtime = {}) {
   const registered = []
-  const config = resolveConfig({ enabled: true, automationMode })
-  registerTools({ tools: { register: tool => registered.push(tool) } }, config, {})
+  const config = resolveConfig({ enabled: true, automationMode, toolSurface })
+  // The service is only touched when a tool executes (browser_index() reads runtime facts best-effort).
+  registerTools({ tools: { register: tool => registered.push(tool) } }, config, {}, undefined, runtime)
+  return registered
+}
+
+function collect(registered) {
   return registered.map(tool => {
     const modelFacing = { name: tool.name, description: tool.description, parameters: tool.parameters }
     const serialized = JSON.stringify(modelFacing)
@@ -51,47 +66,101 @@ function collect(automationMode) {
   })
 }
 
-function summarize(automationMode) {
-  const tools = collect(automationMode)
+function summarize(automationMode, toolSurface) {
+  const tools = collect(register(automationMode, toolSurface))
   const totalChars = tools.reduce((sum, tool) => sum + tool.chars, 0)
   return {
     mode: automationMode,
+    toolSurface,
     toolCount: tools.length,
     totalChars,
-    estimatedTokens: Math.round(totalChars / CHARS_PER_TOKEN),
+    estimatedTokens: tokens(totalChars),
     descriptionChars: tools.reduce((sum, tool) => sum + tool.descriptionChars, 0),
     parametersChars: tools.reduce((sum, tool) => sum + tool.parametersChars, 0),
     outputSchemaChars: tools.reduce((sum, tool) => sum + tool.outputSchemaChars, 0),
     charsPerToken: CHARS_PER_TOKEN,
-    tools: tools.map(tool => ({ ...tool, estimatedTokens: Math.round(tool.chars / CHARS_PER_TOKEN) })).sort((a, b) => b.chars - a.chars || a.name.localeCompare(b.name)),
+    tools: tools.map(tool => ({ ...tool, estimatedTokens: tokens(tool.chars) })).sort((a, b) => b.chars - a.chars || a.name.localeCompare(b.name)),
   }
 }
 
-const primary = summarize(mode)
+/** What browser_index discloses, measured by calling the registered tool itself. */
+async function disclosure(automationMode) {
+  const tool = register(automationMode, 'indexed').find(entry => entry.name === 'browser_index')
+  const render = async input => (await tool.execute(input, {})).text
+  const measure = text => ({ chars: text.length, estimatedTokens: tokens(text.length) })
+  const groups = {}
+  for (const group of ACTION_GROUPS) groups[group] = measure(await render({ group }))
+  const withSkill = register(automationMode, 'indexed', { skillAvailable: () => true }).find(entry => entry.name === 'browser_index')
+  return {
+    root: measure(await render({})),
+    rootWithSkill: measure((await withSkill.execute({}, {})).text),
+    groups,
+    largestGroup: Object.entries(groups).sort((a, b) => b[1].chars - a[1].chars)[0],
+    action: { name: 'act.click', ...measure(await render({ action: 'act.click' })) },
+    largestActionDetail: await (async () => {
+      let best
+      const { ACTIONS } = await import(pathToFileURL(path.join(root, 'src/actions/registry.ts')).href)
+      for (const action of ACTIONS) {
+        const entry = { name: action.name, ...measure(await render({ action: action.name })) }
+        if (!best || entry.chars > best.chars) best = entry
+      }
+      return best
+    })(),
+  }
+}
+
+const indexed = summarize(mode, 'indexed')
+const flat = summarize(mode, 'flat')
+const shown = await disclosure(mode)
+const budgetChars = Math.round(INDEXED_L0_BUDGET_TOKENS * CHARS_PER_TOKEN)
+const withinBudget = indexed.estimatedTokens <= INDEXED_L0_BUDGET_TOKENS
 
 if (json) {
-  console.log(JSON.stringify(primary, null, 2))
-  process.exit(0)
+  console.log(JSON.stringify({ indexed, flat, disclosure: shown, indexedL0Budget: { tokens: INDEXED_L0_BUDGET_TOKENS, chars: budgetChars, met: withinBudget } }, null, 2))
+  process.exit(withinBudget ? 0 : 1)
 }
 
 const pad = (value, width) => String(value).padStart(width)
-console.log(`Tool surface (mode=${primary.mode}; name + description + parameters schema, as sent to the model)`)
-console.log(`  tools:           ${primary.toolCount}`)
-console.log(`  total chars:     ${primary.totalChars}`)
-console.log(`  estimated tokens: ${primary.estimatedTokens}  (chars / ${CHARS_PER_TOKEN})`)
-console.log(`  of which description chars: ${primary.descriptionChars}, parameters chars: ${primary.parametersChars}`)
-console.log(`  output schemas (host-side, not sent to the model): ${primary.outputSchemaChars} chars`)
+
+function printSurface(summary) {
+  console.log(`Tool surface = ${summary.toolSurface} (mode=${summary.mode}; name + description + parameters schema, as sent to the model)`)
+  console.log(`  tools:           ${summary.toolCount}`)
+  console.log(`  total chars:     ${summary.totalChars}`)
+  console.log(`  estimated tokens: ${summary.estimatedTokens}  (chars / ${CHARS_PER_TOKEN})`)
+  console.log(`  of which description chars: ${summary.descriptionChars}, parameters chars: ${summary.parametersChars}`)
+  console.log(`  output schemas (host-side, not sent to the model): ${summary.outputSchemaChars} chars`)
+  console.log('')
+  console.log(`${'#'.padStart(3)}  ${'tool'.padEnd(30)} ${pad('chars', 7)} ${pad('~tokens', 8)} ${pad('desc', 6)} ${pad('params', 7)}`)
+  const rows = summary.toolSurface === 'flat' ? summary.tools.slice(0, 8) : summary.tools
+  rows.forEach((tool, index) => {
+    console.log(`${pad(index + 1, 3)}  ${tool.name.padEnd(30)} ${pad(tool.chars, 7)} ${pad(tool.estimatedTokens, 8)} ${pad(tool.descriptionChars, 6)} ${pad(tool.parametersChars, 7)}`)
+  })
+  if (rows.length < summary.tools.length) console.log(`     ... ${summary.tools.length - rows.length} more tools (use --json for the full list)`)
+  console.log('')
+}
+
+printSurface(indexed)
+printSurface(flat)
+
+console.log('Progressive disclosure (indexed; text the model reads only when it asks)')
+console.log(`  browser_index()                 ${pad(shown.root.chars, 6)} chars  ~${shown.root.estimatedTokens} tokens  (no skill service: includes the compact guide)`)
+console.log(`  browser_index() with the skill  ${pad(shown.rootWithSkill.chars, 6)} chars  ~${shown.rootWithSkill.estimatedTokens} tokens`)
+for (const [group, size] of Object.entries(shown.groups)) console.log(`  browser_index({group:"${group}"})`.padEnd(34) + `${pad(size.chars, 6)} chars  ~${size.estimatedTokens} tokens`)
+console.log(`  browser_index({action:"${shown.action.name}"})`.padEnd(34) + `${pad(shown.action.chars, 6)} chars  ~${shown.action.estimatedTokens} tokens`)
+console.log(`  largest action detail (${shown.largestActionDetail.name}) ${pad(shown.largestActionDetail.chars, 6)} chars  ~${shown.largestActionDetail.estimatedTokens} tokens`)
 console.log('')
-console.log(`${'#'.padStart(3)}  ${'tool'.padEnd(30)} ${pad('chars', 7)} ${pad('~tokens', 8)} ${pad('desc', 6)} ${pad('params', 7)}`)
-primary.tools.forEach((tool, index) => {
-  console.log(`${pad(index + 1, 3)}  ${tool.name.padEnd(30)} ${pad(tool.chars, 7)} ${pad(tool.estimatedTokens, 8)} ${pad(tool.descriptionChars, 6)} ${pad(tool.parametersChars, 7)}`)
-})
+console.log('Comparison (always-on L0)')
+console.log(`  indexed: ${pad(indexed.estimatedTokens, 5)} tokens in ${indexed.toolCount} tools   (budget ${INDEXED_L0_BUDGET_TOKENS} tokens = ${budgetChars} chars: ${withinBudget ? 'MET' : 'EXCEEDED'})`)
+console.log(`  flat:    ${pad(flat.estimatedTokens, 5)} tokens in ${flat.toolCount} tools   (indexed is ${(100 - 100 * indexed.estimatedTokens / flat.estimatedTokens).toFixed(0)}% smaller)`)
+console.log('  baseline before the registry (30 browser_* tools, B0 measurement): ~8800 tokens')
 
 if (modeIndex < 0) {
   console.log('')
   console.log('Other automation modes (same measurement):')
   for (const other of ['read-only', 'standard', 'autonomous']) {
-    const summary = summarize(other)
-    console.log(`  ${other.padEnd(12)} tools=${pad(summary.toolCount, 2)} chars=${pad(summary.totalChars, 6)} ~tokens=${pad(summary.estimatedTokens, 5)}`)
+    const i = summarize(other, 'indexed')
+    const f = summarize(other, 'flat')
+    console.log(`  ${other.padEnd(12)} indexed tools=${pad(i.toolCount, 2)} ~tokens=${pad(i.estimatedTokens, 5)} | flat tools=${pad(f.toolCount, 2)} ~tokens=${pad(f.estimatedTokens, 5)}`)
   }
 }
+if (!withinBudget) process.exit(1)
