@@ -315,7 +315,7 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     assert.equal(bad.error.code, 'INVALID_ARGS')
     assert.match(bad.error.message, /locater: unknown argument/)
     assert.match(bad.error.message, /text: required/)
-    assert.match(bad.error.schema, /^act\.fill\(selector\?: string, locator\?: \$locator, text: string, timeoutMs\?: number\)/)
+    assert.match(bad.error.schema, /^act\.fill\(selector\?: string, locator\?: \$locator, text: string, timeoutMs\?: number, expectGeneration\?: number\)/)
 
     // Self-correction from the reply alone: the schema names the argument shapes.
     const fixed = await harness.action(S1, 'act.fill', { locator: { label: 'Name' }, text: 'Grace' })
