@@ -109,7 +109,7 @@ test('browser settings card key matches the Host settings namespace', () => {
 test('browser settings panel covers every public browser configuration field', () => {
   // Single-input controls, and the JSON code editors kept apart from them.
   const fields = [
-    'enabled', 'automationMode', 'browserRuntime', 'channel', 'headless', 'opencliEnabled',
+    'enabled', 'automationMode', 'toolSurface', 'browserRuntime', 'channel', 'headless', 'opencliEnabled',
     'autoInstall', 'storageStatePath', 'defaultAuthProfile',
     'executablePath', 'snapshotDir', 'verbose', 'cdpPort', 'maxSessions',
   ]
@@ -188,6 +188,20 @@ test('browser panel validates freedom, runtime, and usage buffer before saving',
   assert.equal(scope.getSnapshot().user?.cdpPort, 9222)
   assert.deepEqual(scope.getSnapshot().user?.usagePolicy, { minDelayMs: 750, maxConcurrency: 2, burst: 3, maxPagesPerRun: 20, maxDepth: 2, retryLimit: 2, backoffBaseMs: 1000, cooldownMs: 30000 })
   assert.equal(controller.snapshot().dirty, false)
+  controller.dispose()
+})
+
+test('browser panel edits the tool surface and refuses values the schema does not know', async () => {
+  const { scope, controller, actions } = fixture()
+  actions.edit('toolSurface', 'deferred')
+  assert.equal(controller.snapshot().fields.toolSurface.invalid, true, 'deferred is not a supported surface yet')
+  actions.edit('toolSurface', 'flat')
+  assert.equal(controller.snapshot().fields.toolSurface.invalid, false)
+  await actions.save()
+  assert.equal(scope.getSnapshot().user?.toolSurface, 'flat')
+  actions.resetField('toolSurface')
+  await actions.save()
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'toolSurface'), false)
   controller.dispose()
 })
 

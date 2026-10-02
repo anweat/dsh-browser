@@ -15,7 +15,7 @@ import { SettingsFormModel, settingsNumberField, settingsTextField } from '@deep
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
 
 export type SectionField =
-  | 'enabled' | 'automationMode' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
+  | 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
   | 'autoInstall' | 'storageStatePath' | 'defaultAuthProfile'
   | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'maxSessions'
 
@@ -126,6 +126,7 @@ function validUsagePolicy(value: Record<string, unknown>): boolean {
 export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   booleanField('enabled'),
   enumField('automationMode', ['read-only', 'standard', 'autonomous', 'unrestricted']),
+  enumField('toolSurface', ['indexed', 'flat']),
   enumField('browserRuntime', ['playwright', 'patchright']),
   textField('channel'),
   rangedNumberField('cdpPort', 1, 65_535),

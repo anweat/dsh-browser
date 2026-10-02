@@ -42,7 +42,7 @@ function formLabels(t: Translator): SettingsFormLabels {
 }
 
 const SECTION_LAYOUT: readonly { title: LabelKey; hint: LabelKey; fields: readonly SectionField[] }[] = [
-  { title: 'freedom', hint: 'freedomHint', fields: ['enabled', 'automationMode', 'opencliEnabled'] },
+  { title: 'freedom', hint: 'freedomHint', fields: ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled'] },
   { title: 'runtime', hint: 'runtimeHint', fields: ['browserRuntime', 'channel', 'headless', 'autoInstall', 'executablePath', 'cdpPort'] },
   { title: 'advanced', hint: 'advancedHint', fields: ['storageStatePath', 'defaultAuthProfile', 'snapshotDir', 'verbose'] },
 ]
