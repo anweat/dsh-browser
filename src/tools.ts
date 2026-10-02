@@ -22,7 +22,7 @@ import { sessionKeyFor } from './browser-service.ts'
 import { configuredBrowserActions } from './freedom.ts'
 import type { AutomationAssetStore } from './automation-assets.ts'
 import { AutomationDevelopmentService } from './automation-development.ts'
-import { ACTIONS, CALL_TOOL, INDEX_TOOL, flatToolName } from './actions/registry.ts'
+import { ACTIONS, CALL_TOOL, INDEX_TOOL, flatToolName, traitsFor } from './actions/registry.ts'
 import { expandParams } from './actions/schema.ts'
 import { renderIndex, type IndexEnvironment } from './actions/index-view.ts'
 import { runAction, type RunEnvironment } from './actions/run.ts'
@@ -158,7 +158,7 @@ function flatTool(action: ActionDef, actionContext: (exec: any) => ActionContext
     parameters: expandParams(action.params) as never,
     output: { schema: ENVELOPE_SCHEMA, render: renderEnvelope as never },
     timeoutMs: action.timeoutMs + 5_000,
-    isConcurrencySafe: () => action.concurrencySafe,
+    isConcurrencySafe: (args: unknown) => traitsFor(action, args).concurrencySafe,
     async execute(args: Record<string, unknown>, exec: unknown) {
       return runAction(action.name, args, actionContext(exec), runEnv) as never
     },

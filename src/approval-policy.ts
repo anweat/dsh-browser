@@ -49,19 +49,35 @@ function interactionLabel(name: string, args: unknown): string {
 }
 
 /**
+ * The one rule for replaying recipe steps: read-only steps run directly; mutating steps are denied in
+ * read-only, asked in standard, and free in autonomous and unrestricted. `automation.run_recipe` applies
+ * it to the steps in the call, and `automation.develop` test applies it to the steps of the draft.
+ */
+export function recipeStepsDecision(name: string, steps: readonly AnyRecipeStep[], mode: AutomationMode): BrowserPolicyDecision {
+  if (!recipeNeedsApproval(steps)) return { kind: 'allow' }
+  const actions = [...new Set(steps.map(step => step.type).filter(type => !READ_ONLY_ACTIONS.has(type)))]
+  if (mode === 'read-only') return { kind: 'deny', reason: `Mutating recipes are disabled by automationMode=${mode}: ` + actions.join(', ') }
+  if (mode === 'autonomous' || mode === 'unrestricted') return { kind: 'allow' }
+  return { kind: 'ask', reason: `${name}: Run a multi-step Playwright recipe with page mutations: ` + actions.join(', ') }
+}
+
+/**
  * Decide whether a call may run.
  * @param name - an action name (`act.click`) or one of the WebSearch tool names this policy also guards.
  * @param args - the action's own arguments (never the `browser_call` wrapper).
  * @param mode - the configured automationMode.
- * @param assetKind - for `automation.run`, the kind of the asset about to run.
+ * @param assetKind - for `automation.run` and `automation.develop` test, the kind of the asset about to run.
+ * @param draftSteps - for `automation.develop` test of a recipe, the steps the draft would replay.
  */
-export function browserPolicyDecision(name: string, args: unknown, mode: AutomationMode = 'standard', assetKind?: 'recipe' | 'userscript'): BrowserPolicyDecision {
+export function browserPolicyDecision(
+  name: string, args: unknown, mode: AutomationMode = 'standard', assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[],
+): BrowserPolicyDecision {
   const action = findAction(name)
   if (!action && (name.startsWith('browser_') || /^[a-z]+\.[a-z_]+$/.test(name))) {
     return { kind: 'deny', reason: `Unknown browser action ${name}; browser tools are reached through browser_index / browser_call` }
   }
   if (action) {
-    if (!isBrowserActionExposed(name, mode)) return { kind: 'deny', reason: `Browser action ${name} is disabled by automationMode=${mode}` }
+    if (!isBrowserActionExposed(name, mode, args ?? {})) return { kind: 'deny', reason: `Browser action ${name} is disabled by automationMode=${mode}` }
     switch (action.approval) {
       case 'interaction': {
         if (mode === 'read-only') return { kind: 'deny', reason: `Page interaction is disabled by automationMode=${mode}` }
@@ -112,14 +128,7 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
       }
       case 'recipe': {
         const input = (args ?? {}) as { steps?: unknown }
-        const steps = Array.isArray(input.steps) ? input.steps as AnyRecipeStep[] : []
-        if (recipeNeedsApproval(steps)) {
-          const actions = [...new Set(steps.map(step => step.type).filter(type => !READ_ONLY_ACTIONS.has(type)))]
-          if (mode === 'read-only') return { kind: 'deny', reason: `Mutating recipes are disabled by automationMode=${mode}: ` + actions.join(', ') }
-          if (mode === 'autonomous' || mode === 'unrestricted') return { kind: 'allow' }
-          return { kind: 'ask', reason: `${name}: Run a multi-step Playwright recipe with page mutations: ` + actions.join(', ') }
-        }
-        return { kind: 'allow' }
+        return recipeStepsDecision(name, Array.isArray(input.steps) ? input.steps as AnyRecipeStep[] : [], mode)
       }
       case 'asset-run': {
         const id = (args as { id?: unknown })?.id
@@ -132,7 +141,16 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
         const develop = String((args as { action?: unknown })?.action ?? '')
         if (['get', 'validate'].includes(develop)) return { kind: 'allow' }
         if (mode === 'read-only') return { kind: 'deny', reason: `Automation draft writes are disabled by automationMode=${mode}` }
-        if (develop === 'test' && mode !== 'unrestricted') return { kind: 'ask', reason: `${name} test: Replay a reusable automation draft in a real browser context` }
+        if (develop === 'test') {
+          if (mode === 'unrestricted') return { kind: 'allow' }
+          // Autonomous: a recipe draft is replayed under exactly the rule automation.run_recipe applies to the same steps.
+          // A UserScript draft, or a draft we cannot look up, still asks.
+          if (mode === 'autonomous' && assetKind === 'recipe' && draftSteps) {
+            const byRecipeRule = recipeStepsDecision(name + ' test', draftSteps, mode)
+            if (byRecipeRule.kind === 'allow') return byRecipeRule
+          }
+          return { kind: 'ask', reason: `${name} test: Replay a reusable automation draft in a real browser context` }
+        }
         if (mode === 'standard') return { kind: 'ask', reason: `${name} ${develop || '(unspecified)'}: Save a bounded local reusable automation draft` }
         return { kind: 'allow' }
       }

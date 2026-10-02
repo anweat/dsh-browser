@@ -24,6 +24,8 @@ import path from 'node:path'
 
 const CHARS_PER_TOKEN = 3.5
 const INDEXED_L0_BUDGET_TOKENS = 1500
+// Every browser_index() layer (root, group, action, sub-action) must stay within this.
+const DISCLOSURE_BUDGET_TOKENS = 1000
 const root = fileURLToPath(new URL('..', import.meta.url))
 
 // The sources use parameter properties, which need type *transformation*, so
@@ -98,13 +100,26 @@ async function disclosure(automationMode) {
     largestGroup: Object.entries(groups).sort((a, b) => b[1].chars - a[1].chars)[0],
     action: { name: 'act.click', ...measure(await render({ action: 'act.click' })) },
     largestActionDetail: await (async () => {
+      // Every action detail, and for an action with sub-actions each sub-action's detail too (browser_index({action:"automation.develop.save"})).
       let best
       const { ACTIONS } = await import(pathToFileURL(path.join(root, 'src/actions/registry.ts')).href)
       for (const action of ACTIONS) {
-        const entry = { name: action.name, ...measure(await render({ action: action.name })) }
-        if (!best || entry.chars > best.chars) best = entry
+        const names = [action.name, ...Object.keys(action.subActions?.items ?? {}).map(sub => `${action.name}.${sub}`)]
+        for (const name of names) {
+          const entry = { name, ...measure(await render({ action: name })) }
+          if (!best || entry.chars > best.chars) best = entry
+        }
       }
       return best
+    })(),
+    subActionDetails: await (async () => {
+      const { ACTIONS } = await import(pathToFileURL(path.join(root, 'src/actions/registry.ts')).href)
+      const details = {}
+      for (const action of ACTIONS.filter(entry => entry.subActions)) {
+        details[action.name] = measure(await render({ action: action.name }))
+        for (const sub of Object.keys(action.subActions.items)) details[`${action.name}.${sub}`] = measure(await render({ action: `${action.name}.${sub}` }))
+      }
+      return details
     })(),
   }
 }
@@ -114,10 +129,13 @@ const flat = summarize(mode, 'flat')
 const shown = await disclosure(mode)
 const budgetChars = Math.round(INDEXED_L0_BUDGET_TOKENS * CHARS_PER_TOKEN)
 const withinBudget = indexed.estimatedTokens <= INDEXED_L0_BUDGET_TOKENS
+const disclosureSizes = [shown.root, shown.rootWithSkill, ...Object.values(shown.groups), shown.action, ...Object.values(shown.subActionDetails), shown.largestActionDetail]
+const disclosureOver = disclosureSizes.filter(size => size.estimatedTokens > DISCLOSURE_BUDGET_TOKENS)
+const disclosureWithin = disclosureOver.length === 0
 
 if (json) {
-  console.log(JSON.stringify({ indexed, flat, disclosure: shown, indexedL0Budget: { tokens: INDEXED_L0_BUDGET_TOKENS, chars: budgetChars, met: withinBudget } }, null, 2))
-  process.exit(withinBudget ? 0 : 1)
+  console.log(JSON.stringify({ indexed, flat, disclosure: shown, indexedL0Budget: { tokens: INDEXED_L0_BUDGET_TOKENS, chars: budgetChars, met: withinBudget }, disclosureBudget: { tokens: DISCLOSURE_BUDGET_TOKENS, met: disclosureWithin } }, null, 2))
+  process.exit(withinBudget && disclosureWithin ? 0 : 1)
 }
 
 const pad = (value, width) => String(value).padStart(width)
@@ -147,11 +165,13 @@ console.log(`  browser_index()                 ${pad(shown.root.chars, 6)} chars
 console.log(`  browser_index() with the skill  ${pad(shown.rootWithSkill.chars, 6)} chars  ~${shown.rootWithSkill.estimatedTokens} tokens`)
 for (const [group, size] of Object.entries(shown.groups)) console.log(`  browser_index({group:"${group}"})`.padEnd(34) + `${pad(size.chars, 6)} chars  ~${size.estimatedTokens} tokens`)
 console.log(`  browser_index({action:"${shown.action.name}"})`.padEnd(34) + `${pad(shown.action.chars, 6)} chars  ~${shown.action.estimatedTokens} tokens`)
+for (const [name, size] of Object.entries(shown.subActionDetails)) console.log(`  browser_index({action:"${name}"})`.padEnd(44) + `${pad(size.chars, 6)} chars  ~${size.estimatedTokens} tokens`)
 console.log(`  largest action detail (${shown.largestActionDetail.name}) ${pad(shown.largestActionDetail.chars, 6)} chars  ~${shown.largestActionDetail.estimatedTokens} tokens`)
 console.log('')
 console.log('Comparison (always-on L0)')
 console.log(`  indexed: ${pad(indexed.estimatedTokens, 5)} tokens in ${indexed.toolCount} tools   (budget ${INDEXED_L0_BUDGET_TOKENS} tokens = ${budgetChars} chars: ${withinBudget ? 'MET' : 'EXCEEDED'})`)
 console.log(`  flat:    ${pad(flat.estimatedTokens, 5)} tokens in ${flat.toolCount} tools   (indexed is ${(100 - 100 * indexed.estimatedTokens / flat.estimatedTokens).toFixed(0)}% smaller)`)
+console.log(`  every disclosure layer: largest ${shown.largestActionDetail.name} ~${shown.largestActionDetail.estimatedTokens} tokens (budget ${DISCLOSURE_BUDGET_TOKENS}: ${disclosureWithin ? 'MET' : 'EXCEEDED'})`)
 console.log('  baseline before the registry (30 browser_* tools, B0 measurement): ~8800 tokens')
 
 if (modeIndex < 0) {
@@ -163,4 +183,4 @@ if (modeIndex < 0) {
     console.log(`  ${other.padEnd(12)} indexed tools=${pad(i.toolCount, 2)} ~tokens=${pad(i.estimatedTokens, 5)} | flat tools=${pad(f.toolCount, 2)} ~tokens=${pad(f.estimatedTokens, 5)}`)
   }
 }
-if (!withinBudget) process.exit(1)
+if (!withinBudget || !disclosureWithin) process.exit(1)

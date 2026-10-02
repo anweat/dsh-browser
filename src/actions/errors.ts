@@ -20,6 +20,7 @@ const HINTS: Partial<Record<ErrorCode, string>> = {
   NOT_FOUND: 'The referenced item does not exist. Use automation.search to find valid ids.',
   VALIDATION_FAILED: 'The steps ran but an assert step did not hold, so the business result is not confirmed. Read the page (observe.read) to see what happened; if earlier steps submitted something, do not run them again blindly.',
   OUTCOME_UNKNOWN: 'A side-effecting step timed out, so it may or may not have taken effect. Verify the real result on the page (observe.read) before any retry; never resubmit blindly.',
+  VALIDATION_MISSING: 'The steps ran, but nothing in this asset verifies the result, so the test cannot pass. Add an assert step or a postcondition that proves the outcome, save (a new revision), and test again.',
   INVALID_RECIPE: 'The recipe itself is malformed (see the message). Fix the step and send it again; nothing ran.',
 }
 

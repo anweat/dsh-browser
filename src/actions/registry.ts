@@ -5,7 +5,7 @@
  * @module dsh-browser/actions/registry
  */
 
-import { ACTION_GROUPS, type ActionDef, type ActionGroup } from './types.ts'
+import { ACTION_GROUPS, type ActionDef, type ActionGroup, type ActionTraits } from './types.ts'
 import { RUNTIME_ACTIONS } from './runtime.ts'
 import { TARGET_ACTIONS } from './target.ts'
 import { OBSERVE_ACTIONS } from './observe.ts'
@@ -33,6 +33,33 @@ export const GROUP_SUMMARIES: Record<ActionGroup, string> = {
   automation: 'search/run reusable assets, develop drafts, inline recipes',
   crawl: 'bounded multi-page crawl',
   opencli: 'bundled OpenCLI site adapters',
+}
+
+/**
+ * The flags that apply to THIS call. An action with sub-actions takes the flags of the operation the
+ * arguments select; an unknown or missing operation gets the action-level (strictest) flags.
+ */
+export function traitsFor(action: ActionDef, args?: unknown): ActionTraits {
+  const base: ActionTraits = { readOnly: action.readOnly, mutating: action.mutating, concurrencySafe: action.concurrencySafe }
+  const set = action.subActions
+  if (!set || !args || typeof args !== 'object') return base
+  const selected = (args as Record<string, unknown>)[set.key]
+  const sub = typeof selected === 'string' && Object.hasOwn(set.items, selected) ? set.items[selected] : undefined
+  return sub?.traits ? { ...base, ...sub.traits } : base
+}
+
+/** Whether any operation of the action is usable in `read-only` mode (decides whether it is listed there at all). */
+export function readOnlyCapable(action: ActionDef): boolean {
+  return action.readOnly || Object.values(action.subActions?.items ?? {}).some(sub => sub.traits?.readOnly === true)
+}
+
+/** `automation.develop.save` resolves to the action and its operation; undefined for anything else. */
+export function findSubAction(name: unknown): { action: ActionDef; sub: string } | undefined {
+  if (typeof name !== 'string') return undefined
+  const cut = name.lastIndexOf('.')
+  const action = cut > 0 ? findAction(name.slice(0, cut)) : undefined
+  const sub = name.slice(cut + 1)
+  return action?.subActions && Object.hasOwn(action.subActions.items, sub) ? { action, sub } : undefined
 }
 
 export function isActionGroup(value: unknown): value is ActionGroup {

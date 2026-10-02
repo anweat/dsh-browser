@@ -90,10 +90,12 @@ export function apply(ctx: Context, config: Config): void {
     // action and returns a structured UNKNOWN_ACTION error, so nothing to approve.
     if (call?.kind === 'index' || call?.kind === 'unresolved') return downstream
     if (call?.kind === 'action') {
-      const assetId = (call.args as { id?: unknown })?.id
-      const assetKind = call.action === 'automation.run' && typeof assetId === 'string'
-        ? assets.get(assetId)?.kind : undefined
-      return browserPolicyDecision(call.action, call.args, resolved.automationMode, assetKind)
+      // automation.run and automation.develop test act on a stored asset: the policy needs to know what kind it is,
+      // and for a recipe draft which steps it would replay.
+      const callArgs = (call.args ?? {}) as { id?: unknown; action?: unknown }
+      const replaysAsset = call.action === 'automation.run' || (call.action === 'automation.develop' && callArgs.action === 'test')
+      const target = replaysAsset && typeof callArgs.id === 'string' ? assets.get(callArgs.id) : undefined
+      return browserPolicyDecision(call.action, call.args, resolved.automationMode, target?.kind, call.action === 'automation.develop' ? target?.recipe : undefined)
     }
     return browserPolicyDecision(exec.name, exec.arguments, resolved.automationMode)
   })

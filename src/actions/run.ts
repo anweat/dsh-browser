@@ -9,7 +9,7 @@
  */
 
 import { outcomeOf, type ActionContext, type ActionEnvelope, type ActionErrorBody, type ExecutionStatus } from './types.ts'
-import { ACTIONS, findAction } from './registry.ts'
+import { ACTIONS, findAction, traitsFor } from './registry.ts'
 import { actionUnavailableReason, type AutomationMode, type ExposureOptions } from '../freedom.ts'
 import { compactSchema, validateArgs } from './schema.ts'
 import { DeadlineError, abortedByDeadline, hintFor, mapError } from './errors.ts'
@@ -122,6 +122,12 @@ export async function runAction(name: unknown, rawArgs: unknown, ctx: ActionCont
       schema: compactSchema(action.name, action.params),
     })
   }
+  // The mode may allow some operations of an action and not others (automation.develop: get yes, test no).
+  const operationUnavailable = actionUnavailableReason(action, env.mode, env.options, env.enabled, validation.value)
+  if (operationUnavailable) {
+    return failure(action.name, 'failed', { code: 'POLICY_DENIED', message: `Action ${action.name} is ${operationUnavailable}`, hint: hintFor('POLICY_DENIED')! })
+  }
+  const traits = traitsFor(action, validation.value)
   if (ctx.signal.aborted) return failure(action.name, 'cancelled', { code: 'CANCELLED', message: 'cancelled before start', hint: hintFor('CANCELLED')! })
 
   let workSignal: AbortSignal = ctx.signal
@@ -129,11 +135,11 @@ export async function runAction(name: unknown, rawArgs: unknown, ctx: ActionCont
     const outcome = await withDeadline(signal => { workSignal = signal; return action.execute(validation.value, { ...ctx, signal }) }, action.timeoutMs, ctx.signal, action.settleMs)
     if (outcome.timedOut) {
       // The work may still finish after the deadline, so a side-effecting action has an unknown outcome.
-      const status: ExecutionStatus = action.mutating ? 'outcome_unknown' : 'failed'
+      const status: ExecutionStatus = traits.mutating ? 'outcome_unknown' : 'failed'
       return failure(action.name, status, {
         code: 'DEADLINE',
         message: `${action.name} did not finish within ${action.timeoutMs} ms`,
-        hint: action.mutating ? 'Outcome unknown: verify the page state with observe.read before retrying; do not blindly repeat a submit.' : hintFor('DEADLINE')!,
+        hint: traits.mutating ? 'Outcome unknown: verify the page state with observe.read before retrying; do not blindly repeat a submit.' : hintFor('DEADLINE')!,
       })
     }
     // A result may carry its own outcome (a recipe that ran and failed still returns its whole report).
@@ -143,7 +149,7 @@ export async function runAction(name: unknown, rawArgs: unknown, ctx: ActionCont
   } catch (error) {
     const body = mapError(error, action.name, { signal: workSignal })
     // The deadline stopped work that had not returned: for a side-effecting action the outcome is unknown.
-    if (abortedByDeadline(workSignal) && action.mutating) return failure(action.name, 'outcome_unknown', { ...body, code: 'DEADLINE', hint: 'Outcome unknown: verify the page state with observe.read before retrying; do not blindly repeat a submit.' })
+    if (abortedByDeadline(workSignal) && traits.mutating) return failure(action.name, 'outcome_unknown', { ...body, code: 'DEADLINE', hint: 'Outcome unknown: verify the page state with observe.read before retrying; do not blindly repeat a submit.' })
     return failure(action.name, body.code === 'CANCELLED' ? 'cancelled' : 'failed', body)
   }
 }

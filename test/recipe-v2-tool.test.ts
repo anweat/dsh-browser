@@ -48,9 +48,13 @@ function stores() {
   return { assets, development: new AutomationDevelopmentService(assets, policy) }
 }
 
-test('the L2 detail of automation.develop is enough to write a legal v2 recipe: its own example saves and tests', async () => {
-  const detail = renderIndex({ action: 'automation.develop' }, INDEX_ENV).text
-  for (const needed of ['$recipeLocator', '$postcondition', '$inputSpec', '$outputSpec', 'explicitFirst', 'indexReason', 'allowEmpty', 'LOCATOR_AMBIGUOUS', 'convert', 'schemaVersion']) {
+test('the L2 detail of automation.develop.save is enough to write a legal v2 recipe: its own example saves and tests', async () => {
+  const overview = renderIndex({ action: 'automation.develop' }, INDEX_ENV).text
+  for (const sub of ['get', 'validate', 'save', 'test', 'convert', 'fork']) assert.match(overview, new RegExp(`\\n  ${sub} - `), `the overview lists ${sub}`)
+  assert.ok(overview.length <= 3_500, `the overview is ${overview.length} chars`)
+  assert.ok(!overview.includes('$recipeLocator'), 'the overview no longer carries the step schemas')
+  const detail = renderIndex({ action: 'automation.develop.save' }, INDEX_ENV).text
+  for (const needed of ['$recipeLocator', '$postcondition', '$inputSpec', '$outputSpec', 'explicitFirst', 'indexReason', 'allowEmpty', 'LOCATOR_AMBIGUOUS', 'schemaVersion']) {
     assert.ok(detail.includes(needed), `L2 should mention ${needed}`)
   }
   assert.ok(detail.length <= 3_500, `L2 is ${detail.length} chars`)

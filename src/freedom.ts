@@ -1,6 +1,6 @@
 /** Public automation-freedom contract and action exposure matrix. */
 
-import { ACTIONS, CALL_TOOL, INDEX_TOOL, findAction, flatToolName } from './actions/registry.ts'
+import { ACTIONS, CALL_TOOL, INDEX_TOOL, findAction, flatToolName, readOnlyCapable, traitsFor } from './actions/registry.ts'
 import type { ActionDef } from './actions/types.ts'
 
 export const AUTOMATION_MODES = ['read-only', 'standard', 'autonomous', 'unrestricted'] as const
@@ -29,11 +29,16 @@ export function resolveToolSurface(value: unknown): ToolSurface {
   return surface as ToolSurface
 }
 
-/** Whether an action name is a known browser action allowed under the mode. */
-export function isBrowserActionExposed(name: string, mode: AutomationMode): boolean {
+/**
+ * Whether an action name is a known browser action allowed under the mode. With `args`, an action
+ * that bundles several operations (`automation.develop`) is judged by the operation the call selects;
+ * without them, by whether any operation is usable.
+ */
+export function isBrowserActionExposed(name: string, mode: AutomationMode, args?: unknown): boolean {
   const action = findAction(name)
   if (!action) return false
-  return mode !== 'read-only' || action.readOnly
+  if (mode !== 'read-only') return true
+  return args === undefined ? readOnlyCapable(action) : traitsFor(action, args).readOnly
 }
 
 export function browserActionsForMode(mode: AutomationMode): string[] {
@@ -49,9 +54,11 @@ export function configuredBrowserActions(mode: AutomationMode, options: Exposure
 }
 
 /** Why an action cannot run now, or undefined when it can. */
-export function actionUnavailableReason(action: ActionDef, mode: AutomationMode, options: ExposureOptions, enabled = true): string | undefined {
+export function actionUnavailableReason(action: ActionDef, mode: AutomationMode, options: ExposureOptions, enabled = true, args?: unknown): string | undefined {
   if (!enabled) return 'browser service is disabled (enabled=false)'
-  if (mode === 'read-only' && !action.readOnly) return `disabled by automationMode=${mode}`
+  if (mode === 'read-only' && !(args === undefined ? readOnlyCapable(action) : traitsFor(action, args).readOnly)) {
+    return args !== undefined && action.subActions && readOnlyCapable(action) ? `disabled by automationMode=${mode} for ${action.subActions.key}=${String((args as Record<string, unknown>)[action.subActions.key])}` : `disabled by automationMode=${mode}`
+  }
   if (action.name === 'automation.develop' && !options.modelDevelopmentEnabled) return 'disabled by automationAssets.modelDevelopmentEnabled=false'
   return undefined
 }

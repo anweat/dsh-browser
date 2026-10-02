@@ -7,8 +7,8 @@
  * @module dsh-browser/actions/index-view
  */
 
-import { ACTIONS, GROUP_SUMMARIES, actionsInGroup, findAction, isActionGroup } from './registry.ts'
-import { ACTION_GROUPS, type ActionDef, type ApprovalClass } from './types.ts'
+import { ACTIONS, GROUP_SUMMARIES, actionsInGroup, findAction, findSubAction, isActionGroup, traitsFor } from './registry.ts'
+import { ACTION_GROUPS, type ActionDef, type ApprovalClass, type ParamSchema, type SubActionDef } from './types.ts'
 import { compactParams, describeParams } from './schema.ts'
 import { actionUnavailableReason, type AutomationMode, type ExposureOptions } from '../freedom.ts'
 
@@ -116,13 +116,89 @@ function exampleLine(action: ActionDef): string[] {
   return (action.examples ?? []).slice(0, 2).map(example => `example: browser_call(${JSON.stringify({ action: action.name, args: example.args })})${example.note ? ` // ${example.note}` : ''}`)
 }
 
+/** Approval wording for one operation of an action that bundles several (automation.develop). */
+function subApprovalNote(action: ActionDef, sub: string, mode: AutomationMode): string {
+  if (action.approval !== 'asset-develop') return approvalNote(action, mode)
+  if (sub === 'get' || sub === 'validate') return ''
+  if (sub === 'test') return mode === 'unrestricted' ? '' : mode === 'autonomous' ? 'asks for userscript drafts' : 'asks'
+  return mode === 'standard' ? 'asks to write' : ''
+}
+
+function pick(params: ParamSchema, names: readonly string[]): ParamSchema {
+  return Object.fromEntries(names.filter(name => name in params).map(name => [name, params[name]!]))
+}
+
+function errorsLine(action: ActionDef, mutating: boolean): string {
+  const codes = action.errors ?? []
+  return `errors: INVALID_ARGS, TARGET_CLOSED, DEADLINE, CANCELLED${action.group === 'act' ? ', LOCATOR_NOT_FOUND, NOT_ACTIONABLE' : ''}${codes.length ? ', ' + codes.join(', ') : ''}${mutating ? ' (a DEADLINE on this action means the outcome is unknown: verify before retrying)' : ''}`
+}
+
+/** The parameters of one operation as the detail prints them: its own required marks and descriptions. */
+function subParams(action: ActionDef, sub: SubActionDef, selector: string): ParamSchema {
+  const params: ParamSchema = {}
+  for (const name of sub.params.filter(param => param !== selector)) {
+    const node = action.params[name]
+    if (!node) continue
+    const hint = sub.hints?.[name]
+    const { required: _required, description, ...rest } = node
+    params[name] = { ...rest, ...hint !== undefined ? (hint ? { description: hint } : {}) : description ? { description } : {}, ...sub.required?.includes(name) ? { required: true as const } : {} }
+  }
+  return params
+}
+
+/** The parent view of an action with sub-actions: what it is, the arguments every operation shares, and one line per operation. */
+function renderActionWithSubs(action: ActionDef, env: IndexEnvironment): string {
+  const set = action.subActions!
+  const reason = actionUnavailableReason(action, env.mode, env.options, env.enabled)
+  const note = approvalNote(action, env.mode)
+  const own = (sub: SubActionDef): string => sub.params.filter(name => !set.common.includes(name)).join(', ')
+  const lines = [
+    `${action.name} - ${action.summary}`,
+    `group ${action.group} | changes state (get and validate only read) | ${reason ? `UNAVAILABLE: ${reason}` : note ? `approval: ${note}` : 'no approval needed'}`,
+    ...action.notes ? [action.notes] : [],
+    'common args:',
+    ...Object.entries(pick(action.params, set.common)).map(([key, node]) => `  ${key}${node.required ? '' : '?'}: ${node.enum ? node.enum.map(value => JSON.stringify(value)).join('|') : node.type ?? 'any'}${node.description ? ' - ' + node.description : ''}`),
+    `sub-actions (full schema of one: browser_index({action:"${action.name}.<sub>"})):`,
+    ...Object.entries(set.items).map(([key, sub]) => {
+      const flags = env.mode === 'read-only' && !traitsFor(action, { [set.key]: key }).readOnly ? ' [not in read-only]' : ''
+      return `  ${key} - ${sub.summary} | ${own(sub) || 'id only'}${flags}`
+    }),
+    errorsLine(action, action.mutating),
+  ]
+  return lines.join('\n')
+}
+
+/** One operation of an action with sub-actions: only its own arguments, notes and example. */
+function renderSubAction(action: ActionDef, subName: string, env: IndexEnvironment): string {
+  const set = action.subActions!
+  const sub = set.items[subName]!
+  const traits = traitsFor(action, { [set.key]: subName })
+  const name = `${action.name}.${subName}`
+  const reason = actionUnavailableReason(action, env.mode, env.options, env.enabled, { [set.key]: subName })
+  const note = subApprovalNote(action, subName, env.mode)
+  const lines = [
+    `${name} - ${sub.summary}`,
+    `call: browser_call({action:"${action.name}",args:{${set.key}:"${subName}",...}}) | ${traits.mutating ? 'changes state' : 'read/observe'} | ${reason ? `UNAVAILABLE: ${reason}` : note ? `approval: ${note}` : 'no approval needed'}`,
+    ...sub.notes ? [sub.notes] : [],
+    'args:',
+    `  ${set.key}: "${subName}" - selects this operation`,
+    ...describeParams(subParams(action, sub, set.key)).filter(line => line !== '  (no arguments)'),
+    ...(sub.examples ?? []).slice(0, 2).map(example => `example: browser_call(${JSON.stringify({ action: action.name, args: example.args })})${example.note ? ` // ${example.note}` : ''}`),
+    `errors: INVALID_ARGS${sub.params.includes('url') ? ', TARGET_CLOSED, DEADLINE, CANCELLED' : ''}${sub.errors?.length ? ', ' + sub.errors.join(', ') : ''}${traits.mutating && sub.params.includes('url') ? ' (a DEADLINE here means the outcome is unknown: verify before retrying)' : ''}`,
+  ]
+  return lines.join('\n')
+}
+
 export function renderAction(name: string, env: IndexEnvironment): string {
   const action = findAction(name)
   if (!action) {
+    const nested = findSubAction(name)
+    if (nested) return renderSubAction(nested.action, nested.sub, env)
     if (isActionGroup(name)) return renderGroup(name, env)
     const hits = searchActions(name, env).slice(0, 5)
     return `Unknown action "${name}".${hits.length ? ' Similar: ' + hits.map(hit => hit.name).join(', ') + '.' : ''} browser_index() lists the groups.`
   }
+  if (action.subActions) return renderActionWithSubs(action, env)
   const reason = actionUnavailableReason(action, env.mode, env.options, env.enabled)
   const note = approvalNote(action, env.mode)
   const lines = [
@@ -132,14 +208,14 @@ export function renderAction(name: string, env: IndexEnvironment): string {
     'args:',
     ...describeParams(action.params),
     ...exampleLine(action),
-    `errors: INVALID_ARGS, TARGET_CLOSED, DEADLINE, CANCELLED${action.group === 'act' ? ', LOCATOR_NOT_FOUND, NOT_ACTIONABLE' : ''}${action.errors?.length ? ', ' + action.errors.join(', ') : ''}${action.mutating ? ' (a DEADLINE on this action means the outcome is unknown: verify before retrying)' : ''}`,
+    errorsLine(action, action.mutating),
   ]
   return lines.join('\n')
 }
 
 function score(action: ActionDef, terms: string[]): number {
   const name = action.name.toLowerCase()
-  const summary = action.summary.toLowerCase()
+  const summary = (action.summary + ' ' + Object.entries(action.subActions?.items ?? {}).map(([key, sub]) => key + ' ' + sub.summary).join(' ')).toLowerCase()
   const params = Object.keys(action.params).join(' ').toLowerCase()
   let total = 0
   for (const term of terms) {
