@@ -11,7 +11,7 @@
  */
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives';
-export type SectionField = 'enabled' | 'automationMode' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled' | 'autoInstall' | 'storageStatePath' | 'defaultAuthProfile' | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'maxSessions';
+export type SectionField = 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled' | 'autoInstall' | 'storageStatePath' | 'defaultAuthProfile' | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'maxSessions';
 /** Retained name for callers that predate the section/JSON split. */
 export type SettingField = SectionField;
 /** One control's state, as the shared form model reports it. */

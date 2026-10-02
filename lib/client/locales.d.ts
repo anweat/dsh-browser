@@ -17,6 +17,8 @@ export declare const zh: {
     readonly enabledHint: "关闭后浏览器服务不可用。";
     readonly automationMode: "自动化模式";
     readonly automationModeHint: "read-only / standard / autonomous / unrestricted。";
+    readonly toolSurface: "工具面形态";
+    readonly toolSurfaceHint: "indexed（默认）只常驻 browser_index / browser_call 两个工具；flat 为每个动作注册独立工具，常驻上下文明显更大。保存后需重启 profile。";
     readonly browserRuntime: "运行时提供器";
     readonly browserRuntimeHint: "Patchright 仅支持 Chromium。";
     readonly channel: "浏览器通道";
@@ -60,13 +62,13 @@ export declare const zh: {
     readonly assetArchive: "归档";
     readonly assetSaveDraft: "保存草稿";
     readonly autoInstall: "缺失时自动安装 Chromium";
-    readonly autoInstallHint: "可能触发较大下载，日常建议关闭并显式调用 browser_install。";
+    readonly autoInstallHint: "可能触发较大下载，日常建议关闭并显式执行 runtime.install 动作。";
     readonly storageStatePath: "全局 storageState 路径";
     readonly storageStatePathHint: "旧版兼容入口；新配置优先使用限域 AuthProfile。";
     readonly authProfiles: "AuthProfiles JSON";
     readonly authProfilesHint: "命名登录态、allowedDomains 与 persistState。";
     readonly defaultAuthProfile: "默认 AuthProfile";
-    readonly defaultAuthProfileHint: "未显式选择登录态时使用；browser_crawl 始终匿名。";
+    readonly defaultAuthProfileHint: "未显式选择登录态时使用；crawl.crawl 始终匿名。";
     readonly rulePacks: "RulePacks JSON";
     readonly rulePacksHint: "域名匹配、哈希固定 init script 和有界步骤。";
     readonly executablePath: "浏览器可执行文件";

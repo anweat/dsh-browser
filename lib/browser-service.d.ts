@@ -159,7 +159,10 @@ export interface BrowserStatus {
     opencliInstalled: boolean;
     opencliEntryPath?: string;
     automationMode: AutomationMode;
+    /** Tool names registered for the model under the configured toolSurface. */
     exposedTools: string[];
+    /** Browser actions (`group.action`) the model can run. */
+    exposedActions: string[];
     directInteractionPolicy: 'deny' | 'ask' | 'allow';
     mutatingRecipePolicy: 'deny' | 'ask' | 'allow';
     externalUserscriptPolicy: 'deny' | 'ask' | 'allow';
@@ -187,8 +190,8 @@ export interface BrowserStatus {
  *
  * A single `BrowserService` instance is provided to every consumer, so before
  * this existed two concurrent sessions shared one `activePage`: whichever
- * session called `browser_open` last owned the page, and the other session's
- * `browser_read` / `browser_evaluate` / `browser_console` then operated on a
+ * session called `target.open` last owned the page, and the other session's
+ * `observe.read` / `script.evaluate` / `inspect.console` then operated on a
  * page it never opened — including the other session's cookies and DOM.
  *
  * State is therefore keyed by session. The browser PROCESS stays shared on
@@ -255,7 +258,7 @@ export declare class BrowserService {
      * The state bucket belonging to a tool execution's session.
      *
      * Tools use this for the few operations that act on the bucket itself
-     * (`browser_close`) rather than passing a key into a method.
+     * (`target.close`) rather than passing a key into a method.
      */
     sessionState(agent: SessionIdentity | undefined): SessionState | undefined;
     private assertEnabled;
@@ -271,7 +274,7 @@ export declare class BrowserService {
     /**
      * Look up an existing bucket WITHOUT creating one and WITHOUT evicting.
      *
-     * Queries (`browser_status`, `browser_console`, `browser_requests`) must go
+     * Queries (`runtime.status`, `inspect.console`, `inspect.requests`) must go
      * through this, not {@link state}. Creating a bucket for a session that only
      * *asks* a question would both leak a slot and push a live session past the
      * limit, so a read could evict the very page it was trying to describe.

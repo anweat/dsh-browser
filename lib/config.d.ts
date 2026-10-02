@@ -5,7 +5,7 @@
 import z from '@deepseek-ai/schemastery';
 import type { AuthProfileConfig } from './auth-profiles.ts';
 import type { RulePackConfig } from './rule-packs.ts';
-import { type AutomationMode } from './freedom.ts';
+import { type AutomationMode, type ToolSurface } from './freedom.ts';
 import { type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts';
 import { type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts';
 export declare const BROWSER_RUNTIMES: readonly ["playwright", "patchright"];
@@ -33,6 +33,12 @@ export interface Config {
     opencliEnabled: boolean;
     /** Model-facing tool exposure and approval level. */
     automationMode: AutomationMode;
+    /**
+     * How browser capabilities reach the model: `indexed` (default) exposes two
+     * small tools, `browser_index` + `browser_call`; `flat` registers one tool per
+     * action (a much larger always-on context cost).
+     */
+    toolSurface?: ToolSurface;
     /** Approval-independent traffic buffering and bounded crawl budgets. */
     usagePolicy?: UsagePolicyInput;
     /** Reusable automation capture, review, activation, and retrieval policy. */
@@ -66,6 +72,7 @@ export interface ResolvedConfig {
     executablePath?: string;
     opencliEnabled: boolean;
     automationMode: AutomationMode;
+    toolSurface: ToolSurface;
     usagePolicy: UsagePolicy;
     automationAssets: AutomationAssetPolicy;
     autoInstall: boolean;
