@@ -13,14 +13,15 @@
  * @module dsh-browser/client/SettingsCard
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { SettingsForm, SettingsValueField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BrowserSettingsCardProps } from './index.ts'
 import { FIELD_SPECS, JSON_FIELD_SPECS, JSON_FIELDS, type SectionField, type CardFieldState } from './form.ts'
 import type { SettingsFieldSpec } from '@deepseek-ai/dsh-client-ui-primitives'
 import { styles as css } from './styles.ts'
-import type { AutomationAsset } from '../automation-assets.ts'
+import { credentialView, isDirty, shortHash } from './asset-editor.ts'
+import type { AssetNoticeKind } from './automation-assets-client.ts'
 
 /**
  * The page's own translator, taken from the props rather than restated: the
@@ -109,36 +110,23 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
 function AutomationAssetsPanel(props: BrowserSettingsCardProps) {
   const { t } = props
   const state = props.useAutomationAssets(snapshot => snapshot)
-  const [draft, setDraft] = useState('')
-  const [draftError, setDraftError] = useState(false)
-  const [testUrl, setTestUrl] = useState('')
-  const [testInputs, setTestInputs] = useState('{}')
-  const selected = state.selected
-  useEffect(() => { if (selected) setDraft(JSON.stringify(selected, null, 2)) }, [selected?.id, selected?.revision])
+  const { editor, selected } = state
+  const dirty = isDirty(editor.text, editor.baseline)
+  const credentials = credentialView(selected)
+  const draft = selected?.status === 'draft'
+  // Leaving the page with edits in the textarea would lose them silently.
+  useEffect(() => {
+    if (!dirty) return undefined
+    const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [dirty])
 
-  const newAsset = (kind: AutomationAsset['kind']) => {
-    props.selectAutomationAsset(undefined)
-    const value: Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'> = kind === 'recipe'
-      ? { kind, name: 'New recipe', description: '', domains: [], tags: [], inputNames: [], recipe: [{ type: 'extract', selector: 'main', mode: 'text', limit: 20 }] }
-      : { kind, name: 'New userscript', description: '', domains: [], tags: [], inputNames: [], source: '// ==UserScript==\n// @name New userscript\n// @match https://example.com/*\n// @grant none\n// ==/UserScript==\nreturn { title: document.title }' }
-    setDraft(JSON.stringify(value, null, 2)); setDraftError(false)
-  }
-  const save = async () => {
-    try {
-      const value = JSON.parse(draft) as Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>
-      if (selected?.id) value.id = selected.id
-      await props.saveAutomationAsset(value); setDraftError(false)
-    } catch { setDraftError(true) }
-  }
-  const runTest = async () => {
-    if (!selected || !testUrl.trim()) { setDraftError(true); return }
-    try {
-      const inputs = JSON.parse(testInputs) as Record<string, string>
-      await props.testAutomationAsset(selected.id, testUrl.trim(), inputs); setDraftError(false)
-    } catch { setDraftError(true) }
-  }
   const candidates = state.snapshot?.candidates.filter(candidate => candidate.suggestedAt && !candidate.dismissedAt) ?? []
   const assets = state.snapshot?.assets ?? []
+  const noticeLabel = (kind: AssetNoticeKind) => t(({ json: 'assetNoticeJson', backend: 'assetNoticeBackend', validation: 'assetNoticeValidation', refused: 'assetNoticeRefused' } as const)[kind])
+  // Unsaved edits, or a brand-new draft that was never saved: the button saves what is on screen, then tests exactly that revision.
+  const saveFirst = dirty || !selected
 
   return <section className={css.section} data-dsh-browser-assets>
     <div className={css.sectionHead}><h3>{t('assetLibrary')}</h3><p>{t('assetLibraryHint')}</p></div>
@@ -148,20 +136,30 @@ function AutomationAssetsPanel(props: BrowserSettingsCardProps) {
       <div><strong>{candidate.title}</strong><p>{candidate.domain} · {candidate.successfulRuns} {t('assetRuns')} · {candidate.distinctSessions} {t('assetSessions')}</p></div>
       <div className={css.actions}><button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.dismissAutomationCandidate(candidate.id)}>{t('assetDismiss')}</button><button type="button" className={css.primary} disabled={state.busy} onClick={() => props.summarizeAutomationCandidate(candidate.id)}>{t('assetSummarize')}</button></div>
     </article>)}</div> : null}
-    <div className={css.assetToolbar}><div><strong>{t('assetScripts')}</strong><p className={css.hint}>{t('assetScriptsHint')}</p></div><div className={css.actions}><button type="button" className={css.secondary} onClick={() => newAsset('recipe')}>{t('assetNewRecipe')}</button><button type="button" className={css.secondary} onClick={() => newAsset('userscript')}>{t('assetNewScript')}</button><button type="button" className={css.secondary} onClick={props.refreshAutomationAssets}>{t('assetRefresh')}</button></div></div>
+    <div className={css.assetToolbar}><div><strong>{t('assetScripts')}</strong><p className={css.hint}>{t('assetScriptsHint')}</p></div><div className={css.actions}><button type="button" className={css.secondary} onClick={() => props.requestNewAutomationAsset('recipe')}>{t('assetNewRecipe')}</button><button type="button" className={css.secondary} onClick={() => props.requestNewAutomationAsset('userscript')}>{t('assetNewScript')}</button><button type="button" className={css.secondary} onClick={props.requestRefreshAutomationAssets}>{t('assetRefresh')}</button></div></div>
+    {editor.confirm ? <div className={css.failed} role="alertdialog" aria-label={t('assetLeaveTitle')} data-dsh-browser-leave>
+      <p>{t('assetLeaveTitle')}</p>
+      <div className={css.actions}><button type="button" className={css.secondary} onClick={props.cancelLeaveAutomationAsset}>{t('assetLeaveKeep')}</button><button type="button" className={css.primary} onClick={props.confirmLeaveAutomationAsset}>{t('assetLeaveConfirm')}</button></div>
+    </div> : null}
     <div className={css.assetLayout}>
-      <div className={css.assetList}>{assets.length ? assets.map(asset => <button type="button" key={asset.id} className={`${css.assetItem} ${selected?.id === asset.id ? css.assetSelected : ''}`} onClick={() => props.selectAutomationAsset(asset.id)}><span><strong>{asset.name}</strong><small>{asset.kind} · {asset.status} · r{asset.revision}</small></span><span className={css.assetTest}>{asset.testStatus}</span></button>) : <p className={css.hint}>{t('assetEmpty')}</p>}</div>
+      <div className={css.assetList}>{assets.length ? assets.map(asset => <button type="button" key={asset.id} className={`${css.assetItem} ${selected?.id === asset.id ? css.assetSelected : ''}`} onClick={() => props.requestSelectAutomationAsset(asset.id)}><span><strong>{asset.name}</strong><small>{asset.kind} · {asset.status} · r{asset.revision}</small></span><span className={css.assetTest}>{asset.testStatus}</span></button>) : <p className={css.hint}>{t('assetEmpty')}</p>}</div>
       <div className={css.assetEditor}>
-        <label className={css.label} htmlFor="dsh-browser-asset-editor">{t('assetEditor')}</label>
-        <textarea id="dsh-browser-asset-editor" className={`${css.input} ${css.textarea} ${css.code} ${draftError ? css.invalidInput : ''}`} rows={18} value={draft} spellCheck={false} placeholder={t('assetEditorHint')} onChange={event => { setDraft(event.currentTarget.value); setDraftError(false) }} />
-        <p className={css.hint}>{draftError ? t('assetInvalid') : t('assetSourceBoundary')}</p>
-        {selected?.status === 'draft' ? <div className={css.assetTestForm}><input className={css.input} value={testUrl} placeholder={t('assetTestUrl')} onChange={event => setTestUrl(event.currentTarget.value)} /><textarea className={`${css.input} ${css.textarea} ${css.code}`} rows={3} value={testInputs} spellCheck={false} aria-label={t('assetTestInputs')} onChange={event => setTestInputs(event.currentTarget.value)} /></div> : null}
+        <label className={css.label} htmlFor="dsh-browser-asset-editor">{t('assetEditor')}{dirty ? <> · <span data-dsh-browser-dirty>{t('assetEditorDirtyBadge')}</span></> : null}</label>
+        {selected ? <div className={css.hint} data-dsh-browser-version>
+          <p>{t('assetRevision')} r{selected.revision} · {t('assetHash')} <code>{shortHash(selected.contentHash)}</code> · {selected.status}{selected.sourceAssetId ? <> · {t('assetDerivedFrom')} {selected.sourceAssetId.slice(0, 8)} r{selected.sourceRevision}</> : null}</p>
+          {credentials.latest ? <p data-dsh-browser-credential>{t('assetLastTest')}: r{credentials.latest.revision} · <code>{shortHash(credentials.latest.contentHash)}</code> · {credentials.latest.passed ? t('assetPassed') : t('assetNotPassed')} ({credentials.latest.executionStatus}/{credentials.latest.validationStatus}, {credentials.latest.evidenceLevel}{credentials.latest.legacy ? ', legacy' : ''}) · {new Date(credentials.latest.testedAt).toLocaleString()} · {t('assetInputsDigest')} {credentials.latest.inputsDigest}{credentials.latest.revision !== selected.revision ? <> · {t('assetStaleTest')}</> : null}</p> : null}
+          {selected.status === 'draft' && !credentials.vouches ? <p>{t('assetNoTest')}</p> : null}
+        </div> : null}
+        <textarea id="dsh-browser-asset-editor" className={`${css.input} ${css.textarea} ${css.code} ${editor.notice?.kind === 'json' ? css.invalidInput : ''}`} rows={18} value={editor.text} spellCheck={false} disabled={state.busy} placeholder={t('assetEditorHint')} onChange={event => props.editAutomationAsset(event.currentTarget.value)} />
+        {editor.notice ? <p className={css.failed} role="alert" data-dsh-browser-notice={editor.notice.kind}>{noticeLabel(editor.notice.kind)}{editor.notice.message}{editor.notice.code ? ` [${editor.notice.code}]` : ''}</p> : <p className={css.hint}>{dirty ? t('assetUnsaved') : t('assetSourceBoundary')}</p>}
+        {draft || !selected ? <div className={css.assetTestForm}><input className={css.input} value={editor.testUrl} placeholder={t('assetTestUrl')} onChange={event => props.setAssetTestUrl(event.currentTarget.value)} /><textarea className={`${css.input} ${css.textarea} ${css.code}`} rows={3} value={editor.testInputs} spellCheck={false} aria-label={t('assetTestInputs')} onChange={event => props.setAssetTestInputs(event.currentTarget.value)} /></div> : null}
         <div className={css.actions}>
-          {selected ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.validateAutomationAsset(selected.id)}>{t('assetValidate')}</button> : null}
-          {selected?.status === 'draft' ? <button type="button" className={css.secondary} disabled={state.busy || !testUrl.trim()} onClick={() => void runTest()}>{t('assetTest')}</button> : null}
-          {selected?.status === 'draft' ? <button type="button" className={css.secondary} disabled={state.busy || selected.testStatus !== 'passed'} onClick={() => props.setAutomationAssetStatus(selected.id, 'active')}>{t('assetActivate')}</button> : null}
+          {selected ? <button type="button" className={css.secondary} disabled={state.busy || dirty} onClick={() => props.validateAutomationAsset(selected.id)}>{t('assetValidate')}</button> : null}
+          {draft || !selected ? <button type="button" className={css.secondary} disabled={state.busy || !editor.testUrl.trim() || !editor.text} onClick={() => void props.saveAndTestAutomationAsset()}>{saveFirst ? t('assetSaveAndTest') : t('assetTest')}</button> : null}
+          {draft ? <button type="button" className={css.secondary} disabled={state.busy || dirty || !credentials.vouches} title={dirty ? t('assetActivateNeedsSave') : undefined} onClick={() => void props.activateAutomationAsset()}>{t('assetActivate')} r{selected.revision}</button> : null}
+          {selected && selected.status !== 'draft' ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.requestForkAutomationAsset(selected.id)}>{t('assetFork')}</button> : null}
           {selected && selected.status !== 'archived' ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.setAutomationAssetStatus(selected.id, 'archived')}>{t('assetArchive')}</button> : null}
-          <button type="button" className={css.primary} disabled={state.busy || !draft || selected?.status === 'active'} onClick={() => void save()}>{t('assetSaveDraft')}</button>
+          <button type="button" className={css.primary} disabled={state.busy || !editor.text || selected?.status === 'active'} onClick={() => void props.saveEditedAutomationAsset()}>{t('assetSaveDraft')}</button>
         </div>
       </div>
     </div>
