@@ -2,7 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-import type { AutomationAsset, AutomationAssetStatus, AutomationAssetStore } from './automation-assets.ts'
+import { ActivationRefusedError, type AutomationAsset, type AutomationAssetStatus, type AutomationAssetStore } from './automation-assets.ts'
 import type { BrowserService } from './browser-service.ts'
 import { executeAutomationAsset } from './automation-execution.ts'
 
@@ -17,7 +17,7 @@ import { executeAutomationAsset } from './automation-execution.ts'
  */
 const CHANNEL = '/dsh-browser-assets'
 const PREFIX = 'dsh-browser-assets'
-const ENDPOINTS = ['snapshot', 'get', 'save', 'summarize', 'dismiss', 'validate', 'test', 'status'] as const
+const ENDPOINTS = ['snapshot', 'get', 'save', 'fork', 'summarize', 'dismiss', 'validate', 'test', 'status'] as const
 
 function record(payload: unknown): Record<string, unknown> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('request payload must be an object')
@@ -28,6 +28,21 @@ function record(payload: unknown): Record<string, unknown> {
 function stringField(payload: Record<string, unknown>, name: string): string {
   const value = payload[name]
   if (typeof value !== 'string' || value.length < 1 || value.length > 200) throw new Error(`${name} must be a non-empty string`)
+  return value
+}
+
+/** A failure the review UI should tell apart from a transport or storage error. `details.errorCode` names it. */
+export class AssetRpcFailure extends Error {
+  constructor(message: string, readonly details: Record<string, unknown>) {
+    super(message)
+    this.name = 'AssetRpcFailure'
+  }
+}
+
+function expectedRevision(payload: Record<string, unknown>): number | undefined {
+  const value = payload.expectedRevision
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value)) throw new Error('expectedRevision must be an integer')
   return value
 }
 
@@ -60,22 +75,32 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
           case 'snapshot': value = store.snapshot(); break
           case 'get': value = store.get(stringField(payload, 'id')) ?? null; break
           case 'save': value = store.saveDraft(payload.asset as Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>); break
+          case 'fork': value = store.fork(stringField(payload, 'id')); break
           case 'summarize': value = store.summarizeCandidate(stringField(payload, 'id')); break
           case 'dismiss': store.dismissCandidate(stringField(payload, 'id')); value = store.snapshot(); break
           case 'validate': value = store.validate(stringField(payload, 'id')); break
           case 'test': {
-            const result = await executeAutomationAsset(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputs, 'draft')
-            // The review UI shows a failed replay as an error, as it did when a failure threw.
-            if (!result.succeeded) throw new Error(result.execution.failedStep?.message ?? result.execution.message ?? 'Runtime replay did not complete.')
+            const result = await executeAutomationAsset(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputs, 'draft', { expectedRevision: expectedRevision(payload) })
+            // The review UI shows a failed replay as an error, as it did when a failure threw. The errorCode lets it
+            // say "the result did not hold" (VALIDATION_FAILED / VALIDATION_MISSING) apart from a backend problem.
+            if (!result.succeeded) {
+              const execution = result.execution
+              const errorCode = result.verifierMissing ? 'VALIDATION_MISSING' : execution.failedStep?.errorCode ?? (execution.validationStatus === 'failed' ? 'VALIDATION_FAILED' : 'ACTION_FAILED')
+              throw new AssetRpcFailure(
+                result.verifierMissing?.message ?? execution.failedStep?.message ?? execution.message ?? 'Runtime replay did not complete.',
+                { errorCode, executionStatus: execution.executionStatus, validationStatus: execution.validationStatus, effects: execution.effects, revision: result.asset.revision },
+              )
+            }
             value = result.asset
             break
           }
-          case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus); break
+          case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus, { expectedRevision: expectedRevision(payload) }); break
           default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}`, details: {} } }
         }
         return { ok: true, value }
       } catch (error) {
-        return { ok: false, error: { code: 'bad-request' as const, message: String(error instanceof Error ? error.message : error).slice(0, 500), details: {} } }
+        const details = error instanceof AssetRpcFailure ? error.details : error instanceof ActivationRefusedError ? { errorCode: 'ACTIVATION_REFUSED', reason: error.reason } : {}
+        return { ok: false, error: { code: 'bad-request' as const, message: String(error instanceof Error ? error.message : error).slice(0, 500), details } }
       }
     }
     connectionCtx.effect(
