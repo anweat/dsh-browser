@@ -113,7 +113,8 @@ test('auth profiles filter foreign storage; domains are admission rules, not a n
   }))
   try {
     await service.open(base, { authProfile: 'fixture' })
-    const state = await (service as any).activeContext.storageState()
+    // PR #36 moved the active context into per-session state; calls without a session key use the 'shared' bucket.
+    const state = await (service as any).sessions.get('shared').context.storageState()
     assert.deepEqual(state.cookies.map((cookie: any) => cookie.name), ['allowed'])
     await assert.rejects(service.open(base.replace('127.0.0.1', 'localhost'), { authProfile: 'fixture' }), /not allowed/)
     assert.equal(foreignHits, 0)
