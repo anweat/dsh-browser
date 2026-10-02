@@ -19,7 +19,7 @@ export const ACTION_GROUPS = ['runtime', 'target', 'observe', 'act', 'inspect', 
 export type ActionGroup = typeof ACTION_GROUPS[number]
 
 /** Shared sub-schemas defined once and referenced by name from parameters. */
-export type SharedSchemaName = 'locator' | 'frame' | 'recipeStep'
+export type SharedSchemaName = 'locator' | 'frame' | 'recipeStep' | 'recipeLocator' | 'postcondition' | 'inputSpec' | 'outputSpec'
 
 /**
  * One parameter node. The shape is deliberately a subset of the Host's tool

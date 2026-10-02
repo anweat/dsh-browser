@@ -132,6 +132,8 @@ export interface AutomationAssetSummary {
   inputNames: string[]
   /** Only present for schema v2 assets. */
   schemaVersion?: 2
+  /** v2 assets: the typed inputs a caller must pass to automation.run. */
+  inputSchema?: InputSpec[]
   revision: number
   testStatus: AutomationAsset['testStatus']
   successCount: number
@@ -263,7 +265,7 @@ function candidateFingerprint(domain: string, steps: BrowserRecipeStep[]): strin
 
 function summary(asset: AutomationAsset): AutomationAssetSummary {
   const { id, kind, status, name, description, domains, tags, inputNames, revision, testStatus, successCount, failureCount, updatedAt, lastRunAt } = asset
-  return { id, kind, status, name, description, domains: [...domains], tags: [...tags], inputNames: [...inputNames], ...asset.schemaVersion === 2 ? { schemaVersion: 2 as const } : {}, revision, testStatus, successCount, failureCount, updatedAt, ...lastRunAt ? { lastRunAt } : {} }
+  return { id, kind, status, name, description, domains: [...domains], tags: [...tags], inputNames: [...inputNames], ...asset.schemaVersion === 2 ? { schemaVersion: 2 as const, ...asset.inputSchema ? { inputSchema: structuredClone(asset.inputSchema) } : {} } : {}, revision, testStatus, successCount, failureCount, updatedAt, ...lastRunAt ? { lastRunAt } : {} }
 }
 
 function persistedState(value: unknown): PersistedState {

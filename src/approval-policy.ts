@@ -10,7 +10,7 @@
  * @module dsh-browser/approval-policy
  */
 
-import { recipeNeedsApproval, type BrowserRecipeStep } from './automation.ts'
+import { READ_ONLY_ACTIONS, recipeNeedsApproval, type AnyRecipeStep } from './automation.ts'
 import { validateUserscript } from './scripts.ts'
 import { isBrowserActionExposed, type AutomationMode } from './freedom.ts'
 import { findAction } from './actions/registry.ts'
@@ -112,9 +112,9 @@ export function browserPolicyDecision(name: string, args: unknown, mode: Automat
       }
       case 'recipe': {
         const input = (args ?? {}) as { steps?: unknown }
-        const steps = Array.isArray(input.steps) ? input.steps as BrowserRecipeStep[] : []
+        const steps = Array.isArray(input.steps) ? input.steps as AnyRecipeStep[] : []
         if (recipeNeedsApproval(steps)) {
-          const actions = [...new Set(steps.map(step => step.type).filter(type => !['wait', 'extract', 'assert', 'screenshot'].includes(type)))]
+          const actions = [...new Set(steps.map(step => step.type).filter(type => !READ_ONLY_ACTIONS.has(type)))]
           if (mode === 'read-only') return { kind: 'deny', reason: `Mutating recipes are disabled by automationMode=${mode}: ` + actions.join(', ') }
           if (mode === 'autonomous' || mode === 'unrestricted') return { kind: 'allow' }
           return { kind: 'ask', reason: `${name}: Run a multi-step Playwright recipe with page mutations: ` + actions.join(', ') }

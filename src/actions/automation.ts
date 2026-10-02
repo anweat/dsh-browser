@@ -2,7 +2,9 @@
 
 import type { ActionDef } from './types.ts'
 import { ActionUnavailableError, withOutcome } from './types.ts'
-import type { BrowserRecipeStep } from '../automation.ts'
+import type { AnyRecipeStep, BrowserRecipeStep } from '../automation.ts'
+import { RecipeValidationError } from './errors.ts'
+import { normalizePostconditions, type BrowserRecipeStepV2 } from '../automation-v2.ts'
 import { executeAutomationAsset } from '../automation-execution.ts'
 import { capJson, recipeOutcome } from './shared.ts'
 
@@ -38,27 +40,44 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
   {
     name: 'automation.develop',
     group: 'automation',
-    summary: 'Get, save, validate, or replay one automation draft. Never activates assets.',
-    notes: 'Search first. Full recipe/source is returned only for action=get with an exact id. `action` here is this action\'s own parameter (get|save|validate|test).',
+    summary: 'Get, save, validate, test, or convert (v1 to v2) one automation draft. Never activates assets.',
+    notes: 'save replaces the whole draft. v2 steps use locator (strict: several matches => LOCATOR_AMBIGUOUS, step not run); a v2 test needs an assert or postcondition. convert: v1 -> NEW v2 draft.',
     params: {
-      action: { type: 'string', required: true, enum: ['get', 'save', 'validate', 'test'] },
-      id: { type: 'string', description: 'Exact asset id for get, update, validate, or test.' },
-      kind: { type: 'string', enum: ['recipe', 'userscript'], description: 'Required for save.' },
-      name: { type: 'string', description: 'Required for save.' },
+      action: { type: 'string', required: true, enum: ['get', 'save', 'validate', 'test', 'convert'] },
+      id: { type: 'string', description: 'asset id; omit on save to create' },
+      kind: { type: 'string', enum: ['recipe', 'userscript'], description: 'save' },
+      name: { type: 'string', description: 'save' },
       description: { type: 'string' },
       domains: { type: 'array', items: { type: 'string' } },
-      tags: { type: 'array', items: { type: 'string' }, description: 'Explicit retrieval keywords, capped at 20.' },
-      inputNames: { type: 'array', items: { type: 'string' }, description: 'Declared UserScript __DSH_INPUTS__ keys. Recipe placeholders are inferred.' },
-      recipe: { type: 'array', items: { ref: 'recipeStep' }, description: '1-25 declarative Playwright steps.' },
-      source: { type: 'string', description: 'Complete UserScript with @match and @grant none.' },
-      url: { type: 'string', description: 'Required for test; must match the draft domain and UserScript @match.' },
-      inputs: { type: 'object', additionalProperties: true, description: 'Declared runtime inputs for test.' },
+      tags: { type: 'array', items: { type: 'string' }, description: 'retrieval keywords' },
+      inputNames: { type: 'array', items: { type: 'string' }, description: 'UserScript input keys' },
+      schemaVersion: { type: 'number', description: '1 or 2; use 2 (omitted: new=1, edit keeps)' },
+      recipe: { type: 'array', items: { ref: 'recipeStep' }, description: '1-25 steps.' },
+      inputSchema: { type: 'array', items: { ref: 'inputSpec' }, description: 'v2 typed inputs.' },
+      outputSchema: { type: 'array', items: { ref: 'outputSpec' }, description: 'v2 named outputs.' },
+      postconditions: { type: 'array', items: { ref: 'postcondition' }, description: 'v2: verified after the steps' },
+      requiredCapabilities: { type: 'array', items: { type: 'string' }, description: 'v2: recorded only' },
+      source: { type: 'string', description: 'UserScript' },
+      url: { type: 'string', description: 'test: inside the draft domains' },
+      inputs: { type: 'object', additionalProperties: true, description: 'test inputs' },
       authProfile: { type: 'string' },
       rulePack: { type: 'string' },
     },
     approval: 'asset-develop', readOnly: true, mutating: false, concurrencySafe: false, timeoutMs: 30_000, settleMs: RECIPE_SETTLE_MS,
     errors: ['VALIDATION_FAILED', 'OUTCOME_UNKNOWN'],
-    examples: [{ args: { action: 'get', id: 'asset-id' } }],
+    examples: [
+      {
+        args: {
+          action: 'save', kind: 'recipe', schemaVersion: 2, name: 'Search', domains: ['example.com'],
+          recipe: [
+            { type: 'fill', locator: { label: 'Query' }, value: '{{query}}' },
+            { type: 'click', locator: { role: 'button', name: 'Search' } },
+            { type: 'extract', locator: { css: '#results' }, as: 'results' },
+          ],
+          postconditions: [{ output: 'results', nonEmpty: true }],
+        },
+      },
+    ],
     async execute(args, ctx) {
       const { assets, development } = ctx
       if (!assets || !development) throw new ActionUnavailableError('model automation development is disabled')
@@ -89,15 +108,30 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
           result: capped.value, truncated: capped.truncated,
         }, recipeOutcome(result.execution))
       }
+      if (args.action === 'convert') {
+        if (!args.id) throw new Error('automation development convert requires id')
+        const { draft, conversion } = development.convert(args.id, ctx.sessionId)
+        return developmentResult('convert', {
+          id: draft.id, status: draft.status, schemaVersion: 2, name: draft.name, revision: draft.revision,
+          sourceAssetId: draft.sourceAssetId, sourceRevision: draft.sourceRevision, steps: draft.recipe?.length ?? 0,
+          pendingDisambiguation: conversion.pendingDisambiguation, notes: conversion.notes,
+        }, draft)
+      }
       if (args.action !== 'save' || !args.kind || !args.name) throw new Error('automation development save requires kind and name')
       const asset = development.save({
         ...args.id ? { id: args.id } : {}, kind: args.kind, name: args.name,
         ...args.description !== undefined ? { description: args.description } : {},
         ...args.domains ? { domains: args.domains } : {}, ...args.tags ? { tags: args.tags } : {},
-        ...args.inputNames ? { inputNames: args.inputNames } : {}, ...args.recipe ? { recipe: args.recipe as BrowserRecipeStep[] } : {},
+        ...args.inputNames ? { inputNames: args.inputNames } : {}, ...args.recipe ? { recipe: args.recipe as AnyRecipeStep[] } : {},
+        ...args.schemaVersion !== undefined ? { schemaVersion: args.schemaVersion } : {},
+        ...args.inputSchema ? { inputSchema: args.inputSchema } : {}, ...args.outputSchema ? { outputSchema: args.outputSchema } : {},
+        ...args.postconditions ? { postconditions: args.postconditions } : {}, ...args.requiredCapabilities ? { requiredCapabilities: args.requiredCapabilities } : {},
         ...args.source !== undefined ? { source: args.source } : {},
       }, ctx.sessionId)
-      const compact = { id: asset.id, kind: asset.kind, status: asset.status, name: asset.name, domains: asset.domains, tags: asset.tags, inputNames: asset.inputNames, revision: asset.revision, testStatus: asset.testStatus }
+      const compact = {
+        id: asset.id, kind: asset.kind, status: asset.status, name: asset.name, domains: asset.domains, tags: asset.tags, inputNames: asset.inputNames, revision: asset.revision, testStatus: asset.testStatus,
+        ...asset.schemaVersion === 2 ? { schemaVersion: 2, pendingDisambiguation: asset.pendingDisambiguation?.length ?? 0 } : {},
+      }
       return developmentResult('save', compact, asset)
     },
   },
@@ -130,19 +164,30 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
     name: 'automation.run_recipe',
     group: 'automation',
     summary: 'Run an inline Playwright recipe (max 25 named steps) on the current page or a given url.',
-    notes: 'Read-only steps (wait, extract, assert, screenshot) run directly; mutating steps are denied in read-only, approved once in standard, and direct in autonomous/unrestricted.',
+    notes: 'Read-only steps (wait, goto, extract, assert, screenshot) run directly; mutating steps are denied in read-only, approved once in standard, and direct in autonomous/unrestricted. Prefer schemaVersion 2 (strict locators, see automation.develop for the step rules).',
     params: {
       url: { type: 'string', description: 'Open this URL first; omit only when target.open already established a page.' },
       authProfile: { type: 'string' },
       rulePack: { type: 'string' },
       waitMs: { type: 'number' },
       steps: { type: 'array', required: true, items: { ref: 'recipeStep' } },
+      schemaVersion: { type: 'number', description: '1 (default): steps use selector and take the first match. 2: steps use locator (strict), goto/clear exist, postconditions apply.' },
+      allowedDomains: { type: 'array', items: { type: 'string' }, description: 'v2 goto may go to these domains (and stay on the starting origin). Default: the starting origin only.' },
+      postconditions: { type: 'array', items: { ref: 'postcondition' }, description: 'v2: what must hold after the steps.' },
     },
     approval: 'recipe', readOnly: true, mutating: true, concurrencySafe: false, timeoutMs: 120_000, settleMs: RECIPE_SETTLE_MS,
     errors: ['VALIDATION_FAILED', 'OUTCOME_UNKNOWN', 'INVALID_RECIPE'],
-    examples: [{ args: { url: 'https://example.com/', steps: [{ type: 'extract', selector: 'main', mode: 'text', limit: 5 }] } }],
+    examples: [
+      { args: { url: 'https://example.com/', steps: [{ type: 'extract', selector: 'main', mode: 'text', limit: 5 }] } },
+      { args: { url: 'https://example.com/', schemaVersion: 2, steps: [{ type: 'click', locator: { role: 'link', name: 'More' } }, { type: 'extract', locator: { css: 'main' }, as: 'body' }], postconditions: [{ output: 'body', nonEmpty: true }] }, note: 'v2: strict locators' },
+    ],
     async execute(args, ctx) {
-      const steps = args.steps as BrowserRecipeStep[]
+      const steps = args.steps as AnyRecipeStep[]
+      const v2 = args.schemaVersion === 2
+      if (args.schemaVersion !== undefined && args.schemaVersion !== 1 && !v2) throw new RecipeValidationError('schemaVersion must be 1 or 2')
+      if (!v2 && (args.postconditions || args.allowedDomains)) throw new RecipeValidationError('postconditions and allowedDomains need schemaVersion 2')
+      let postconditions
+      try { postconditions = v2 && args.postconditions ? normalizePostconditions(args.postconditions, steps as BrowserRecipeStepV2[]) : undefined } catch (error) { throw new RecipeValidationError(error instanceof Error ? error.message : String(error)) }
       try {
         const { steps: _legacy, ...result } = await ctx.service.recipe(steps, {
           signal: ctx.signal,
@@ -150,14 +195,16 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
           ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {},
           ...args.authProfile ? { authProfile: args.authProfile } : {},
           ...args.rulePack ? { rulePack: args.rulePack } : {},
+          ...v2 ? { schemaVersion: 2 as const, gotoSameOrigin: true, ...args.allowedDomains ? { allowedDomains: args.allowedDomains } : {}, ...postconditions ? { postconditions } : {} } : {},
           session: ctx.session,
         })
         const outcome = recipeOutcome(result)
         const where = result.url || args.url
-        if (where) ctx.assets?.recordRecipe(where, steps, ctx.sessionId, outcome.ok)
+        // v2 inline recipes are not offered as reuse candidates (the candidate store normalizes v1 selectors only).
+        if (where && !v2) ctx.assets?.recordRecipe(where, steps as BrowserRecipeStep[], ctx.sessionId, outcome.ok)
         return withOutcome(result, outcome)
       } catch (error) {
-        if (args.url) ctx.assets?.recordRecipe(args.url, steps, ctx.sessionId, false)
+        if (args.url && !v2) ctx.assets?.recordRecipe(args.url, steps as BrowserRecipeStep[], ctx.sessionId, false)
         throw error
       }
     },

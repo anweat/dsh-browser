@@ -40,24 +40,86 @@ const LOCATOR_SCHEMA: ParamNode = {
   },
 }
 
+const RECIPE_LOCATOR_SCHEMA: ParamNode = {
+  type: 'object',
+  additionalProperties: false,
+  description: 'v2, strict: one match or LOCATOR_AMBIGUOUS. One of role (+name, exact), label, text, testId, css.',
+  properties: {
+    role: { type: 'string' },
+    name: { type: 'string', description: 'with role' },
+    exact: { type: 'boolean' },
+    label: { type: 'string' },
+    text: { type: 'string' },
+    testId: { type: 'string' },
+    css: { type: 'string' },
+    framePath: { type: 'array', items: { type: 'string' }, description: 'iframe selectors, outermost first' },
+    index: { type: 'number', description: '0-based; needs indexReason' },
+    indexReason: { type: 'string' },
+    explicitFirst: { type: 'boolean', description: 'v1 converter marker' },
+  },
+}
+
 const RECIPE_STEP_SCHEMA: ParamNode = {
   type: 'object',
   additionalProperties: false,
-  description: 'One declarative Playwright recipe step.',
+  description: 'v1: selector (first match). v2: locator (strict).',
   properties: {
-    type: { type: 'string', required: true, enum: ['wait', 'click', 'fill', 'type', 'press', 'select', 'check', 'hover', 'scroll', 'extract', 'assert', 'screenshot'] },
-    condition: { type: 'string', enum: ['selector', 'text', 'load', 'time'] },
-    selector: { type: 'string' },
-    value: { type: 'string' },
-    text: { type: 'string' },
+    type: { type: 'string', required: true, enum: ['wait', 'click', 'fill', 'clear', 'type', 'press', 'select', 'check', 'hover', 'scroll', 'goto', 'extract', 'assert', 'screenshot'] },
+    condition: { type: 'string', enum: ['selector', 'locator', 'text', 'url', 'load', 'time'], description: 'wait kind' },
+    selector: { type: 'string', description: 'v1 CSS' },
+    locator: { ref: 'recipeLocator' },
+    value: { type: 'string', description: 'fill/type/select; wait text/url' },
+    allowEmpty: { type: 'boolean', description: 'v2 fill ""' },
+    text: { type: 'string', description: 'assert' },
+    urlIncludes: { type: 'string', description: 'v2 assert' },
+    url: { type: 'string', description: 'v2 goto, inside domains' },
     key: { type: 'string' },
-    timeoutMs: { type: 'number' },
+    timeoutMs: { type: 'number', description: '1-30000; v2 extract/assert 5000' },
     waitMs: { type: 'number' },
     deltaY: { type: 'number' },
     checked: { type: 'boolean' },
     mode: { type: 'string', enum: ['text', 'html', 'links', 'attribute'] },
     attribute: { type: 'string' },
     limit: { type: 'number' },
+    as: { type: 'string', description: 'v2 extract output name' },
+  },
+}
+
+const POSTCONDITION_SCHEMA: ParamNode = {
+  type: 'object',
+  additionalProperties: false,
+  description: 'One of selector, text, urlIncludes, output (+ nonEmpty or allowEmpty true).',
+  properties: {
+    selector: { type: 'string', description: 'visible CSS' },
+    text: { type: 'string', description: 'visible text' },
+    urlIncludes: { type: 'string' },
+    output: { type: 'string', description: 'an extract as name' },
+    nonEmpty: { type: 'boolean' },
+    allowEmpty: { type: 'boolean' },
+    timeoutMs: { type: 'number', description: 'default 5000' },
+  },
+}
+
+const INPUT_SPEC_SCHEMA: ParamNode = {
+  type: 'object',
+  additionalProperties: false,
+  description: 'Typed input, checked and converted before running.',
+  properties: {
+    name: { type: 'string', required: true, description: 'placeholder name (double curly braces in steps)' },
+    type: { type: 'string', required: true, enum: ['string', 'number', 'enum'] },
+    required: { type: 'boolean', description: 'default true' },
+    example: { type: 'string', description: 'sample, as text' },
+    enumValues: { type: 'array', items: { type: 'string' }, description: 'for enum' },
+  },
+}
+
+const OUTPUT_SPEC_SCHEMA: ParamNode = {
+  type: 'object',
+  additionalProperties: false,
+  description: 'Named output of the extract step with the same as.',
+  properties: {
+    name: { type: 'string', required: true },
+    type: { type: 'string', required: true, enum: ['string', 'number', 'json'] },
   },
 }
 
@@ -65,6 +127,10 @@ export const SHARED_SCHEMAS: Record<SharedSchemaName, ParamNode> = {
   frame: FRAME_SCHEMA,
   locator: LOCATOR_SCHEMA,
   recipeStep: RECIPE_STEP_SCHEMA,
+  recipeLocator: RECIPE_LOCATOR_SCHEMA,
+  postcondition: POSTCONDITION_SCHEMA,
+  inputSpec: INPUT_SPEC_SCHEMA,
+  outputSpec: OUTPUT_SPEC_SCHEMA,
 }
 
 /** The two params every element-targeting action accepts. */
