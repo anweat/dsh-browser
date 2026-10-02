@@ -22,11 +22,35 @@ export const ACT_ACTIONS: ActionDef[] = [
     name: 'act.fill',
     group: 'act',
     summary: 'Fill text into an input/textarea (replaces its value); returns the page state.',
+    notes: 'To empty a field use act.clear.',
     params: { ...TARGET_PARAMS, text: { type: 'string', required: true, description: 'Text to enter.' }, timeoutMs: TIMEOUT },
     approval: 'interaction', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 30_000,
     examples: [{ args: { locator: { label: 'Query' }, text: 'dsh' } }],
     async execute(args, ctx) {
       return ctx.service.type(targetOf(args)!, args.text, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: ctx.session })
+    },
+  },
+  {
+    name: 'act.type',
+    group: 'act',
+    summary: 'Type text key by key into the located element (fires key events); use act.fill to replace a value at once.',
+    notes: 'Appends at the caret. Use it for inputs that react to every keystroke (autocomplete, masked fields). To empty a field use act.clear.',
+    params: { ...TARGET_PARAMS, text: { type: 'string', required: true, description: 'Text to type, 1-10000 characters.' }, delayMs: { type: 'number', description: 'Delay between keys, 0-1000 ms. Default 0.' }, timeoutMs: TIMEOUT },
+    approval: 'interaction', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 60_000,
+    examples: [{ args: { locator: { role: 'combobox', name: 'City' }, text: 'Ams', delayMs: 50 } }],
+    async execute(args, ctx) {
+      return ctx.service.typeKeys(targetOf(args)!, args.text, { ...args.delayMs !== undefined ? { delayMs: args.delayMs } : {}, ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: ctx.session })
+    },
+  },
+  {
+    name: 'act.clear',
+    group: 'act',
+    summary: 'Empty an input/textarea (fires the input event, so controlled fields update); returns the page state.',
+    params: { ...TARGET_PARAMS, timeoutMs: TIMEOUT },
+    approval: 'interaction', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 30_000,
+    examples: [{ args: { locator: { label: 'Query' } } }],
+    async execute(args, ctx) {
+      return ctx.service.clear(targetOf(args)!, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: ctx.session })
     },
   },
   {

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Controlled</title></head>
+<body>
+  <h1>Controlled input fixture</h1>
+  <label for="q">Query</label>
+  <input id="q" type="text">
+  <p id="state">State: []</p>
+  <p id="keys">Keys: 0</p>
+  <button id="submit" type="button" data-hit="submit">Submit</button>
+  <script>
+    // A controlled input in the React style: the state is the source of truth and every input event re-renders the value.
+    var state = { q: 'initial' }
+    var keys = 0
+    var input = document.getElementById('q')
+    function render() {
+      input.value = state.q
+      document.getElementById('state').textContent = 'State: [' + state.q + ']'
+    }
+    input.addEventListener('input', function (event) { state.q = event.target.value; render() })
+    input.addEventListener('keydown', function () { keys += 1; document.getElementById('keys').textContent = 'Keys: ' + keys })
+    document.getElementById('submit').addEventListener('click', function () { fetch('/hit?who=submit&q=' + encodeURIComponent(state.q)) })
+    render()
+  </script>
+</body>
+</html>

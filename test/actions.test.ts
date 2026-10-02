@@ -227,6 +227,9 @@ test('approval reasons name the action and its key arguments', () => {
   assert.match(reason('act.fill', { selector: '#q', text: 'secret' }), /act\.fill #q \(6 chars\)/)
   assert.doesNotMatch(reason('act.fill', { selector: '#q', text: 'secret' }), /secret/, 'typed text never appears in the prompt')
   assert.match(reason('act.press', { key: 'Enter' }), /act\.press \(page\) \(key Enter\)/)
+  assert.match(reason('act.type', { locator: { testId: 'city' }, text: 'Amsterdam' }), /act\.type testId="city" \(9 chars\)/)
+  assert.doesNotMatch(reason('act.type', { selector: '#pin', text: 'hunter2' }), /hunter2/, 'typed keys never appear in the prompt')
+  assert.match(reason('act.clear', { selector: '#q' }), /act\.clear #q/)
   assert.match(reason('act.upload', { selector: 'input', files: ['/a/b.txt'] }), /act\.upload input.*\/a\/b\.txt/)
   assert.match(reason('script.evaluate', { expression: 'document.title' }), /script\.evaluate `document\.title`/)
   assert.match(reason('opencli.run', { args: ['reddit', 'search', 'dsh'] }), /opencli\.run.*reddit search dsh/)
@@ -234,6 +237,21 @@ test('approval reasons name the action and its key arguments', () => {
   assert.match(reason('automation.develop', { action: 'save' }), /automation\.develop save/)
   assert.match(reason('automation.run', { id: 'asset-1' }), /automation\.run asset-1/)
   assert.match(reason('automation.run_recipe', { steps: [{ type: 'click', selector: 'a' }] }), /automation\.run_recipe.*click/)
+})
+
+test('act.type and act.clear are interaction actions: asked in standard, denied in read-only, free in autonomous', () => {
+  for (const name of ['act.type', 'act.clear']) {
+    const action = findAction(name)!
+    assert.equal(action.approval, 'interaction', name)
+    assert.equal(action.mutating, true, name)
+    assert.equal(action.readOnly, false, name)
+    assert.equal(browserPolicyDecision(name, { selector: '#q', text: 'x' }, 'read-only').kind, 'deny', name)
+    assert.equal(browserPolicyDecision(name, { selector: '#q', text: 'x' }, 'standard').kind, 'ask', name)
+    assert.equal(browserPolicyDecision(name, { selector: '#q', text: 'x' }, 'autonomous').kind, 'allow', name)
+  }
+  assert.equal(validateArgs(findAction('act.type')!.params, { selector: '#q' }).errors[0], 'text: required')
+  assert.deepEqual(validateArgs(findAction('act.type')!.params, { locator: { label: 'City' }, text: 'Ams', delayMs: 40 }).errors, [])
+  assert.deepEqual(validateArgs(findAction('act.clear')!.params, { locator: { label: 'City' } }).errors, [])
 })
 
 test('legacy and unknown browser names are denied by the policy; web tools keep their rules', () => {
@@ -320,9 +338,9 @@ test('indexed registers two tools; flat registers one per usable action; both sh
   assert.deepEqual([...collect({ automationMode: 'unrestricted' }).keys()], ['browser_index', 'browser_call'])
   assert.deepEqual([...collect({ enabled: false }).keys()], [])
   const flatAll = collect({ automationMode: 'unrestricted', toolSurface: 'flat' })
-  assert.equal(flatAll.size, 31)
+  assert.equal(flatAll.size, 33)
   assert.equal(collect({ automationMode: 'read-only', toolSurface: 'flat' }).size, 18)
-  assert.equal(collect({ automationMode: 'standard', toolSurface: 'flat', automationAssets: { modelDevelopmentEnabled: false } }).size, 30)
+  assert.equal(collect({ automationMode: 'standard', toolSurface: 'flat', automationAssets: { modelDevelopmentEnabled: false } }).size, 32)
   assert.deepEqual([...flatAll.keys()].sort(), configuredBrowserTools('unrestricted', { modelDevelopmentEnabled: true }, true, 'flat').sort())
   const flatClick = flatAll.get('browser_act_click')
   assert.equal(flatClick.parameters.properties.locator.properties.role.type, 'string', 'flat tools carry the expanded locator schema')

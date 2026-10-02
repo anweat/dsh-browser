@@ -27,7 +27,7 @@ export const GROUP_SUMMARIES: Record<ActionGroup, string> = {
   runtime: 'runtime status and Chromium install',
   target: 'open / close / list this session\'s page',
   observe: 'read page text, screenshots',
-  act: 'click, fill, press, select, check, hover, scroll, upload, wait',
+  act: 'click, fill, type, clear, press, select, check, hover, scroll, upload, wait',
   inspect: 'captured console and failed-request records',
   script: 'page JavaScript, built-in scripts, userscripts',
   automation: 'search/run reusable assets, develop drafts, inline recipes',

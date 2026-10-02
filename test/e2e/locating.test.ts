@@ -56,4 +56,31 @@ describe('dsh-browser strict locating in a real browser', { skip: detection.ok ?
     await new Promise(resolve => setTimeout(resolve, 300))
     assert.deepEqual(server.hits(), { shipping: 1, pay: 1 })
   })
+  it('act.clear empties a controlled input and the app state follows; act.type fires one key event per character', async () => {
+    await harness.result(S, 'target.open', { url: url('controlled.html') })
+    const before = await harness.result(S, 'observe.read')
+    assert.match(before.text, /State: \[initial\]/)
+
+    const cleared = await harness.result(S, 'act.clear', { locator: { label: 'Query' } })
+    assert.match(cleared.text, /State: \[\]/, 'the controlled state saw the empty value, not just the DOM')
+    const value = await harness.result(S, 'script.evaluate', { expression: 'document.getElementById("q").value' })
+    assert.equal(JSON.parse(value.resultJson), '')
+
+    const keysOf = (text: string): number => Number(/Keys: (\d+)/.exec(text)![1])
+    const keysBefore = keysOf(cleared.text)
+    const typed = await harness.result(S, 'act.type', { locator: { label: 'Query' }, text: 'xyz' })
+    assert.match(typed.text, /State: \[xyz\]/)
+    assert.equal(keysOf(typed.text) - keysBefore, 3, 'pressSequentially sends a key event per character')
+
+    // fill replaces the value without key events; it is a different action.
+    const filled = await harness.result(S, 'act.fill', { locator: { label: 'Query' }, text: 'abc' })
+    assert.match(filled.text, /State: \[abc\]/)
+    assert.equal(keysOf(filled.text), keysOf(typed.text), 'fill fires no key events')
+
+    // Both are strict like every other locator.
+    const missing = await harness.action(S, 'act.clear', { locator: { label: 'No such field' }, timeoutMs: 400 })
+    assert.equal(missing.error.code, 'LOCATOR_NOT_FOUND')
+    const index = await harness.index({ action: 'act.type' })
+    assert.match(index, /act\.type/)
+  })
 })

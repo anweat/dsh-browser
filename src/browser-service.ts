@@ -1117,6 +1117,24 @@ export class BrowserService {
     return this.readState(page, false)
   }
 
+  /** Type key by key (pressSequentially), so per-key handlers fire; unlike `type`, which replaces the whole value. */
+  async typeKeys(target: BrowserTarget, text: string, opts: { delayMs?: number; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const value = boundedString(text, 'act.type text', 10_000)
+    const delay = opts.delayMs ?? 0
+    if (!Number.isFinite(delay) || delay < 0 || delay > 1_000) throw new Error('act.type delayMs must be between 0 and 1,000')
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
+    const timeout = boundedTimeout(opts.timeoutMs, 'act.type timeoutMs')
+    await this.onTarget(page, target, locator => locator.pressSequentially(value, { delay, timeout }))
+    return this.readState(page, false)
+  }
+
+  async clear(target: BrowserTarget, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
+    const timeout = boundedTimeout(opts.timeoutMs, 'act.clear timeoutMs')
+    await this.onTarget(page, target, locator => locator.clear({ timeout }))
+    return this.readState(page, false)
+  }
+
   async wait(target: BrowserTarget | undefined, opts: { urlPattern?: string; networkIdle?: boolean; timeMs?: number; state?: 'visible' | 'hidden' | 'attached' | 'detached'; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     const modes = [target !== undefined, opts.urlPattern !== undefined, opts.networkIdle === true, opts.timeMs !== undefined].filter(Boolean)

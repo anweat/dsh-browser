@@ -40,7 +40,7 @@ function targetLabel(args: unknown): string {
 function interactionLabel(name: string, args: unknown): string {
   const input = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
   const extras: string[] = []
-  if (name === 'act.fill' && typeof input.text === 'string') extras.push(`${input.text.length} chars`)
+  if ((name === 'act.fill' || name === 'act.type') && typeof input.text === 'string') extras.push(`${input.text.length} chars`)
   if (name === 'act.press' && typeof input.key === 'string') extras.push(`key ${clip(input.key, 40)}`)
   if (name === 'act.select' && Array.isArray(input.values)) extras.push('values ' + clip(input.values.map(String).join(',')))
   if (name === 'act.check') extras.push(input.checked === false ? 'uncheck' : 'check')
