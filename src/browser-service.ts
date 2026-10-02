@@ -32,6 +32,13 @@ import { configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
 
+/**
+ * How many sessions may hold a browser context+page at once. Past this, the
+ * least-recently-used session is closed, so a long-lived profile cannot
+ * accumulate contexts until the browser dies.
+ */
+const DEFAULT_MAX_SESSIONS = 8
+
 export interface RenderRule {
   hostname: string
   contentSelectors: string[]
@@ -307,28 +314,111 @@ function redactCaptureUrl(value: string): string {
   }
 }
 
+/**
+ * The interactive page state owned by ONE session.
+ *
+ * A single `BrowserService` instance is provided to every consumer, so before
+ * this existed two concurrent sessions shared one `activePage`: whichever
+ * session called `browser_open` last owned the page, and the other session's
+ * `browser_read` / `browser_evaluate` / `browser_console` then operated on a
+ * page it never opened — including the other session's cookies and DOM.
+ *
+ * State is therefore keyed by session. The browser PROCESS stays shared on
+ * purpose: launching N Chromium processes costs hundreds of MB each, while one
+ * process with N `BrowserContext`s is what Chromium itself does for N profiles
+ * and is properly isolated (separate cookies, storage, cache, permissions).
+ * "Different tabs" would not be enough — pages in the SAME context share
+ * cookies and storage, so each session gets its own context, not just its own
+ * page.
+ */
+interface SessionState {
+  context?: any
+  page?: any
+  profile?: ResolvedAuthProfile
+  rulePack?: ResolvedRulePack
+  captureConsole: boolean
+  captureNetwork: boolean
+  capturedConsole: BrowserConsoleRecord[]
+  capturedRequests: BrowserRequestRecord[]
+  /** Monotonic tick of last use, for least-recently-used eviction. */
+  lastUsed: number
+}
+
+function newSessionState(): SessionState {
+  return {
+    captureConsole: false,
+    captureNetwork: false,
+    capturedConsole: [],
+    capturedRequests: [],
+    lastUsed: 0,
+  }
+}
+
+/** Bucket for callers that carry no agent identity. */
+const SHARED_SESSION = 'shared'
+
+/**
+ * Session key for a tool execution.
+ *
+ * `ToolExecution.agent` is documented as "the agent on whose behalf the call
+ * runs (set by the agent loop)". Two session identities hang off it and BOTH are
+ * the session, not the turn:
+ *
+ * - `agent.session.id` — the live `Agent` face exposes `readonly session:
+ *   Session`, and `Session.id` is a `SessionId`. This is the path the
+ *   automation-asset recorder already uses in production, so it is tried first.
+ * - `agent.id` — the base `Agent` contract documents `readonly id: SessionId`
+ *   as "Session-backed Agent identity". Used as a fallback.
+ *
+ * A session therefore keeps ONE page across all of its turns, and two
+ * concurrent sessions never share one. Calls carrying no agent at all
+ * (automation-asset replays, non-agent dispatchers) land in one shared bucket,
+ * which is the pre-existing single-session behaviour rather than a new hazard.
+ */
+export function sessionKeyFor(agent: SessionIdentity | undefined): string {
+  const live = agent?.session?.id
+  if (typeof live === 'string' && live) return `session:${live}`
+  const own = (agent as { readonly id?: unknown } | undefined)?.id
+  if (typeof own === 'string' && own) return `session:${own}`
+  return SHARED_SESSION
+}
+
+/** The two shapes a live Agent presents for session identity. */
+export interface SessionIdentity {
+  readonly id?: unknown
+  readonly session?: { readonly id?: unknown }
+}
+
 export class BrowserService {
   private browser: any
   private launching?: Promise<any>
-  private activeContext: any
-  private activePage: any
-  private activeProfile?: ResolvedAuthProfile
-  private activeRulePack?: ResolvedRulePack
+  /** Per-session interactive state. Replaces the former global activePage. */
+  private readonly sessions = new Map<string, SessionState>()
+  private clock = 0
   private readonly authProfiles: AuthProfileStore
   private readonly usageGovernor: UsageGovernor
   private opencliCatalogCache?: OpencliCatalogItem[]
-  private captureConsoleEnabled = false
-  private captureNetworkEnabled = false
-  private capturedConsole: BrowserConsoleRecord[] = []
-  private capturedRequests: BrowserRequestRecord[] = []
+  /** How many sessions may hold a context+page at once before LRU eviction. */
+  private readonly sessionLimit: number
 
   constructor(private readonly config: ResolvedConfig) {
     this.authProfiles = new AuthProfileStore(config.authProfiles)
     this.usageGovernor = new UsageGovernor(config.usagePolicy)
+    this.sessionLimit = Math.max(1, Number.isInteger(config.maxSessions) ? config.maxSessions : DEFAULT_MAX_SESSIONS)
   }
 
   available(): boolean {
     return this.config.enabled
+  }
+
+  /**
+   * The state bucket belonging to a tool execution's session.
+   *
+   * Tools use this for the few operations that act on the bucket itself
+   * (`browser_close`) rather than passing a key into a method.
+   */
+  sessionState(agent: SessionIdentity | undefined): SessionState | undefined {
+    return this.peek(sessionKeyFor(agent))
   }
 
   private assertEnabled(): void {
@@ -339,12 +429,75 @@ export class BrowserService {
     return !!browser && (typeof browser.isConnected !== 'function' || browser.isConnected())
   }
 
+  /**
+   * The state bucket for one session, created on demand.
+   *
+   * Eviction is least-recently-used and never touches the caller's own bucket,
+   * so a session cannot have its page closed out from under it by a burst of
+   * other sessions.
+   */
+  private state(session = SHARED_SESSION): SessionState {
+    const existing = this.sessions.get(session)
+    if (existing) {
+      existing.lastUsed = ++this.clock
+      return existing
+    }
+    const state = newSessionState()
+    state.lastUsed = ++this.clock
+    this.sessions.set(session, state)
+    void this.evictSessions(session)
+    return state
+  }
+
+  /**
+   * Look up an existing bucket WITHOUT creating one and WITHOUT evicting.
+   *
+   * Queries (`browser_status`, `browser_console`, `browser_requests`) must go
+   * through this, not {@link state}. Creating a bucket for a session that only
+   * *asks* a question would both leak a slot and push a live session past the
+   * limit, so a read could evict the very page it was trying to describe.
+   */
+  private peek(session = SHARED_SESSION): SessionState | undefined {
+    const existing = this.sessions.get(session)
+    if (existing) existing.lastUsed = ++this.clock
+    return existing
+  }
+
+  /** Close the least-recently-used sessions that exceed the limit. */
+  private async evictSessions(keep: string): Promise<void> {
+    while (this.sessions.size > this.sessionLimit) {
+      let victim: string | undefined
+      let oldest = Number.POSITIVE_INFINITY
+      for (const [key, value] of this.sessions) {
+        if (key === keep) continue
+        if (value.lastUsed < oldest) { oldest = value.lastUsed; victim = key }
+      }
+      if (victim === undefined) return
+      const state = this.sessions.get(victim)
+      this.sessions.delete(victim)
+      if (state) await this.disposeState(state)
+    }
+  }
+
+  /** Close one session's page+context without persisting its auth state. */
+  private async disposeState(state: SessionState): Promise<void> {
+    const page = state.page
+    const context = state.context
+    state.page = undefined
+    state.context = undefined
+    state.profile = undefined
+    state.rulePack = undefined
+    state.capturedConsole = []
+    state.capturedRequests = []
+    state.captureConsole = false
+    state.captureNetwork = false
+    if (page) await page.close().catch(() => {})
+    if (context) await context.close().catch(() => {})
+  }
+
+  /** Drop all per-session state after a browser-level failure. */
   private clearActiveState(): void {
-    this.activeContext = undefined
-    this.activePage = undefined
-    this.activeProfile = undefined
-    this.activeRulePack = undefined
-    this.resetCapture()
+    this.sessions.clear()
   }
 
   private handleBrowserDisconnected(browser: any): void {
@@ -790,85 +943,98 @@ export class BrowserService {
     return this.runScript(url, source, opts)
   }
 
-  // ── interactive surface (one persistent context + page) ──────────────────
+  // ── interactive surface (one context + page PER SESSION) ──────────────────
 
-  private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string } = {}): Promise<any> {
+  /**
+   * Return the calling session's live page, creating one when needed.
+   *
+   * `session` is the key from {@link sessionKeyFor}. Every read and write below
+   * is confined to that bucket, which is what stops one session from observing
+   * or mutating another's page, cookies, console or network log.
+   */
+  private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string; session?: string } = {}): Promise<any> {
     if (targetUrl && !['http:', 'https:'].includes(new URL(targetUrl).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
-    if (this.activePage && (this.activePage.isClosed() || !this.browserConnected())) await this.closePage()
-    if (this.activePage && !this.activePage.isClosed()) {
-      if (!targetUrl) return this.activePage
-      if ((opts.authProfile ?? this.config.defaultAuthProfile) === this.activeProfile?.id && opts.rulePack === this.activeRulePack?.id) {
-        if (this.activeProfile) this.authProfiles.resolve(this.activeProfile.id, targetUrl)
-        if (this.activeRulePack) resolveRulePack(this.config.rulePacks, this.activeRulePack.id, targetUrl)
-        return this.activePage
+    const state = this.state(opts.session)
+    if (state.page && (state.page.isClosed() || !this.browserConnected())) await this.closePage(state)
+    if (state.page && !state.page.isClosed()) {
+      if (!targetUrl) return state.page
+      if ((opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id && opts.rulePack === state.rulePack?.id) {
+        if (state.profile) this.authProfiles.resolve(state.profile.id, targetUrl)
+        if (state.rulePack) resolveRulePack(this.config.rulePacks, state.rulePack.id, targetUrl)
+        return state.page
       }
-      await this.closePage()
+      await this.closePage(state)
     }
     if (targetUrl) {
       const session = await this.transientContext(targetUrl, opts)
-      this.activeContext = session.context
-      this.activeProfile = session.profile
-      this.activeRulePack = session.rulePack
+      state.context = session.context
+      state.profile = session.profile
+      state.rulePack = session.rulePack
     } else {
       const browser = await this.ensure()
-      this.activeContext = await browser.newContext(storageStateOptions(this.config.storageStatePath, 'global'))
+      state.context = await browser.newContext(storageStateOptions(this.config.storageStatePath, 'global'))
     }
-    this.activePage = await this.activeContext.newPage()
-    this.attachCapture(this.activePage)
-    return this.activePage
+    state.page = await state.context.newPage()
+    this.attachCapture(state, state.page)
+    return state.page
   }
 
-  private attachCapture(page: any): void {
+  private attachCapture(state: SessionState, page: any): void {
     const release = () => {
-      if (this.activePage !== page) return
-      const context = this.activeContext
-      const profile = this.activeProfile
-      this.clearActiveState()
+      // Only clear this session's bucket, and only if the page is still the
+      // one we attached to: another session must not be affected.
+      if (state.page !== page) return
+      const context = state.context
+      const profile = state.profile
+      state.page = undefined
+      state.context = undefined
+      state.profile = undefined
+      state.rulePack = undefined
       if (context) void this.persistAndClose({ context, ...profile ? { profile } : {} }).catch(() => {})
     }
     page.on('close', release)
     page.on('crash', release)
     page.on('console', (message: any) => {
-      if (!this.captureConsoleEnabled) return
+      if (!state.captureConsole) return
       const location = message.location?.() as { url?: string } | undefined
-      this.capturedConsole.push({
+      state.capturedConsole.push({
         type: String(message.type?.() ?? 'log').slice(0, 40),
         text: redactCaptureText(String(message.text?.() ?? '')),
         ...location?.url ? { url: redactCaptureUrl(location.url) } : {},
         timestamp: new Date().toISOString(),
       })
-      if (this.capturedConsole.length > 200) this.capturedConsole.splice(0, this.capturedConsole.length - 200)
+      if (state.capturedConsole.length > 200) state.capturedConsole.splice(0, state.capturedConsole.length - 200)
     })
     page.on('response', (response: any) => {
-      if (!this.captureNetworkEnabled) return
+      if (!state.captureNetwork) return
       const status = Number(response.status?.() ?? 0)
       if (status < 400) return
       const request = response.request?.()
-      this.capturedRequests.push({
+      state.capturedRequests.push({
         method: String(request?.method?.() ?? 'GET').slice(0, 20),
         url: redactCaptureUrl(String(response.url?.() ?? '')),
         status,
         timestamp: new Date().toISOString(),
       })
-      if (this.capturedRequests.length > 200) this.capturedRequests.splice(0, this.capturedRequests.length - 200)
+      if (state.capturedRequests.length > 200) state.capturedRequests.splice(0, state.capturedRequests.length - 200)
     })
     page.on('requestfailed', (request: any) => {
-      if (!this.captureNetworkEnabled) return
-      this.capturedRequests.push({
+      if (!state.captureNetwork) return
+      state.capturedRequests.push({
         method: String(request.method?.() ?? 'GET').slice(0, 20),
         url: redactCaptureUrl(String(request.url?.() ?? '')),
         failure: redactCaptureText(String(request.failure?.()?.errorText ?? 'request failed'), 500),
         timestamp: new Date().toISOString(),
       })
-      if (this.capturedRequests.length > 200) this.capturedRequests.splice(0, this.capturedRequests.length - 200)
+      if (state.capturedRequests.length > 200) state.capturedRequests.splice(0, state.capturedRequests.length - 200)
     })
   }
 
-  private resetCapture(capture: readonly ('console' | 'network')[] = []): void {
-    this.captureConsoleEnabled = capture.includes('console')
-    this.captureNetworkEnabled = capture.includes('network')
-    this.capturedConsole = []
-    this.capturedRequests = []
+  private resetCapture(state: SessionState, capture: readonly ('console' | 'network')[] = []): void {
+    state.captureConsole = capture.includes('console')
+    state.captureNetwork = capture.includes('network')
+    state.capturedConsole = []
+    state.capturedRequests = []
   }
 
   private resolveTarget(page: any, target: BrowserTarget): any {
@@ -951,33 +1117,34 @@ export class BrowserService {
     return state
   }
 
-  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string; capture?: readonly ('console' | 'network')[] } = {}): Promise<InteractiveState> {
+  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string; capture?: readonly ('console' | 'network')[]; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(url, opts)
-    this.resetCapture(opts.capture)
+    const state = this.state(opts.session)
+    this.resetCapture(state, opts.capture)
     page.setDefaultTimeout(30_000)
     await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
-    await applyRuleSteps(page, this.activeRulePack)
+    await applyRuleSteps(page, state.rulePack)
     if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
     return this.readState(page, true)
   }
 
-  async click(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async click(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     await this.resolveTarget(page, target).click({ timeout: boundedTimeout(opts.timeoutMs, 'browser_click timeoutMs') })
     if (opts.waitMs !== undefined) await page.waitForTimeout(opts.waitMs)
     else await page.waitForTimeout(500)
     return this.readState(page, true)
   }
 
-  async type(target: BrowserTarget, text: string, opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async type(target: BrowserTarget, text: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     await this.resolveTarget(page, target).fill(text, { timeout: boundedTimeout(opts.timeoutMs, 'browser_type timeoutMs') })
     return this.readState(page, false)
   }
 
-  async wait(target: BrowserTarget | undefined, opts: { urlPattern?: string; networkIdle?: boolean; timeMs?: number; state?: 'visible' | 'hidden' | 'attached' | 'detached'; timeoutMs?: number } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async wait(target: BrowserTarget | undefined, opts: { urlPattern?: string; networkIdle?: boolean; timeMs?: number; state?: 'visible' | 'hidden' | 'attached' | 'detached'; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     const modes = [target !== undefined, opts.urlPattern !== undefined, opts.networkIdle === true, opts.timeMs !== undefined].filter(Boolean)
     if (modes.length !== 1) throw new Error('browser_wait requires exactly one target, urlPattern, networkIdle=true, or timeMs')
     const timeout = boundedTimeout(opts.timeoutMs, 'browser_wait timeoutMs')
@@ -992,32 +1159,32 @@ export class BrowserService {
     return this.readState(page, false)
   }
 
-  async press(target: BrowserTarget | undefined, key: string, opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async press(target: BrowserTarget | undefined, key: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     const value = boundedString(key, 'browser_press key', 100)
     if (target !== undefined) await this.resolveTarget(page, target).press(value, { timeout: boundedTimeout(opts.timeoutMs, 'browser_press timeoutMs') })
     else await page.keyboard.press(value)
     return this.readState(page, false)
   }
 
-  async select(target: BrowserTarget, values: readonly string[], opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
+  async select(target: BrowserTarget, values: readonly string[], opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     if (values.length < 1 || values.length > 20) throw new Error('browser_select requires 1 to 20 values')
     values.forEach(value => boundedString(value, 'browser_select value', 2_000))
-    const page = await this.ensureActivePage()
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     await this.resolveTarget(page, target).selectOption([...values], { timeout: boundedTimeout(opts.timeoutMs, 'browser_select timeoutMs') })
     return this.readState(page, false)
   }
 
-  async check(target: BrowserTarget, checked = true, opts: { timeoutMs?: number } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async check(target: BrowserTarget, checked = true, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     const locator = this.resolveTarget(page, target)
     if (checked) await locator.check({ timeout: boundedTimeout(opts.timeoutMs, 'browser_check timeoutMs') })
     else await locator.uncheck({ timeout: boundedTimeout(opts.timeoutMs, 'browser_check timeoutMs') })
     return this.readState(page, false)
   }
 
-  async hover(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async hover(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     const timeoutMs = boundedTimeout(opts.timeoutMs, 'browser_hover timeoutMs')
     const waitMs = Math.min(Math.max(opts.waitMs ?? 300, 0), timeoutMs)
     await this.resolveTarget(page, target).hover({ timeout: timeoutMs })
@@ -1025,7 +1192,7 @@ export class BrowserService {
     return this.readState(page, true)
   }
 
-  async setFiles(target: BrowserTarget, files: readonly string[], opts: { timeoutMs?: number } = {}): Promise<FileUploadResult> {
+  async setFiles(target: BrowserTarget, files: readonly string[], opts: { timeoutMs?: number; session?: string } = {}): Promise<FileUploadResult> {
     if (files.length === 0 || files.length > 20) throw new Error('browser_set_files requires 1 to 20 files')
     const resolved = files.map(file => {
       if (!path.isAbsolute(file)) throw new Error('browser_set_files requires absolute file paths: ' + file)
@@ -1035,16 +1202,16 @@ export class BrowserService {
     })
     const totalBytes = resolved.reduce((total, file) => total + fs.statSync(file).size, 0)
     if (totalBytes > 512 * 1024 * 1024) throw new Error('browser_set_files total upload size exceeds 512 MiB')
-    const page = await this.ensureActivePage()
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     await this.resolveTarget(page, target).setInputFiles(resolved, { timeout: boundedTimeout(opts.timeoutMs, 'browser_set_files timeoutMs') })
     return { ...await this.readState(page, true), files: resolved.map(file => path.basename(file)) }
   }
 
-  async evaluate(expression: string, opts: { timeoutMs?: number } = {}): Promise<EvaluateResult> {
+  async evaluate(expression: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<EvaluateResult> {
     const source = expression.trim()
     if (!source) throw new Error('browser_evaluate requires a JavaScript expression')
     if (source.length > 20_000) throw new Error('browser_evaluate expression exceeds 20,000 characters')
-    const page = await this.ensureActivePage()
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? 15_000, 1_000), 30_000)
     let timer: ReturnType<typeof setTimeout> | undefined
     let timedOut = false
@@ -1087,57 +1254,62 @@ export class BrowserService {
     }
   }
 
-  async scroll(deltaY: number, opts: { waitMs?: number } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async scroll(deltaY: number, opts: { waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     await page.mouse?.wheel(0, deltaY || 2000).catch(() => {})
     await page.waitForTimeout(opts.waitMs ?? 500)
     return this.readState(page, false)
   }
 
-  async read(): Promise<InteractiveState> {
-    const page = await this.ensureActivePage()
+  async read(opts: { session?: string } = {}): Promise<InteractiveState> {
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
     return this.readState(page, false)
   }
 
-  consoleMessages(opts: { level?: string; limit?: number; clear?: boolean } = {}): { enabled: boolean; records: BrowserConsoleRecord[] } {
+  consoleMessages(opts: { level?: string; limit?: number; clear?: boolean; session?: string } = {}): { enabled: boolean; records: BrowserConsoleRecord[] } {
     const severities = ['debug', 'log', 'info', 'warning', 'error']
     const threshold = opts.level ? severities.indexOf(opts.level) : 0
     if (opts.level && threshold < 0) throw new Error('browser_console level must be debug, log, info, warning, or error')
     const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100), 1), 200)
-    const records = this.capturedConsole.filter(record => {
+    // A session that never captured has nothing to report; reading must not
+    // mint it a bucket, or `browser_console` would evict someone's page.
+    const state = this.peek(opts.session) ?? newSessionState()
+    const records = state.capturedConsole.filter(record => {
       const index = severities.indexOf(record.type === 'warn' ? 'warning' : record.type)
       return index < 0 || index >= threshold
     }).slice(-limit)
-    if (opts.clear) this.capturedConsole = []
-    return { enabled: this.captureConsoleEnabled, records }
+    if (opts.clear) state.capturedConsole = []
+    return { enabled: state.captureConsole, records }
   }
 
-  networkRequests(opts: { limit?: number; clear?: boolean } = {}): { enabled: boolean; records: BrowserRequestRecord[] } {
+  networkRequests(opts: { limit?: number; clear?: boolean; session?: string } = {}): { enabled: boolean; records: BrowserRequestRecord[] } {
     const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100), 1), 200)
-    const records = this.capturedRequests.slice(-limit)
-    if (opts.clear) this.capturedRequests = []
-    return { enabled: this.captureNetworkEnabled, records }
+    const state = this.peek(opts.session) ?? newSessionState()
+    const records = state.capturedRequests.slice(-limit)
+    if (opts.clear) state.capturedRequests = []
+    return { enabled: state.captureNetwork, records }
   }
 
-  async screenshot(options: BrowserScreenshotOptions = {}): Promise<{ path: string }> {
-    const page = await this.ensureActivePage()
+  async screenshot(options: BrowserScreenshotOptions & { session?: string } = {}): Promise<{ path: string }> {
+    const page = await this.ensureActivePage(undefined, { session: options.session })
     return { path: await this.captureScreenshot(page, options) }
   }
 
   async recipe(
     steps: readonly BrowserRecipeStep[],
-    opts: { url?: string; waitMs?: number; authProfile?: string; rulePack?: string; signal?: AbortSignal } = {},
+    opts: { url?: string; waitMs?: number; authProfile?: string; rulePack?: string; signal?: AbortSignal; session?: string } = {},
   ): Promise<RecipeRunResult> {
-    if (!opts.url && (!this.activePage || this.activePage.isClosed())) throw new Error('browser recipe requires url or an active browser_open page')
+    const existing = this.peek(opts.session)?.page
+    if (!opts.url && (!existing || existing.isClosed())) throw new Error('browser recipe requires url or an active browser_open page')
     const page = await this.ensureActivePage(opts.url, opts)
     if (opts.url) {
       page.setDefaultTimeout(30_000)
       await this.navigate(page, opts.url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, opts.signal)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
-      await applyRuleSteps(page, this.activeRulePack)
+      await applyRuleSteps(page, this.state(opts.session).rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
     }
-    const onAbort = () => void this.closePage()
+    const onAbort = () => void this.closePage(this.state(opts.session))
     if (opts.signal?.aborted) onAbort()
     else opts.signal?.addEventListener('abort', onAbort)
     try {
@@ -1148,16 +1320,30 @@ export class BrowserService {
     }
   }
 
-  async closePage(): Promise<void> {
-    const page = this.activePage
-    const context = this.activeContext
-    const profile = this.activeProfile
-    this.clearActiveState()
+  /**
+   * Close one session's page.
+   *
+   * `session` is the caller's bucket: a tool call closes only the page that
+   * session opened. Only a caller with no session (a service consumer outside
+   * the agent loop) reaches the shared bucket, which preserves the historical
+   * behaviour for those consumers.
+   */
+  async closePage(session?: SessionState): Promise<void> {
+    if (!session) return
+    const page = session.page
+    const context = session.context
+    const profile = session.profile
+    session.page = undefined
+    session.context = undefined
+    session.profile = undefined
+    session.rulePack = undefined
+    session.capturedConsole = []
+    session.capturedRequests = []
     if (page) await page.close().catch(() => {})
     if (context) await this.persistAndClose({ context, ...profile ? { profile } : {} })
   }
 
-  async status(): Promise<BrowserStatus> {
+  async status(opts: { session?: string } = {}): Promise<BrowserStatus> {
     let chromiumInstalled = false
     let chromiumExecutablePath: string | undefined
     try {
@@ -1212,13 +1398,25 @@ export class BrowserService {
       builtinScripts: BUILTIN_SCRIPTS.map(script => script.id),
       externalUserscriptsRequireApproval: ['standard', 'autonomous'].includes(this.config.automationMode),
       mutatingRecipesRequireApproval: this.config.automationMode === 'standard',
-      ...(this.browserConnected() && this.activePage && !this.activePage.isClosed() ? { activeUrl: this.activePage.url() } : {}),
-      ...(this.browserConnected() && this.activePage && !this.activePage.isClosed() && this.activeProfile ? { activeAuthProfile: this.activeProfile.id } : {}),
+      ...(() => {
+        // Report only the caller's own page, so one session cannot observe that
+        // another session currently has a page open. `peek` keeps this a pure
+        // query: asking about a session never creates or evicts a bucket.
+        const own = this.peek(opts.session)
+        if (!this.browserConnected() || !own?.page || own.page.isClosed()) return {}
+        return {
+          activeUrl: own.page.url(),
+          ...own.profile ? { activeAuthProfile: own.profile.id } : {},
+        }
+      })(),
     }
   }
 
   async close(): Promise<void> {
-    await this.closePage()
+    // Process teardown (fiber dispose): every session's page and context goes,
+    // because the browser process itself is going away.
+    for (const state of [...this.sessions.values()]) await this.closePage(state)
+    this.sessions.clear()
     const b = this.browser
     this.browser = undefined
     this.launching = undefined

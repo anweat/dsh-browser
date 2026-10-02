@@ -46,6 +46,12 @@ export interface Config {
     cdpPort?: number;
     /** Additional Chromium CLI launch arguments. */
     args?: string[];
+    /**
+     * How many sessions may hold a browser context+page at once. Past this the
+     * least-recently-used session is closed. One shared browser process serves
+     * them all, so this bounds contexts, not processes.
+     */
+    maxSessions?: number;
 }
 export declare const Config: z<Config>;
 export interface ResolvedConfig {
@@ -67,6 +73,7 @@ export interface ResolvedConfig {
     verbose: boolean;
     cdpPort?: number;
     args: string[];
+    maxSessions: number;
 }
 export declare function defaultSnapshotDir(): string;
 export declare function resolveConfig(config: Config): ResolvedConfig;

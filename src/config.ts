@@ -58,6 +58,12 @@ export interface Config {
   cdpPort?: number
   /** Additional Chromium CLI launch arguments. */
   args?: string[]
+  /**
+   * How many sessions may hold a browser context+page at once. Past this the
+   * least-recently-used session is closed. One shared browser process serves
+   * them all, so this bounds contexts, not processes.
+   */
+  maxSessions?: number
 }
 
 // The `as unknown as z<Config>` is required because a `.volatile()` field
@@ -134,6 +140,7 @@ export const Config = z.object({
   verbose: z.boolean().default(false).volatile(),
   cdpPort: z.number().min(1).max(65_535).step(1).description('Optional remote debugging port to expose CDP for external tools (e.g. 9222)').volatile(),
   args: z.array(z.string()).default([]).description('Additional Chromium CLI launch arguments').volatile(),
+  maxSessions: z.number().min(1).max(64).step(1).default(8).description('Sessions that may hold a browser page at once; the least-recently-used one is closed past this. One browser process is shared by all of them.').volatile(),
 }) as unknown as z<Config>
 
 export interface ResolvedConfig {
@@ -155,6 +162,7 @@ export interface ResolvedConfig {
   verbose: boolean
   cdpPort?: number
   args: string[]
+  maxSessions: number
 }
 
 export function defaultSnapshotDir(): string {
@@ -205,6 +213,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     usagePolicy: resolveUsagePolicy(optional<Partial<UsagePolicyInput>>('usagePolicy')),
     automationAssets: resolveAutomationAssetPolicy(optional<Partial<AutomationAssetPolicyInput>>('automationAssets')),
     autoInstall: read('autoInstall', false),
+    maxSessions: read('maxSessions', 8),
     snapshotDir,
     verbose: read('verbose', false),
     authProfiles: read('authProfiles', {}),

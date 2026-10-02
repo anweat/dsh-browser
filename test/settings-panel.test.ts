@@ -111,7 +111,7 @@ test('browser settings panel covers every public browser configuration field', (
   const fields = [
     'enabled', 'automationMode', 'browserRuntime', 'channel', 'headless', 'opencliEnabled',
     'autoInstall', 'storageStatePath', 'defaultAuthProfile',
-    'executablePath', 'snapshotDir', 'verbose', 'cdpPort',
+    'executablePath', 'snapshotDir', 'verbose', 'cdpPort', 'maxSessions',
   ]
   assert.deepEqual(FIELD_SPECS.map(spec => spec.field).toSorted(), fields.toSorted())
   assert.deepEqual(JSON_FIELD_SPECS.map(spec => spec.field).toSorted(), ['automationAssets', 'usagePolicy'])

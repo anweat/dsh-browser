@@ -8,6 +8,8 @@ export interface AutomationExecutionOptions {
   signal?: AbortSignal
   authProfile?: string
   rulePack?: string
+  /** Session key, so an asset run uses the calling session's page bucket. */
+  session?: string
 }
 
 export interface AutomationExecutionResult {
@@ -56,7 +58,7 @@ export async function executeAutomationAsset(
   store.assertTarget(asset, url)
   try {
     const value = asset.kind === 'recipe'
-      ? await service.recipe(materializeRecipe(asset.recipe ?? [], inputs), { url, signal: options.signal, ...options.authProfile ? { authProfile: options.authProfile } : {}, ...options.rulePack ? { rulePack: options.rulePack } : {} })
+      ? await service.recipe(materializeRecipe(asset.recipe ?? [], inputs), { url, signal: options.signal, ...options.authProfile ? { authProfile: options.authProfile } : {}, ...options.rulePack ? { rulePack: options.rulePack } : {}, session: options.session })
       : await service.runUserscript(url, asset.source ?? '', { signal: options.signal, inputs, ...options.authProfile ? { authProfile: options.authProfile } : {}, ...options.rulePack ? { rulePack: options.rulePack } : {} })
     if (requiredStatus === 'active') store.noteRun(asset.id, true)
     else store.noteTestResult(asset.id, true, url)
