@@ -13,6 +13,7 @@ import type { ResolvedConfig } from '../config.ts'
 import type { BrowserService } from '../browser-service.ts'
 import type { AutomationAssetStore } from '../automation-assets.ts'
 import type { AutomationDevelopmentService } from '../automation-development.ts'
+import type { LocatorAmbiguity } from '../locator.ts'
 
 export const ACTION_GROUPS = ['runtime', 'target', 'observe', 'act', 'inspect', 'script', 'automation', 'crawl', 'opencli'] as const
 export type ActionGroup = typeof ACTION_GROUPS[number]
@@ -139,6 +140,8 @@ export interface ActionErrorBody {
   hint?: string
   /** Compact parameter schema, attached to INVALID_ARGS so the model can fix the call at once. */
   schema?: string
+  /** The first matches of an ambiguous locator (LOCATOR_AMBIGUOUS): role, name, text snippet, visibility. */
+  candidates?: LocatorAmbiguity
 }
 
 /**

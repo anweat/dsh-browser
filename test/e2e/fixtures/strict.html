@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Strict</title></head>
+<body>
+  <h1>Strict locator fixture</h1>
+  <section aria-label="Billing">
+    <h2>Billing</h2>
+    <button id="save-billing" type="button" data-hit="billing">Save</button>
+  </section>
+  <section aria-label="Shipping">
+    <h2>Shipping</h2>
+    <button id="save-shipping" type="button" data-hit="shipping">Save</button>
+  </section>
+  <button id="hidden-save" type="button" style="display:none" data-hit="hidden">Save</button>
+  <button id="pay" type="button" data-hit="pay">Pay now</button>
+  <p id="status">Idle</p>
+  <script>
+    document.querySelectorAll('button[data-hit]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        fetch('/hit?who=' + button.dataset.hit)
+        document.getElementById('status').textContent = 'Clicked ' + button.dataset.hit
+      })
+    })
+  </script>
+</body>
+</html>

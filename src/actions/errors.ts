@@ -6,10 +6,11 @@
  */
 
 import { ActionArgError, ActionUnavailableError, type ActionErrorBody, type ErrorCode } from './types.ts'
+import { LocatorAmbiguousError } from '../locator.ts'
 
 const HINTS: Partial<Record<ErrorCode, string>> = {
   LOCATOR_NOT_FOUND: 'No element matched. Re-read the page (observe.read), check the locator, and wait for dynamic content (act.wait) before retrying.',
-  LOCATOR_AMBIGUOUS: 'More than one element matched. Narrow the locator (role+name, label, exact) instead of guessing.',
+  LOCATOR_AMBIGUOUS: 'More than one element matched and nothing was done. Pick the intended element from candidates: narrow the locator (role+name, exact, label, testId, frame), or give index with indexReason.',
   NOT_ACTIONABLE: 'The element exists but cannot take this action now (hidden, disabled, covered, or still moving). Wait for it or dismiss the overlay.',
   TARGET_CLOSED: 'The page is gone or none is open. Call target.open first.',
   DEADLINE: 'The action ran out of time. Re-read the page to see whether it took effect before retrying.',
@@ -82,6 +83,7 @@ export function mapError(error: unknown, action: string, opts: { signal?: AbortS
   const name = error instanceof Error ? error.name : ''
   const result = (code: ErrorCode, hint = HINTS[code]): ActionErrorBody => ({ code, message, ...hint ? { hint } : {} })
 
+  if (error instanceof LocatorAmbiguousError) return { ...result('LOCATOR_AMBIGUOUS'), candidates: error.ambiguity }
   if (error instanceof RecipeValidationError) return result('INVALID_RECIPE')
   if (error instanceof RecipeAssertionError) return result('VALIDATION_FAILED')
   if (abortedByDeadline(opts.signal)) return result('DEADLINE')

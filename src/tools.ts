@@ -54,6 +54,25 @@ const ENVELOPE_SCHEMA = {
         message: { type: 'string' as const, required: true as const },
         hint: { type: 'string' as const },
         schema: { type: 'string' as const },
+        candidates: {
+          type: 'object' as const, additionalProperties: false,
+          properties: {
+            total: { type: 'number' as const, required: true as const },
+            items: {
+              type: 'array' as const,
+              items: {
+                type: 'object' as const, additionalProperties: false,
+                properties: {
+                  index: { type: 'number' as const, required: true as const },
+                  role: { type: 'string' as const, required: true as const },
+                  name: { type: 'string' as const, required: true as const },
+                  text: { type: 'string' as const, required: true as const },
+                  visible: { type: 'boolean' as const, required: true as const },
+                },
+              },
+            },
+          },
+        },
       },
     },
     truncation: {

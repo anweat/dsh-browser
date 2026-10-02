@@ -59,10 +59,24 @@ export function detectBrowser(): BrowserDetection {
   }
 }
 
-/** Serve `fixtures/` over plain HTTP on an ephemeral loopback port. */
-export async function startFixtureServer(): Promise<{ base: string; close: () => Promise<void> }> {
+/**
+ * Serve `fixtures/` over plain HTTP on an ephemeral loopback port.
+ *
+ * `/hit?who=<name>` counts a request per name, so a test can prove from the
+ * server side whether a click really reached the backend (`hits()`).
+ */
+export async function startFixtureServer(): Promise<{ base: string; close: () => Promise<void>; hits: () => Record<string, number>; resetHits: () => void }> {
+  let counts: Record<string, number> = {}
   const server = http.createServer((req, res) => {
-    const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://fixture.invalid').pathname)
+    const url = new URL(req.url ?? '/', 'http://fixture.invalid')
+    const pathname = decodeURIComponent(url.pathname)
+    if (pathname === '/hit') {
+      const who = url.searchParams.get('who') ?? 'unnamed'
+      counts[who] = (counts[who] ?? 0) + 1
+      res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' })
+      res.end('ok')
+      return
+    }
     const file = path.normalize(path.join(FIXTURE_DIR, pathname === '/' ? 'index.html' : pathname))
     if (!file.startsWith(FIXTURE_DIR + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
       res.writeHead(404, { 'content-type': 'text/plain' })
@@ -77,6 +91,8 @@ export async function startFixtureServer(): Promise<{ base: string; close: () =>
   return {
     base: `http://127.0.0.1:${port}`,
     close: () => new Promise<void>(resolve => { server.closeAllConnections?.(); server.close(() => resolve()) }),
+    hits: () => ({ ...counts }),
+    resetHits: () => { counts = {} },
   }
 }
 

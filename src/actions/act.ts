@@ -11,22 +11,22 @@ export const ACT_ACTIONS: ActionDef[] = [
     name: 'act.click',
     group: 'act',
     summary: 'Click an element (CSS selector or role/text/label locator); returns the updated page state.',
-    params: { ...TARGET_PARAMS },
+    params: { ...TARGET_PARAMS, timeoutMs: TIMEOUT },
     approval: 'interaction', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 30_000,
     examples: [{ args: { locator: { role: 'button', name: 'Search' } } }, { args: { selector: '#submit' } }],
     async execute(args, ctx) {
-      return ctx.service.click(targetOf(args)!, { session: ctx.session })
+      return ctx.service.click(targetOf(args)!, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: ctx.session })
     },
   },
   {
     name: 'act.fill',
     group: 'act',
     summary: 'Fill text into an input/textarea (replaces its value); returns the page state.',
-    params: { ...TARGET_PARAMS, text: { type: 'string', required: true, description: 'Text to enter.' } },
+    params: { ...TARGET_PARAMS, text: { type: 'string', required: true, description: 'Text to enter.' }, timeoutMs: TIMEOUT },
     approval: 'interaction', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 30_000,
     examples: [{ args: { locator: { label: 'Query' }, text: 'dsh' } }],
     async execute(args, ctx) {
-      return ctx.service.type(targetOf(args)!, args.text, { session: ctx.session })
+      return ctx.service.type(targetOf(args)!, args.text, { ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}, session: ctx.session })
     },
   },
   {

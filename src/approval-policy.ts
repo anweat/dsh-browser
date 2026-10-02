@@ -30,7 +30,7 @@ function targetLabel(args: unknown): string {
   if (typeof input.selector === 'string') return clip(input.selector)
   const locator = input.locator as Record<string, unknown> | undefined
   if (locator && typeof locator === 'object') {
-    const parts = ['role', 'name', 'text', 'label', 'selector'].filter(key => typeof locator[key] === 'string').map(key => `${key}=${JSON.stringify(clip(String(locator[key]), 60))}`)
+    const parts = ['role', 'name', 'text', 'label', 'testId', 'selector', 'css'].filter(key => typeof locator[key] === 'string').map(key => `${key}=${JSON.stringify(clip(String(locator[key]), 60))}`)
     if (parts.length) return parts.join(' ')
   }
   return '(page)'

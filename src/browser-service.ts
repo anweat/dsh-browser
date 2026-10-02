@@ -31,6 +31,7 @@ import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, 
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
+import { resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
 
 /**
  * How many sessions may hold a browser context+page at once. Past this, the
@@ -108,23 +109,7 @@ export interface FileUploadResult extends InteractiveState {
   files: string[]
 }
 
-export interface BrowserFrameSpec {
-  selector?: string
-  name?: string
-  url?: string
-}
-
-export interface BrowserLocatorSpec {
-  selector?: string
-  role?: string
-  name?: string
-  text?: string
-  label?: string
-  exact?: boolean
-  frame?: BrowserFrameSpec
-}
-
-export type BrowserTarget = string | BrowserLocatorSpec
+export type { BrowserFrameSpec, BrowserLocatorSpec, BrowserTarget } from './locator.ts'
 
 export interface BrowserConsoleRecord {
   type: string
@@ -1043,31 +1028,15 @@ export class BrowserService {
   }
 
   private resolveTarget(page: any, target: BrowserTarget): any {
-    if (!target || (typeof target !== 'string' && typeof target !== 'object')) throw new Error('browser target must be a selector string or locator object')
-    const spec: BrowserLocatorSpec = typeof target === 'string' ? { selector: target } : target
-    const modes = [spec.selector, spec.role, spec.text, spec.label].filter(value => value !== undefined)
-    if (modes.length !== 1) throw new Error('browser target requires exactly one of selector, role, text, or label')
-    if (spec.name !== undefined && spec.role === undefined) throw new Error('browser target name is only valid with role')
-    let root: any = page
-    if (spec.frame) {
-      const frameModes = [spec.frame.selector, spec.frame.name, spec.frame.url].filter(value => value !== undefined)
-      if (frameModes.length !== 1) throw new Error('browser frame requires exactly one of selector, name, or url')
-      if (spec.frame.selector) root = page.frameLocator(boundedString(spec.frame.selector, 'frame selector', 500))
-      else {
-        const frame = page.frame(spec.frame.name
-          ? { name: boundedString(spec.frame.name, 'frame name', 500) }
-          : { url: boundedString(spec.frame.url, 'frame url', 2_000) })
-        if (!frame) throw new Error('browser target frame was not found')
-        root = frame
-      }
-    }
-    if (spec.selector) return root.locator(boundedString(spec.selector, 'selector', 500))
-    if (spec.role) return root.getByRole(boundedString(spec.role, 'role', 100), {
-      ...spec.name !== undefined ? { name: boundedString(spec.name, 'role name', 2_000) } : {},
-      exact: spec.exact ?? false,
-    })
-    if (spec.text) return root.getByText(boundedString(spec.text, 'text locator', 2_000), { exact: spec.exact ?? false })
-    return root.getByLabel(boundedString(spec.label, 'label locator', 2_000), { exact: spec.exact ?? false })
+    return resolveLocator(page, target)
+  }
+
+  /**
+   * Run an action on a strict locator. More than one match performs nothing and
+   * fails with LOCATOR_AMBIGUOUS plus a summary of the first candidates.
+   */
+  private onTarget<T>(page: any, target: BrowserTarget, run: (locator: any) => Promise<T>): Promise<T> {
+    return withStrictLocator(this.resolveTarget(page, target), run)
   }
 
   private screenshotFile(options: BrowserScreenshotOptions): { file: string; format: 'png' | 'jpeg' } {
@@ -1106,7 +1075,7 @@ export class BrowserService {
     } else if (!options.target) {
       screenshotOptions.fullPage = options.fullPage ?? true
     }
-    if (options.target) await this.resolveTarget(page, options.target).screenshot(screenshotOptions)
+    if (options.target) await this.onTarget(page, options.target, locator => locator.screenshot(screenshotOptions))
     else await page.screenshot(screenshotOptions)
     return file
   }
@@ -1136,7 +1105,7 @@ export class BrowserService {
 
   async click(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    await this.resolveTarget(page, target).click({ timeout: boundedTimeout(opts.timeoutMs, 'act.click timeoutMs') })
+    await this.onTarget(page, target, locator => locator.click({ timeout: boundedTimeout(opts.timeoutMs, 'act.click timeoutMs') }))
     if (opts.waitMs !== undefined) await page.waitForTimeout(opts.waitMs)
     else await page.waitForTimeout(500)
     return this.readState(page, true)
@@ -1144,7 +1113,7 @@ export class BrowserService {
 
   async type(target: BrowserTarget, text: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    await this.resolveTarget(page, target).fill(text, { timeout: boundedTimeout(opts.timeoutMs, 'act.fill timeoutMs') })
+    await this.onTarget(page, target, locator => locator.fill(text, { timeout: boundedTimeout(opts.timeoutMs, 'act.fill timeoutMs') }))
     return this.readState(page, false)
   }
 
@@ -1153,7 +1122,7 @@ export class BrowserService {
     const modes = [target !== undefined, opts.urlPattern !== undefined, opts.networkIdle === true, opts.timeMs !== undefined].filter(Boolean)
     if (modes.length !== 1) throw new Error('act.wait requires exactly one target, urlPattern, networkIdle=true, or timeMs')
     const timeout = boundedTimeout(opts.timeoutMs, 'act.wait timeoutMs')
-    if (target !== undefined) await this.resolveTarget(page, target).waitFor({ state: opts.state ?? 'visible', timeout })
+    if (target !== undefined) await this.onTarget(page, target, locator => locator.waitFor({ state: opts.state ?? 'visible', timeout }))
     else if (opts.urlPattern !== undefined) await page.waitForURL(boundedString(opts.urlPattern, 'urlPattern', 2_000), { timeout })
     else if (opts.networkIdle) await page.waitForLoadState('networkidle', { timeout })
     else {
@@ -1167,7 +1136,7 @@ export class BrowserService {
   async press(target: BrowserTarget | undefined, key: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     const value = boundedString(key, 'act.press key', 100)
-    if (target !== undefined) await this.resolveTarget(page, target).press(value, { timeout: boundedTimeout(opts.timeoutMs, 'act.press timeoutMs') })
+    if (target !== undefined) await this.onTarget(page, target, locator => locator.press(value, { timeout: boundedTimeout(opts.timeoutMs, 'act.press timeoutMs') }))
     else await page.keyboard.press(value)
     return this.readState(page, false)
   }
@@ -1176,15 +1145,14 @@ export class BrowserService {
     if (values.length < 1 || values.length > 20) throw new Error('act.select requires 1 to 20 values')
     values.forEach(value => boundedString(value, 'act.select value', 2_000))
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    await this.resolveTarget(page, target).selectOption([...values], { timeout: boundedTimeout(opts.timeoutMs, 'act.select timeoutMs') })
+    await this.onTarget(page, target, locator => locator.selectOption([...values], { timeout: boundedTimeout(opts.timeoutMs, 'act.select timeoutMs') }))
     return this.readState(page, false)
   }
 
   async check(target: BrowserTarget, checked = true, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    const locator = this.resolveTarget(page, target)
-    if (checked) await locator.check({ timeout: boundedTimeout(opts.timeoutMs, 'act.check timeoutMs') })
-    else await locator.uncheck({ timeout: boundedTimeout(opts.timeoutMs, 'act.check timeoutMs') })
+    const timeout = boundedTimeout(opts.timeoutMs, 'act.check timeoutMs')
+    await this.onTarget(page, target, locator => checked ? locator.check({ timeout }) : locator.uncheck({ timeout }))
     return this.readState(page, false)
   }
 
@@ -1192,7 +1160,7 @@ export class BrowserService {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     const timeoutMs = boundedTimeout(opts.timeoutMs, 'act.hover timeoutMs')
     const waitMs = Math.min(Math.max(opts.waitMs ?? 300, 0), timeoutMs)
-    await this.resolveTarget(page, target).hover({ timeout: timeoutMs })
+    await this.onTarget(page, target, locator => locator.hover({ timeout: timeoutMs }))
     await page.waitForTimeout(waitMs)
     return this.readState(page, true)
   }
@@ -1208,7 +1176,7 @@ export class BrowserService {
     const totalBytes = resolved.reduce((total, file) => total + fs.statSync(file).size, 0)
     if (totalBytes > 512 * 1024 * 1024) throw new Error('act.upload total upload size exceeds 512 MiB')
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    await this.resolveTarget(page, target).setInputFiles(resolved, { timeout: boundedTimeout(opts.timeoutMs, 'act.upload timeoutMs') })
+    await this.onTarget(page, target, locator => locator.setInputFiles(resolved, { timeout: boundedTimeout(opts.timeoutMs, 'act.upload timeoutMs') }))
     return { ...await this.readState(page, true), files: resolved.map(file => path.basename(file)) }
   }
 

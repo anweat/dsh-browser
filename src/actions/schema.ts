@@ -24,7 +24,7 @@ const FRAME_SCHEMA: ParamNode = {
 const LOCATOR_SCHEMA: ParamNode = {
   type: 'object',
   additionalProperties: false,
-  description: 'Element locator. Use exactly one of selector, role, text, or label.',
+  description: 'Element locator, strict: it must match exactly one element, else LOCATOR_AMBIGUOUS lists candidates. Use exactly one of selector, role, text, label, or testId.',
   properties: {
     selector: { type: 'string', description: 'CSS selector.' },
     role: { type: 'string', description: 'Accessible role used by Playwright getByRole.' },
@@ -32,6 +32,10 @@ const LOCATOR_SCHEMA: ParamNode = {
     text: { type: 'string', description: 'Visible text used by Playwright getByText.' },
     label: { type: 'string', description: 'Form label used by Playwright getByLabel.' },
     exact: { type: 'boolean', description: 'Require an exact semantic match. Defaults to false.' },
+    testId: { type: 'string', description: 'data-testid value.' },
+    framePath: { type: 'array', items: { type: 'string' }, description: 'Nested iframes, outermost first, each a CSS selector. Alternative to frame.' },
+    index: { type: 'number', description: 'Pick the n-th match (0-based) of an ambiguous locator. Requires indexReason.' },
+    indexReason: { type: 'string', description: 'Why that match and not the others. Required with index.' },
     frame: { ref: 'frame' },
   },
 }
