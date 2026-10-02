@@ -119,6 +119,109 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     assert.equal(envelope.result.effects, 'observed')
   })
 
+  it('a recipe that fails on step 3 returns the two completed steps and keeps their effects', async () => {
+    const envelope = await harness.action(S1, 'automation.run_recipe', {
+      url: url('search.html'),
+      steps: [
+        { type: 'fill', selector: '#q', value: 'ap' },
+        { type: 'click', selector: '#go' },
+        { type: 'wait', condition: 'selector', value: '#no-such-element', timeoutMs: 400 },
+        { type: 'extract', selector: '#results', mode: 'text' },
+      ],
+    })
+    assert.equal(envelope.ok, false)
+    assert.equal(envelope.executionStatus, 'failed')
+    const result = envelope.result
+    assert.deepEqual(result.completedSteps.map((step: any) => [step.step, step.action, step.ok]), [[1, 'fill', true], [2, 'click', true]])
+    assert.equal(result.failedStep.index, 3)
+    assert.equal(result.failedStep.action, 'wait')
+    assert.equal(result.failedStep.errorCode, 'LOCATOR_NOT_FOUND')
+    assert.match(result.failedStep.message, /Timeout 400ms exceeded/, 'the Playwright message is preserved')
+    assert.equal(result.effects, 'observed')
+    assert.match(result.text, /2 results for ap/, 'the page keeps the state the earlier steps produced')
+    assert.equal(envelope.error.code, 'LOCATOR_NOT_FOUND')
+  })
+
+  it('a click on a missing element times out as outcome_unknown; an empty existing container extracts as completed', async () => {
+    const unknown = await harness.action(S1, 'automation.run_recipe', {
+      url: url('search.html'),
+      steps: [{ type: 'click', selector: '#no-such-button', timeoutMs: 400 }],
+    })
+    assert.equal(unknown.ok, false)
+    assert.equal(unknown.executionStatus, 'outcome_unknown')
+    assert.equal(unknown.error.code, 'OUTCOME_UNKNOWN')
+    assert.equal(unknown.result.effects, 'unknown')
+    assert.equal(unknown.result.failedStep.errorCode, 'LOCATOR_NOT_FOUND')
+
+    const empty = await harness.action(S1, 'automation.run_recipe', {
+      url: url('search.html'),
+      steps: [{ type: 'extract', selector: '#results', mode: 'text' }],
+    })
+    assert.equal(empty.ok, true, 'the container exists but holds nothing yet: a legitimate empty result')
+    assert.equal(empty.result.executionStatus, 'completed')
+    assert.deepEqual(empty.result.outputs, [{ step: 1, action: 'extract', value: '' }])
+  })
+
+  it('a failed assertion is VALIDATION_FAILED with the earlier effects reported, and an assertion that holds validates the run', async () => {
+    const failed = await harness.action(S1, 'automation.run_recipe', {
+      url: url('search.html'),
+      steps: [
+        { type: 'fill', selector: '#q', value: 'zzz' },
+        { type: 'click', selector: '#go' },
+        { type: 'assert', text: '9 results for zzz', timeoutMs: 400 },
+      ],
+    })
+    assert.equal(failed.ok, false)
+    assert.equal(failed.error.code, 'VALIDATION_FAILED')
+    assert.equal(failed.result.validationStatus, 'failed')
+    assert.equal(failed.result.failedStep.errorCode, 'VALIDATION_FAILED')
+    assert.equal(failed.result.effects, 'observed')
+
+    const held = await harness.action(S1, 'automation.run_recipe', {
+      url: url('search.html'),
+      steps: [
+        { type: 'fill', selector: '#q', value: 'zzz' },
+        { type: 'click', selector: '#go' },
+        { type: 'assert', text: '0 results for zzz', timeoutMs: 2000 },
+      ],
+    })
+    assert.equal(held.ok, true)
+    assert.equal(held.result.validationStatus, 'passed')
+  })
+
+  it('cancelling a recipe stops only that recipe: the running step finishes, nothing rolls back, and the session page stays usable', async () => {
+    await harness.result(S1, 'target.open', { url: url('form.html') })
+    const controller = new AbortController()
+    const started = Date.now()
+    const pending = harness.action(S1, 'automation.run_recipe', {
+      steps: [
+        { type: 'click', selector: '#inc' },
+        { type: 'wait', condition: 'time', waitMs: 1200 },
+        { type: 'click', selector: '#inc' },
+      ],
+    }, controller.signal)
+    setTimeout(() => controller.abort(), 300)
+    const envelope = await pending
+    assert.equal(envelope.ok, false)
+    assert.equal(envelope.executionStatus, 'cancelled')
+    assert.equal(envelope.error.code, 'CANCELLED')
+    assert.ok(Date.now() - started >= 1100, 'the call returned only after the step that was already running')
+    const result = envelope.result
+    assert.deepEqual(result.completedSteps.map((step: any) => step.action), ['click', 'wait'])
+    assert.equal(result.failedStep.index, 3)
+    assert.equal(result.failedStep.errorCode, 'CANCELLED')
+    assert.equal(result.effects, 'observed')
+    assert.match(result.text, /Count: 1/, 'the first click stays done and the third never ran')
+
+    // The page was not closed by the cancel.
+    const read = await harness.result(S1, 'observe.read', {})
+    assert.match(read.text, /Count: 1/)
+    const clicked = await harness.result(S1, 'act.click', { selector: '#inc' })
+    assert.match(clicked.text, /Count: 2/)
+    const targets = await harness.result(S1, 'target.list', {})
+    assert.ok(JSON.stringify(targets).includes('form.html'), 'the session still lists its page')
+  })
+
   it('browser_index discloses in layers: root, group, then one action', async () => {
     const root = await harness.index()
     assert.match(root, /Groups:/)

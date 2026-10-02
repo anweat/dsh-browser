@@ -83,9 +83,9 @@ export async function startFixtureServer(): Promise<{ base: string; close: () =>
 export interface Harness {
   service: BrowserService
   /** Call a registered model tool exactly as the agent loop would, as one session. */
-  call: (session: string | undefined, name: string, args?: Record<string, unknown>) => Promise<any>
-  /** `browser_call({ action, args })` as one session; returns the whole result envelope. */
-  action: (session: string | undefined, action: string, args?: Record<string, unknown>) => Promise<any>
+  call: (session: string | undefined, name: string, args?: Record<string, unknown>, signal?: AbortSignal) => Promise<any>
+  /** `browser_call({ action, args })` as one session; returns the whole result envelope. Pass `signal` to cancel it like the Host would. */
+  action: (session: string | undefined, action: string, args?: Record<string, unknown>, signal?: AbortSignal) => Promise<any>
   /** Like {@link action} but asserts the envelope is ok and returns its `result`. */
   result: (session: string | undefined, action: string, args?: Record<string, unknown>) => Promise<any>
   /** `browser_index(args)` as one session; returns the text the model would read. */
@@ -118,14 +118,14 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     service,
     dir,
     toolNames: () => [...tools.keys()],
-    async call(session, name, args = {}) {
+    async call(session, name, args = {}, signal) {
       const tool = tools.get(name)
       if (!tool) throw new Error(`tool not registered: ${name}`)
       const agent = session === undefined ? undefined : { id: session, session: { id: session } }
-      return tool.execute(args, { signal: new AbortController().signal, ...agent ? { agent } : {} })
+      return tool.execute(args, { signal: signal ?? new AbortController().signal, ...agent ? { agent } : {} })
     },
-    async action(session, action, args = {}) {
-      return this.call(session, 'browser_call', { action, args })
+    async action(session, action, args = {}, signal) {
+      return this.call(session, 'browser_call', { action, args }, signal)
     },
     async result(session, action, args = {}) {
       const envelope = await this.action(session, action, args)
