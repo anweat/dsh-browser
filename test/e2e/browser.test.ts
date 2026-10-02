@@ -1,6 +1,7 @@
 /**
  * Real-browser end-to-end tests: the plugin's own BrowserService and tool layer
  * driving a headless Chromium against static fixtures on a loopback HTTP server.
+ * Everything goes through `browser_index` / `browser_call`, as a model would.
  *
  * Run with `pnpm run test:e2e`. It is deliberately NOT part of `verify`: CI is
  * not guaranteed to have a browser. When none is installed the whole suite is
@@ -34,46 +35,47 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     await server?.close()
   })
 
-  it('registers the interactive tools through the real tool layer', () => {
-    const names = harness.toolNames()
-    for (const name of ['browser_open', 'browser_read', 'browser_click', 'browser_type', 'browser_recipe_run', 'browser_evaluate', 'browser_close', 'browser_status']) {
-      assert.ok(names.includes(name), `${name} should be registered`)
-    }
+  it('registers only the two entry tools through the real tool layer', () => {
+    assert.deepEqual(harness.toolNames(), ['browser_index', 'browser_call'])
   })
 
   it('open -> read returns the rendered title, text and a screenshot file', async () => {
-    const opened = await harness.call(S1, 'browser_open', { url: url('index.html') })
+    const opened = await harness.result(S1, 'target.open', { url: url('index.html') })
     assert.equal(opened.title, 'E2E Index')
     assert.equal(opened.url, url('index.html'))
     assert.match(opened.text, /DSH Browser Fixture/)
     assert.match(opened.text, /Hello from the local fixture server\./)
     assert.ok(opened.screenshotPath && fs.existsSync(opened.screenshotPath), 'open should leave a screenshot on disk')
 
-    const read = await harness.call(S1, 'browser_read')
+    const envelope = await harness.action(S1, 'observe.read')
+    assert.equal(envelope.ok, true)
+    assert.equal(envelope.action, 'observe.read')
+    assert.equal(envelope.executionStatus, 'completed')
+    const read = envelope.result
     assert.equal(read.title, 'E2E Index')
     assert.equal(read.url, opened.url)
     assert.match(read.text, /Hello from the local fixture server\./)
-    assert.equal(read.screenshotPath, undefined, 'browser_read must not take a screenshot')
+    assert.equal(read.screenshotPath, undefined, 'observe.read must not take a screenshot')
   })
 
   it('click changes page state (CSS selector and structured locator)', async () => {
-    await harness.call(S1, 'browser_open', { url: url('form.html') })
-    const first = await harness.call(S1, 'browser_click', { selector: '#inc' })
+    await harness.result(S1, 'target.open', { url: url('form.html') })
+    const first = await harness.result(S1, 'act.click', { selector: '#inc' })
     assert.match(first.text, /Count: 1/)
-    const second = await harness.call(S1, 'browser_click', { locator: { role: 'button', name: 'Increment' } })
+    const second = await harness.result(S1, 'act.click', { locator: { role: 'button', name: 'Increment' } })
     assert.match(second.text, /Count: 2/)
   })
 
-  it('fill (browser_type) sets the input value and fires page handlers', async () => {
-    await harness.call(S1, 'browser_open', { url: url('form.html') })
-    const typed = await harness.call(S1, 'browser_type', { locator: { label: 'Name' }, text: 'Ada' })
+  it('fill sets the input value and fires page handlers', async () => {
+    await harness.result(S1, 'target.open', { url: url('form.html') })
+    const typed = await harness.result(S1, 'act.fill', { locator: { label: 'Name' }, text: 'Ada' })
     assert.match(typed.text, /Hello, Ada/)
-    const value = await harness.call(S1, 'browser_evaluate', { expression: 'document.getElementById("name").value' })
+    const value = await harness.result(S1, 'script.evaluate', { expression: 'document.getElementById("name").value' })
     assert.equal(JSON.parse(value.resultJson), 'Ada')
   })
 
   it('recipe runs fill + click + extract + assert and reports every step', async () => {
-    const result = await harness.call(S1, 'browser_recipe_run', {
+    const result = await harness.result(S1, 'automation.run_recipe', {
       url: url('search.html'),
       steps: [
         { type: 'fill', selector: '#q', value: 'ap' },
@@ -95,60 +97,136 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     assert.match(result.text, /2 results for ap/)
   })
 
-  it('a recipe whose assertion fails rejects instead of reporting success', async () => {
-    await assert.rejects(
-      harness.call(S1, 'browser_recipe_run', {
-        url: url('search.html'),
-        steps: [
-          { type: 'fill', selector: '#q', value: 'zzz' },
-          { type: 'click', selector: '#go' },
-          { type: 'assert', text: '5 results for zzz', timeoutMs: 500 },
-        ],
-      }),
-    )
+  it('a recipe whose assertion fails returns an error envelope instead of reporting success', async () => {
+    const envelope = await harness.action(S1, 'automation.run_recipe', {
+      url: url('search.html'),
+      steps: [
+        { type: 'fill', selector: '#q', value: 'zzz' },
+        { type: 'click', selector: '#go' },
+        { type: 'assert', text: '5 results for zzz', timeoutMs: 500 },
+      ],
+    })
+    assert.equal(envelope.ok, false)
+    assert.equal(envelope.executionStatus, 'failed')
+    assert.equal(envelope.result, undefined)
+    assert.equal(envelope.error.code, 'LOCATOR_NOT_FOUND', 'the expected text never appeared')
+    assert.match(envelope.error.message, /Timeout 500ms exceeded/, 'the Playwright message is preserved')
+  })
+
+  it('browser_index discloses in layers: root, group, then one action', async () => {
+    const root = await harness.index()
+    assert.match(root, /Groups:/)
+    for (const group of ['runtime', 'target', 'observe', 'act', 'inspect', 'script', 'automation', 'crawl', 'opencli']) assert.match(root, new RegExp(`\\n  ${group} \\(\\d+\\)`))
+    assert.match(root, /automation\.search/)
+    assert.match(root, /Guide:/, 'no skill service in this harness, so the compact guide is shown')
+    assert.ok(root.length < 2_400, `the root listing is ${root.length} chars`)
+
+    const group = await harness.index({ group: 'act' })
+    assert.match(group, /^act - /)
+    assert.match(group, /act\.click - /)
+    assert.match(group, /act\.upload - /)
+    assert.doesNotMatch(group, /\$locator - /, 'a group listing does not repeat sub-schemas')
+
+    const action = await harness.index({ action: 'act.click' })
+    assert.match(action, /\$locator - Element locator/)
+    assert.match(action, /role\?: string/)
+    assert.match(action, /example: browser_call/)
+
+    // The description the model reads is enough to make a working call, with no further lookup.
+    const example = action.match(/example: browser_call\((\{.*\})\)/)![1]!
+    const call = JSON.parse(example) as { action: string; args: Record<string, unknown> }
+    await harness.result(S1, 'target.open', { url: url('form.html') })
+    const clicked = await harness.result(S1, call.action, { locator: { role: 'button', name: 'Increment' } })
+    assert.match(clicked.text, /Count: 1/)
+
+    assert.match(await harness.index({ query: 'screenshot' }), /observe\.screenshot/)
+  })
+
+  it('under read-only mode the index hides interactive actions and browser_call refuses them again', async () => {
+    assert.ok(detection.ok)
+    const readOnly = createHarness(detection, { automationMode: 'read-only' })
+    try {
+      const group = await readOnly.index({ group: 'act' })
+      assert.match(group, /act\.wait - /)
+      assert.doesNotMatch(group, /\nact\.click - /)
+      assert.match(group, /Unavailable \(disabled by automationMode=read-only\): act\.click/)
+      await readOnly.result(S1, 'target.open', { url: url('form.html') })
+      // Guessing the name from the skill or from memory does not get around the catalog.
+      const denied = await readOnly.action(S1, 'act.click', { selector: '#inc' })
+      assert.equal(denied.ok, false)
+      assert.equal(denied.error.code, 'POLICY_DENIED')
+      assert.match((await readOnly.result(S1, 'observe.read')).text, /Count: 0/, 'the click never ran')
+    } finally {
+      await readOnly.dispose()
+    }
+  })
+
+  it('a malformed call returns INVALID_ARGS with the schema, and the corrected call then succeeds', async () => {
+    await harness.result(S1, 'target.open', { url: url('form.html') })
+    // A typical model slip: wrong key name and a missing required value.
+    const bad = await harness.action(S1, 'act.fill', { locater: { label: 'Name' } })
+    assert.equal(bad.ok, false)
+    assert.equal(bad.executionStatus, 'failed')
+    assert.equal(bad.error.code, 'INVALID_ARGS')
+    assert.match(bad.error.message, /locater: unknown argument/)
+    assert.match(bad.error.message, /text: required/)
+    assert.match(bad.error.schema, /^act\.fill\(selector\?: string, locator\?: \$locator, text: string\)/)
+
+    // Self-correction from the reply alone: the schema names the argument shapes.
+    const fixed = await harness.action(S1, 'act.fill', { locator: { label: 'Name' }, text: 'Grace' })
+    assert.equal(fixed.ok, true, JSON.stringify(fixed))
+    assert.match(fixed.result.text, /Hello, Grace/)
+
+    // Real Playwright failures come back as structured codes with the original message.
+    const missing = await harness.action(S1, 'act.check', { selector: '#does-not-exist', timeoutMs: 600 })
+    assert.equal(missing.ok, false)
+    assert.equal(missing.error.code, 'LOCATOR_NOT_FOUND')
+    assert.match(missing.error.message, /does-not-exist/)
+    const unknown = await harness.action(S1, 'act.clik', { selector: '#inc' })
+    assert.equal(unknown.error.code, 'UNKNOWN_ACTION')
   })
 
   it('two sessions open different pages without crossing, and share no cookies or storage', async () => {
-    await harness.call(S1, 'browser_close')
-    await harness.call(S1, 'browser_open', { url: url('session-a.html') })
-    await harness.call(S2, 'browser_open', { url: url('session-b.html') })
+    await harness.result(S1, 'target.close')
+    await harness.result(S1, 'target.open', { url: url('session-a.html') })
+    await harness.result(S2, 'target.open', { url: url('session-b.html') })
 
     // Opening B after A is the ordering that used to steal A's page.
-    const a = await harness.call(S1, 'browser_read')
-    const b = await harness.call(S2, 'browser_read')
+    const a = await harness.result(S1, 'observe.read')
+    const b = await harness.result(S2, 'observe.read')
     assert.equal(a.title, 'Session A Page')
     assert.match(a.text, /This is page A/)
     assert.equal(b.title, 'Session B Page')
     assert.match(b.text, /This is page B/)
 
     // Interaction in A is invisible to B, even though both pages are the same origin.
-    await harness.call(S1, 'browser_click', { selector: '#bump' })
-    await harness.call(S1, 'browser_click', { selector: '#bump' })
-    assert.match((await harness.call(S1, 'browser_read')).text, /Bumps: 2/)
-    assert.match((await harness.call(S2, 'browser_read')).text, /Bumps: 0/)
+    await harness.result(S1, 'act.click', { selector: '#bump' })
+    await harness.result(S1, 'act.click', { selector: '#bump' })
+    assert.match((await harness.result(S1, 'observe.read')).text, /Bumps: 2/)
+    assert.match((await harness.result(S2, 'observe.read')).text, /Bumps: 0/)
 
     // Same origin, so only a separate BrowserContext keeps cookies/localStorage apart.
-    await harness.call(S1, 'browser_evaluate', { expression: '(document.cookie = "who=a; path=/", localStorage.setItem("who", "a"), true)' })
-    const seenByA = JSON.parse((await harness.call(S1, 'browser_evaluate', { expression: '({ cookie: document.cookie, ls: localStorage.getItem("who") })' })).resultJson)
-    const seenByB = JSON.parse((await harness.call(S2, 'browser_evaluate', { expression: '({ cookie: document.cookie, ls: localStorage.getItem("who") })' })).resultJson)
+    await harness.result(S1, 'script.evaluate', { expression: '(document.cookie = "who=a; path=/", localStorage.setItem("who", "a"), true)' })
+    const seenByA = JSON.parse((await harness.result(S1, 'script.evaluate', { expression: '({ cookie: document.cookie, ls: localStorage.getItem("who") })' })).resultJson)
+    const seenByB = JSON.parse((await harness.result(S2, 'script.evaluate', { expression: '({ cookie: document.cookie, ls: localStorage.getItem("who") })' })).resultJson)
     assert.deepEqual(seenByA, { cookie: 'who=a', ls: 'a' })
     assert.deepEqual(seenByB, { cookie: '', ls: null })
 
     // status() reports only the caller's own page.
-    assert.equal((await harness.call(S1, 'browser_status')).activeUrl, url('session-a.html'))
-    assert.equal((await harness.call(S2, 'browser_status')).activeUrl, url('session-b.html'))
+    assert.equal((await harness.result(S1, 'runtime.status')).activeUrl, url('session-a.html'))
+    assert.equal((await harness.result(S2, 'runtime.status')).activeUrl, url('session-b.html'))
 
     // Closing A leaves B's page and state alone.
-    await harness.call(S1, 'browser_close')
-    const stillB = await harness.call(S2, 'browser_read')
+    await harness.result(S1, 'target.close')
+    const stillB = await harness.result(S2, 'observe.read')
     assert.equal(stillB.title, 'Session B Page')
-    assert.equal((await harness.call(S1, 'browser_status')).activeUrl, undefined)
+    assert.equal((await harness.result(S1, 'runtime.status')).activeUrl, undefined)
   })
 
   it('a call without any agent identity lands in the shared bucket, not in a session page', async () => {
-    await harness.call(undefined, 'browser_open', { url: url('index.html') })
-    assert.equal((await harness.call(undefined, 'browser_read')).title, 'E2E Index')
-    assert.equal((await harness.call(S2, 'browser_read')).title, 'Session B Page')
-    assert.equal((await harness.call(S2, 'browser_status')).activeUrl, url('session-b.html'))
+    await harness.result(undefined, 'target.open', { url: url('index.html') })
+    assert.equal((await harness.result(undefined, 'observe.read')).title, 'E2E Index')
+    assert.equal((await harness.result(S2, 'observe.read')).title, 'Session B Page')
+    assert.equal((await harness.result(S2, 'runtime.status')).activeUrl, url('session-b.html'))
   })
 })

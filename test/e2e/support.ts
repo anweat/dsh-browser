@@ -84,6 +84,12 @@ export interface Harness {
   service: BrowserService
   /** Call a registered model tool exactly as the agent loop would, as one session. */
   call: (session: string | undefined, name: string, args?: Record<string, unknown>) => Promise<any>
+  /** `browser_call({ action, args })` as one session; returns the whole result envelope. */
+  action: (session: string | undefined, action: string, args?: Record<string, unknown>) => Promise<any>
+  /** Like {@link action} but asserts the envelope is ok and returns its `result`. */
+  result: (session: string | undefined, action: string, args?: Record<string, unknown>) => Promise<any>
+  /** `browser_index(args)` as one session; returns the text the model would read. */
+  index: (args?: Record<string, unknown>) => Promise<string>
   /** Names of every tool the plugin registered. */
   toolNames: () => string[]
   dir: string
@@ -91,7 +97,7 @@ export interface Harness {
 }
 
 /** Build the real BrowserService and the real tool layer around one headless browser. */
-export function createHarness(detection: Extract<BrowserDetection, { ok: true }>): Harness {
+export function createHarness(detection: Extract<BrowserDetection, { ok: true }>, overrides: Record<string, unknown> = {}): Harness {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-e2e-'))
   const config = resolveConfig({
     enabled: true,
@@ -103,6 +109,7 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     storageStatePath: undefined,
     ...detection.channel ? { channel: detection.channel } : {},
     ...detection.executablePath ? { executablePath: detection.executablePath } : {},
+    ...overrides,
   } as never)
   const service = new BrowserService(config)
   const tools = new Map<string, any>()
@@ -116,6 +123,17 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
       if (!tool) throw new Error(`tool not registered: ${name}`)
       const agent = session === undefined ? undefined : { id: session, session: { id: session } }
       return tool.execute(args, { signal: new AbortController().signal, ...agent ? { agent } : {} })
+    },
+    async action(session, action, args = {}) {
+      return this.call(session, 'browser_call', { action, args })
+    },
+    async result(session, action, args = {}) {
+      const envelope = await this.action(session, action, args)
+      if (!envelope.ok) throw new Error(`${action} failed: ${JSON.stringify(envelope.error)}`)
+      return envelope.result
+    },
+    async index(args = {}) {
+      return (await this.call(undefined, 'browser_index', args)).text
     },
     async dispose() {
       await service.close()
