@@ -44,7 +44,7 @@ A recipe never fails by throwing away what it did. `result` always holds:
 
 | field | meaning |
 |---|---|
-| `executionStatus` | `completed`; `failed` (a step failed or the deadline passed); `cancelled`; `outcome_unknown` (a step that changes the page started and then timed out) |
+| `executionStatus` | `completed`; `failed` (a step failed or the deadline passed); `cancelled`; `outcome_unknown` (a step that changes the page was being performed when it timed out) |
 | `validationStatus` | `passed`: there is at least one `assert` or postcondition and every one held. `failed`: one did not hold. `not_checked`: nothing verified the result |
 | `completedSteps` | the steps that finished: `step`, `action`, `ok`, and for extract/screenshot `output`, the index into `outputs` (the value is stored once, there) |
 | `failedStep` | `index` (1-based), `action`, `errorCode`, the original `message`, and `candidates` for `LOCATOR_AMBIGUOUS`; for a cancel or deadline, the step that did not start. A failed postcondition is reported as a step after the last one with `action: "postcondition"` |
@@ -57,6 +57,7 @@ A recipe never fails by throwing away what it did. `result` always holds:
 - `OUTCOME_UNKNOWN`: do not run the recipe again. Read the page (`observe.read`) to see whether the click, fill or submit took effect, then continue from the real state.
 - `VALIDATION_FAILED`: the page did not show the expected result. Read it, then correct the recipe, the assert or the postcondition. Steps before the failure already ran; do not repeat a submit.
 - `failed` with `effects: observed`: the earlier steps are done. Resume from `failedStep.index`, not from the start.
+- `failed` with `NOT_ACTIONABLE` and `effects: none`: the element was found but stayed disabled, hidden or moving until the timeout, so the step never ran. Wait for the page state it needs (`wait`), then retry.
 - `cancelled`: the step that was running finished before the call returned; the page stays open and usable.
 
 A test or run counts as passed only when it completed and nothing failed validation.
@@ -68,7 +69,7 @@ A test or run counts as passed only when it completed and nothing failed validat
 - `{"selector":"#done"}`: a CSS selector that is visible. `{"text":"Saved"}`: text that is visible. `{"urlIncludes":"/inbox"}`: the final URL contains it. Each waits up to `timeoutMs` (default 5000).
 - `{"output":"results","nonEmpty":true}`: the named extract output is not empty. `{"output":"results","allowEmpty":true}`: it only has to have been produced (an empty result is legitimate).
 
-`validationStatus` is `passed` only when every `assert` and every postcondition holds. **A v2 draft with no `assert` and no postcondition can be saved, but its test cannot pass**: the test reply says `testStatus: "failed"` with the reason. Add a check that proves the business result (confirmation text, new URL, a non-empty output).
+`validationStatus` is `passed` only when every `assert` and every postcondition holds. **A v2 draft with no `assert` and no postcondition can be saved, but its test cannot pass**: the reply is `ok: false` with `error.code: "VALIDATION_MISSING"` and `testStatus: "failed"`. Add a check that proves the business result (confirmation text, new URL, a non-empty output).
 
 ## Inputs and outputs
 
@@ -93,7 +94,19 @@ A test or run counts as passed only when it completed and nothing failed validat
 
 ## Saving a draft
 
-Save (`automation.develop`, `save`) replaces the whole draft, so send every field each time. Then `{"action":"validate","id":...}` and `{"action":"test","id":...,"url":...,"inputs":{...}}`. Test with realistic inputs, and at least two different inputs when the recipe takes any, checking that the outputs differ. Activation is the user's decision. Do not put page content, cookies or passwords into an asset.
+Save (`automation.develop`, `save`) replaces the whole draft, so send every field each time; `browser_index({action:"automation.develop.save"})` has its schema. Then `{"action":"validate","id":...}` and `{"action":"test","id":...,"url":...,"inputs":{...}}`. Test with realistic inputs, and at least two different inputs when the recipe takes any, checking that the outputs differ. Activation is the user's decision. Do not put page content, cookies or passwords into an asset.
+
+**Revisions.** Every save makes a new `revision` (with a `contentHash` over the steps and schema fields) and clears the test result. A test is recorded as a credential for the revision and content it ran on, with only a digest of the inputs; the test reply carries `revision` and `contentHash`. After any edit, test again. The user can activate only a revision whose latest test passed on exactly that content.
+
+## Repairing an active asset
+
+An active asset cannot be edited. When it stops working (the page changed), copy it, change the copy, test the copy:
+
+```json call
+{"action":"automation.develop","args":{"action":"fork","id":"active-asset-id"}}
+```
+
+The draft records `sourceAssetId` and `sourceRevision`. Failing tests of the draft never touch the active asset, which keeps running (`automation.run`). Once the draft passes with realistic inputs, tell the user it is ready; their activation archives the old asset and makes the draft the active one.
 
 ## Converting a v1 asset
 

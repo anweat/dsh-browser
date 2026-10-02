@@ -410,6 +410,7 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
           catalogTokenBudget: 800
           modelDevelopmentEnabled: true
           maxModelDraftWritesPerSession: 3
+          maxTestCredentials: 5     # 每个资产保留最近 N 条测试凭据（激活只认绑定当前 revision 与内容哈希的 passed 凭据）
         maxSessions: 8           # 同时持有 context+page 的 session 上限，超出淘汰最久未使用者
         storageStatePath: ''     # Playwright 登录态 JSON（复用已登录会话）
         authProfiles:

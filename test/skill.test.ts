@@ -4,10 +4,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { ACTIONS, CALL_TOOL, INDEX_TOOL, findAction } from '../src/actions/registry.ts'
-import { ACTION_GROUPS } from '../src/actions/types.ts'
+import { ACTIONS, CALL_TOOL, INDEX_TOOL, findAction, findSubAction } from '../src/actions/registry.ts'
+import { ACTION_GROUPS, ERROR_CODES } from '../src/actions/types.ts'
 import { validateArgs } from '../src/actions/schema.ts'
-import { COMPACT_GUIDE } from '../src/actions/index-view.ts'
+import { COMPACT_GUIDE, renderIndex } from '../src/actions/index-view.ts'
 import { SKILL_DIR, SKILL_NAME, createSkillProvider, parseSkillFile, readSkill } from '../src/skill.ts'
 import plugin, { inject } from '../src/index.ts'
 import { AutomationAssetStore, resolveAutomationAssetPolicy } from '../src/automation-assets.ts'
@@ -68,10 +68,18 @@ test('skill text and examples cannot drift from the action registry', () => {
         assert.ok(action, `${file} example calls unknown action ${String(value.action)}`)
         const checked = validateArgs(action.params, value.args ?? {})
         assert.deepEqual(checked.errors, [], `${file}: example for ${action.name} fails its schema`)
+        // A sub-action example must name a real operation and carry what that operation requires.
+        if (action.subActions) {
+          const operation = (value.args as Record<string, unknown>)[action.subActions.key] as string
+          const sub = action.subActions.items[operation]
+          assert.ok(sub, `${file}: ${action.name} example uses unknown operation ${operation}`)
+          for (const required of sub.required ?? []) assert.ok(required in (value.args as object), `${file}: ${action.name} ${operation} example lacks ${required}`)
+          for (const key of Object.keys(value.args as object)) assert.ok(key === action.subActions.key || sub.params.includes(key), `${file}: ${action.name} ${operation} example passes ${key}, which that operation does not take`)
+        }
         callsChecked += 1
       } else {
         assert.ok(Object.keys(value).every(key => ['group', 'action', 'query'].includes(key)), `${file}: bad index args`)
-        if (typeof value.action === 'string') assert.ok(findAction(value.action))
+        if (typeof value.action === 'string') assert.ok(findAction(value.action) || findSubAction(value.action), `${file}: index names unknown action ${value.action}`)
         if (typeof value.group === 'string') assert.ok((ACTION_GROUPS as readonly string[]).includes(value.group))
         indexChecked += 1
       }
@@ -80,7 +88,7 @@ test('skill text and examples cannot drift from the action registry', () => {
   // The checks above must have actually looked at something.
   assert.ok(namesChecked >= 25, `only ${namesChecked} action names were checked`)
   assert.ok(callsChecked >= 14, `only ${callsChecked} call examples were checked`)
-  assert.ok(indexChecked >= 1)
+  assert.ok(indexChecked >= 2, 'the sub-action index form is demonstrated')
 })
 
 test('the six everyday actions the skill promises examples for are all demonstrated', () => {
@@ -197,4 +205,25 @@ test('every v2 recipe the skill shows is accepted by the real v2 validators, not
   }
   assert.ok(checked >= 3, `only ${checked} v2 examples were checked`)
   // The converter example needs a real v1 asset id; its shape is covered by the schema check above.
+})
+
+test('skill guidance for automation.develop matches its sub-actions, error codes and the revision rules', () => {
+  const skill = read('SKILL.md')
+  const recipes = read('references/recipes.md')
+  const develop = findAction('automation.develop')!
+  // Every sub-action the registry has is something the guidance may name; every one it names exists.
+  for (const [, operation] of (skill + recipes).matchAll(/"action":"(get|save|validate|test|convert|fork)"/g)) assert.ok(operation! in develop.subActions!.items, operation)
+  for (const operation of ['fork', 'convert', 'test', 'save']) assert.match(skill + recipes, new RegExp(`"action":"${operation}"`), `${operation} is demonstrated`)
+  assert.match(skill, /automation\.develop\.save/, 'the split detail form is shown')
+  assert.match(skill, /VALIDATION_MISSING/)
+  assert.match(recipes, /VALIDATION_MISSING/)
+  assert.ok(develop.errors!.includes('VALIDATION_MISSING'))
+  assert.match(skill + recipes, /revision/)
+  assert.match(skill + recipes, /sourceAssetId/)
+  // Error codes in the table all exist.
+  for (const [, code] of skill.matchAll(/^\| `([A-Z_]+)`/gm)) assert.ok((ERROR_CODES as readonly string[]).includes(code!), `${code} is not an error code`)
+  // The detail of every sub-action fits the budget the guidance relies on.
+  for (const operation of Object.keys(develop.subActions!.items)) {
+    assert.ok(renderIndex({ action: `automation.develop.${operation}` }, { mode: 'unrestricted', options: { modelDevelopmentEnabled: true }, enabled: true, skillAvailable: true }).text.length <= 3_500, operation)
+  }
 })
