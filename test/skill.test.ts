@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { ACTIONS, CALL_TOOL, INDEX_TOOL, findAction, findSubAction } from '../src/actions/registry.ts'
+import { ACTIONS, CALL_TOOL, INDEX_TOOL, findAction, findSubAction, findTopic } from '../src/actions/registry.ts'
 import { ACTION_GROUPS, ERROR_CODES } from '../src/actions/types.ts'
 import { validateArgs } from '../src/actions/schema.ts'
 import { COMPACT_GUIDE, renderIndex } from '../src/actions/index-view.ts'
@@ -226,4 +226,41 @@ test('skill guidance for automation.develop matches its sub-actions, error codes
   for (const operation of Object.keys(develop.subActions!.items)) {
     assert.ok(renderIndex({ action: `automation.develop.${operation}` }, { mode: 'unrestricted', options: { modelDevelopmentEnabled: true }, enabled: true, skillAvailable: true }).text.length <= 3_500, operation)
   }
+})
+
+test('skill guidance for observe.read and page generations matches the registry, the topics, and the error codes', () => {
+  const skill = read('SKILL.md')
+  const observe = read('references/observe.md')
+  const env = { mode: 'unrestricted' as const, options: { modelDevelopmentEnabled: true }, enabled: true, skillAvailable: true }
+  const read_ = findAction('observe.read')!
+  // Every section the registry accepts is documented, and the documented ones are accepted.
+  const sections = read_.params.sections!.items!.enum!
+  for (const section of sections) assert.match(observe, new RegExp('`' + section + '`'), `${section} is documented`)
+  // Every detail topic the guidance points at exists, and every topic is pointed at.
+  const named = [...observe.matchAll(/"action":"observe\.read\.([a-z]+)"/g)].map(match => match[1]!)
+  for (const topic of named) assert.ok(findTopic(`observe.read.${topic}`), `observe.read.${topic} is not a detail topic`)
+  for (const topic of Object.keys(read_.topics!)) assert.ok(named.includes(topic) || topic === 'links' || topic === 'tables', `${topic} is not mentioned in references/observe.md`)
+  // The field names the guidance lists for a control are the ones the topic describes, and the other way round.
+  const controlTopic = renderIndex({ action: 'observe.read.controls' }, env).text
+  for (const field of ['role', 'name', 'type', 'locator', 'ambiguous', 'actions', 'visible', 'disabled', 'readonly', 'checked', 'expanded', 'hasValue', 'sensitive', 'options', 'constraints', 'validity', 'source', 'frames']) {
+    assert.match(controlTopic, new RegExp('\\b' + field + '\\b'), `${field} is missing from the controls topic`)
+  }
+  for (const field of ['required', 'min', 'max', 'step', 'pattern', 'minlength', 'maxlength', 'accept', 'multiple']) {
+    assert.match(controlTopic, new RegExp('\\b' + field + '\\b'), `constraint ${field} is missing from the controls topic`)
+    assert.match(observe, new RegExp('`' + field + '`'), `constraint ${field} is missing from references/observe.md`)
+  }
+  assert.match(renderIndex({ action: 'observe.read.tables' }, env).text, /coverage/)
+  assert.match(renderIndex({ action: 'observe.read.truncation' }, env).text, /omittedBySection/)
+  // The generation rules: TARGET_STALE is a real code, the guard is on the act actions the guidance names, recipes are said not to take it.
+  assert.ok((ERROR_CODES as readonly string[]).includes('TARGET_STALE'))
+  assert.match(skill, /\| `TARGET_STALE` \|/)
+  assert.match(skill + observe, /expectGeneration/)
+  for (const name of ['act.click', 'act.fill', 'act.select', 'act.check', 'act.press']) assert.ok(findAction(name)!.params.expectGeneration, `${name} takes expectGeneration`)
+  assert.match(observe, /Recipes do not take it/)
+  for (const event of ['reload', 'history back or forward', 'pushState', 'hash change']) assert.match(observe, new RegExp(event), `the doc lists ${event} as a generation change`)
+  // Nothing about the new capability is in L0: the two always-on tools are unchanged in size.
+  for (const topic of Object.keys(read_.topics!)) {
+    assert.ok(renderIndex({ action: `observe.read.${topic}` }, env).text.length <= 3_500, `${topic} topic fits the layer budget`)
+  }
+  assert.ok(renderIndex({ action: 'observe.read' }, env).text.length <= 3_500, 'the observe.read detail fits the layer budget')
 })

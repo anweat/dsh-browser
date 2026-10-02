@@ -78,6 +78,18 @@ describe('dsh-browser structured observation in a real browser', { skip: detecti
       assert.deepEqual([byName(controls, 'More options').expanded, byName(controls, 'Notes').type], [false, 'contenteditable'])
     })
 
+    it('every field a control record carries is described in the controls detail the model can read', async () => {
+      const topic = await harness.index({ action: 'observe.read.controls' })
+      const keys = new Set<string>()
+      for (const control of controls) {
+        for (const key of Object.keys(control)) keys.add(key)
+        for (const key of Object.keys(control.constraints ?? {})) keys.add(key)
+        for (const option of control.options ?? []) for (const key of Object.keys(option)) keys.add(key)
+      }
+      for (const key of keys) assert.match(topic, new RegExp('\\b' + key + '\\b'), `${key} appears in records but not in observe.read.controls`)
+      assert.ok(keys.has('ambiguous') && keys.has('sensitive') && keys.has('validity'))
+    })
+
     it('every observed state, constraint, option, and validity agrees with the live DOM, and absent means not observed', async () => {
       const truth = await evaluate(`(() => {
         const out = {}

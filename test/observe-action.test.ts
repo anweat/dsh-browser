@@ -36,3 +36,18 @@ test('observe.read: plain calls keep the old read path; sections reach the obser
   assert.deepEqual(Object.keys(findAction('observe.read')!.topics!).sort(), ['controls', 'links', 'tables', 'truncation'])
 })
 
+
+test('observe sections and generations add nothing to the always-on tools; they live in the listing and the details', async () => {
+  const { registerTools } = await import('../src/tools.ts')
+  const { renderIndex } = await import('../src/actions/index-view.ts')
+  const tools: any[] = []
+  registerTools({ tools: { register: (tool: any) => tools.push(tool) } } as never, resolveConfig({ automationMode: 'unrestricted', toolSurface: 'indexed' } as never), {} as never)
+  const l0 = tools.reduce((sum, tool) => sum + JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.parameters }).length, 0)
+  // 1137 chars (325 tokens) when B5 started; the tool definitions must not grow with new actions or arguments.
+  assert.ok(l0 <= 1_137, `L0 is ${l0} chars`)
+  const env = { mode: 'unrestricted' as const, options: { modelDevelopmentEnabled: true }, enabled: true, skillAvailable: true }
+  const group = renderIndex({ group: 'observe' }, env).text
+  assert.match(group, /sections\?/)
+  assert.match(renderIndex({ group: 'act' }, env).text, /expectGeneration\?: number/)
+  assert.match(renderIndex({ action: 'observe.read' }, env).text, /observe\.read\.controls/)
+})
