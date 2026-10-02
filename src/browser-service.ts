@@ -33,6 +33,7 @@ import { configuredBrowserActions, configuredBrowserTools, type AutomationMode }
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
 import { TargetStaleError, resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
+import { describeScan, fitObservation, normalizeObserve, scanPage, scopeBase, type ObserveRegion, type ObserveSection } from './observe.ts'
 
 /**
  * How many sessions may hold a browser context+page at once. Past this, the
@@ -1375,6 +1376,70 @@ export class BrowserService {
   async read(opts: { session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     return this.readState(page, false)
+  }
+
+  /**
+   * Structured observation of the active page (or of one element's subtree): readable text, controls, links,
+   * and tables, each section bounded by `maxItems` and the whole record by `maxBytes` (see src/observe.ts).
+   * With only the default `content` section, no scope and no limits it is exactly {@link read}.
+   */
+  async observe(opts: {
+    sections?: readonly ObserveSection[]
+    target?: BrowserTarget
+    region?: ObserveRegion
+    maxItems?: number
+    maxBytes?: number
+    includeValues?: boolean
+    timeoutMs?: number
+    session?: string
+  } = {}): Promise<Record<string, unknown>> {
+    const request = normalizeObserve(opts)
+    const page = await this.ensureActivePage(undefined, { session: opts.session })
+    const base = scopeBase(request.target)
+    const structured = request.sections.some(section => section !== 'content')
+    const wantsText = request.sections.includes('content')
+    if (!structured && request.target === undefined && opts.maxBytes === undefined && opts.maxItems === undefined) return { ...await this.readState(page, false) }
+
+    const generationBefore = this.stamp(page).generation
+    let title = ''
+    let url = page.url()
+    let text: string | undefined
+    if (wantsText) {
+      if (request.target === undefined) {
+        const state = await this.readState(page, false)
+        title = state.title
+        url = state.url
+        text = state.text
+      } else {
+        const locator = resolveLocator(page, request.target)
+        text = capText(String(await withStrictLocator(locator, l => l.innerText({ timeout: request.timeoutMs }))).replace(/\n{3,}/g, '\n\n').trim(), 100_000)
+      }
+    }
+    if (!title) title = String(await page.title().catch(() => '')).slice(0, 500)
+
+    const raw = structured ? await scanPage(page, request, base) : undefined
+    const described = raw ? await describeScan(page, raw, request, base) : undefined
+    const stamp = this.stamp(page)
+    const limits = [...described?.limits ?? []]
+    if (generationBefore !== stamp.generation) limits.push('the page navigated while it was being observed; observe again')
+    const head: Record<string, unknown> = {
+      url, title,
+      ...stamp.targetId !== undefined ? { targetId: stamp.targetId } : {},
+      // The generation from before the scan: if the page moved meanwhile, a guarded action based on this fails stale.
+      ...generationBefore !== undefined ? { generation: generationBefore } : {},
+      ...described && Object.keys(described.counts).length ? { counts: described.counts } : {},
+      ...raw && raw.shadowRoots > 0 ? { scanned: { shadowRoots: raw.shadowRoots } } : {},
+      ...described?.frames ? { frames: described.frames } : {},
+      ...limits.length ? { limits } : {},
+    }
+    const fitted = fitObservation({
+      head,
+      ...text !== undefined ? { text } : {},
+      ...described?.controls ? { controls: described.controls } : {},
+      ...described?.links ? { links: described.links } : {},
+      ...described?.tables ? { tables: described.tables } : {},
+    }, request.maxBytes, raw?.counts ?? {}, request.maxItems)
+    return { ...fitted.record, ...fitted.truncation ? { truncation: fitted.truncation } : {} }
   }
 
   consoleMessages(opts: { level?: string; limit?: number; clear?: boolean; session?: string } = {}): { enabled: boolean; records: BrowserConsoleRecord[] } {
