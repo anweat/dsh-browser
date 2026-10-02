@@ -58,6 +58,36 @@ export interface ActionContext {
     agent: unknown;
     signal: AbortSignal;
 }
+/** The flags that differ per sub-action for an action that bundles several operations behind one `action` argument. */
+export interface ActionTraits {
+    readOnly: boolean;
+    mutating: boolean;
+    concurrencySafe: boolean;
+}
+/** One operation of an action such as `automation.develop`: its own summary, parameters and traits. */
+export interface SubActionDef {
+    summary: string;
+    /** Names from the action's `params` that this operation uses (the selector argument itself is implied). */
+    params: readonly string[];
+    /** Which of those must be present for this operation (the shared schema marks none required). */
+    required?: readonly string[];
+    /** Per-parameter description for this operation, replacing the action-level one. */
+    hints?: Record<string, string>;
+    /** Error codes this operation can return; when set, the detail lists these instead of the action-wide set. */
+    errors?: readonly string[];
+    /** Extra guidance shown only in this operation's detail. */
+    notes?: string;
+    examples?: ActionExample[];
+    /** Overrides the action-level flags for this operation. */
+    traits?: Partial<ActionTraits>;
+}
+export interface SubActionSet {
+    /** The argument that selects the operation (`action`). */
+    key: string;
+    /** Parameters every operation takes, listed once with the action. */
+    common: readonly string[];
+    items: Record<string, SubActionDef>;
+}
 export interface ActionDef {
     /** `group.action`. */
     name: string;
@@ -68,12 +98,17 @@ export interface ActionDef {
     notes?: string;
     params: ParamSchema;
     approval: ApprovalClass;
-    /** Whether the action may run in `read-only` automationMode. */
+    /**
+     * Whether the action may run in `read-only` automationMode. With {@link subActions} this is the
+     * strictest value (what an unknown or unlisted operation gets); operations that are safe say so in their traits.
+     */
     readOnly: boolean;
-    /** Whether it changes page, local, or remote state (drives OUTCOME handling). */
+    /** Whether it changes page, local, or remote state (drives OUTCOME handling). Strictest value when there are sub-actions. */
     mutating: boolean;
-    /** Whether sibling calls may overlap (flat surface only; `browser_call` is serial). */
+    /** Whether sibling calls may overlap (flat surface only; `browser_call` is serial). Strictest value when there are sub-actions. */
     concurrencySafe: boolean;
+    /** Operations behind one `action` argument, each with its own flags, detail view, and approval. */
+    subActions?: SubActionSet;
     /** Per-call budget; exceeded budgets return DEADLINE. */
     timeoutMs: number;
     /**
@@ -97,7 +132,7 @@ export declare class ActionUnavailableError extends Error {
     readonly hint?: string | undefined;
     constructor(message: string, hint?: string | undefined);
 }
-export declare const ERROR_CODES: readonly ["INVALID_ARGS", "UNKNOWN_ACTION", "CAPABILITY_UNAVAILABLE", "POLICY_DENIED", "LOCATOR_NOT_FOUND", "LOCATOR_AMBIGUOUS", "NOT_ACTIONABLE", "TARGET_CLOSED", "DEADLINE", "CANCELLED", "NOT_FOUND", "ACTION_FAILED", "VALIDATION_FAILED", "OUTCOME_UNKNOWN", "INVALID_RECIPE"];
+export declare const ERROR_CODES: readonly ["INVALID_ARGS", "UNKNOWN_ACTION", "CAPABILITY_UNAVAILABLE", "POLICY_DENIED", "LOCATOR_NOT_FOUND", "LOCATOR_AMBIGUOUS", "NOT_ACTIONABLE", "TARGET_CLOSED", "DEADLINE", "CANCELLED", "NOT_FOUND", "ACTION_FAILED", "VALIDATION_FAILED", "OUTCOME_UNKNOWN", "INVALID_RECIPE", "VALIDATION_MISSING"];
 export type ErrorCode = typeof ERROR_CODES[number];
 export type ExecutionStatus = 'completed' | 'failed' | 'cancelled' | 'outcome_unknown';
 export interface ActionErrorBody {

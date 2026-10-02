@@ -9,6 +9,7 @@
  * rather than a generic dispatcher tool.
  * @module dsh-browser/approval-policy
  */
+import { type AnyRecipeStep } from './automation.ts';
 import { type AutomationMode } from './freedom.ts';
 export type BrowserPolicyDecision = {
     kind: 'allow';
@@ -20,10 +21,17 @@ export type BrowserPolicyDecision = {
     reason: string;
 };
 /**
+ * The one rule for replaying recipe steps: read-only steps run directly; mutating steps are denied in
+ * read-only, asked in standard, and free in autonomous and unrestricted. `automation.run_recipe` applies
+ * it to the steps in the call, and `automation.develop` test applies it to the steps of the draft.
+ */
+export declare function recipeStepsDecision(name: string, steps: readonly AnyRecipeStep[], mode: AutomationMode): BrowserPolicyDecision;
+/**
  * Decide whether a call may run.
  * @param name - an action name (`act.click`) or one of the WebSearch tool names this policy also guards.
  * @param args - the action's own arguments (never the `browser_call` wrapper).
  * @param mode - the configured automationMode.
- * @param assetKind - for `automation.run`, the kind of the asset about to run.
+ * @param assetKind - for `automation.run` and `automation.develop` test, the kind of the asset about to run.
+ * @param draftSteps - for `automation.develop` test of a recipe, the steps the draft would replay.
  */
-export declare function browserPolicyDecision(name: string, args: unknown, mode?: AutomationMode, assetKind?: 'recipe' | 'userscript'): BrowserPolicyDecision;
+export declare function browserPolicyDecision(name: string, args: unknown, mode?: AutomationMode, assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[]): BrowserPolicyDecision;

@@ -31,6 +31,13 @@ export declare function isTimeoutError(error: unknown): boolean;
  * log is treated as "unknown", never as "never reached".
  */
 export declare function neverReachedElement(error: unknown): boolean;
+/**
+ * True when a timeout proves the action never ran although the element was found: the call log shows
+ * Playwright waiting for it to become visible, enabled, stable or editable (or for an overlay to move)
+ * and never reaches the line that says the action is being performed. Needs a call log; without one
+ * (or with a performed marker) the outcome stays unknown.
+ */
+export declare function blockedBeforeAction(error: unknown): boolean;
 /** Map any thrown value to a structured error body. */
 export declare function mapError(error: unknown, action: string, opts?: {
     signal?: AbortSignal;

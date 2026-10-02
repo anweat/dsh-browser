@@ -18,5 +18,10 @@ export declare class AutomationDevelopmentService {
         draft: AutomationAsset;
         conversion: ConversionResult;
     };
+    /**
+     * Copy an asset (typically an active one that stopped working) into a new draft that records its source.
+     * Counts as one draft write for the session. The source keeps running until the copy replaces it on activation.
+     */
+    fork(id: string, sessionId: string): AutomationAsset;
     private assertEnabled;
 }
