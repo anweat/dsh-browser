@@ -37,4 +37,18 @@ Then `inspect.console` (filter with `level`) and `inspect.requests` return bound
 
 ## Several pages
 
-Each session has one page of its own; other sessions cannot see it. `target.list` shows it and `target.close` discards it.
+Each session has its own context; other sessions cannot see it. A link with `target=_blank` or `window.open` adds a popup to your page list without making it active. `target.list` shows every page (`id`, `url`, `title`, `active`); switch with `target.select`, then `observe.read` and `act.*` work on that page.
+
+```json call
+{"action":"target.list","args":{}}
+```
+
+```json call
+{"action":"target.select","args":{"id":"t2"}}
+```
+
+Ids are never reused in a session. A popup that closed gives `TARGET_CLOSED` on select; list again. If the active page closes, the session falls back to another open page of the same context. `target.close` discards all of the session's pages.
+
+## Typing and clearing
+
+`act.fill` replaces a value at once (no key events). `act.type` presses the keys one by one, for autocompletes and masked inputs. `act.clear` empties a field and fires the input event, so controlled inputs update their state; do not fill an empty string to clear.

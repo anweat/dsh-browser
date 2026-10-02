@@ -74,7 +74,7 @@ dsh plugin --profile web add @anweat/dsh-browser@0.1.17 dsh-web-search-pro@0.1.1
 | 情形 | 推荐方式 | 关键边界 |
 |---|---|---|
 | 公开网页读取、截图 | `target.open` → `observe.read` / `observe.screenshot` | 不需要登录态 |
-| 表单、分页、懒加载 | `act.click` / `act.fill` / `act.press` / `act.select` / `act.check` / `act.scroll` | CSS 或 role/text/label 语义定位；`standard` 下审批 |
+| 表单、分页、懒加载 | `act.click` / `act.fill` / `act.type` / `act.clear` / `act.press` / `act.select` / `act.check` / `act.scroll` | CSS 或 role/text/label/testId 语义定位，默认严格唯一；`standard` 下审批 |
 | SPA 条件等待 | `act.wait` | 支持 locator、URL glob、networkidle 或最多 10 秒固定等待 |
 | 悬停菜单与提示 | `act.hover` | 与直接页面交互使用相同审批策略 |
 | 文件上传 | `act.upload` | 只接受现有绝对文件路径；最多 20 个、合计 512 MiB；除 `unrestricted` 外审批会显示路径 |
@@ -194,7 +194,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `toolSurface` | 注册的工具 | 常驻上下文 | 用途 |
 |---|---|---|---|
 | `indexed`（默认） | `browser_index`、`browser_call` 两个 | 约 0.3k token | 渐进披露：先看目录，再按需查看单个动作的 schema |
-| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 9k token（31 个工具） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
+| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 14.5k token（34 个工具；recipe 的 v2 schema 在 `automation.develop` / `automation.run_recipe` 里内联展开） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
 
 `indexed` 下：`browser_index()` 列出能力组和当前环境状态（`automationMode`、Chromium 是否已安装）；`browser_index({group})` 列出该组动作；`browser_index({action})` 给出完整参数 schema；`browser_index({query})` 按关键词检索。`browser_call({action, args})` 执行动作，服务端按 schema 校验参数，校验失败返回 `INVALID_ARGS` 并附上精简 schema。所有动作的返回值使用同一信封：
 
@@ -205,7 +205,18 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 错误码：`INVALID_ARGS`、`UNKNOWN_ACTION`、`CAPABILITY_UNAVAILABLE`、`POLICY_DENIED`、`LOCATOR_NOT_FOUND`、`LOCATOR_AMBIGUOUS`、`NOT_ACTIONABLE`、`TARGET_CLOSED`、`DEADLINE`、`CANCELLED`、`NOT_FOUND`、`ACTION_FAILED`，以及 recipe 专用的 `VALIDATION_FAILED`、`OUTCOME_UNKNOWN`、`INVALID_RECIPE`。会产生副作用的动作超时时 `executionStatus` 为 `outcome_unknown`，调用方应先核验页面再决定是否重试。
 
-**recipe 的执行结果**：`automation.run_recipe`、`automation.run`、`automation.develop` 的 `test` 总是把完整的运行报告放在 `result` 里，失败时也一样（此时 `ok` 为 false，并附带 `error`）：`executionStatus`（`completed` / `failed` / `cancelled` / `outcome_unknown`）、`validationStatus`（`not_checked` / `passed` / `failed`）、`completedSteps`、`failedStep{index, action, errorCode, message}`、`effects`（`none` / `observed` / `unknown`）、`outputs`。`ok` 只在“执行完成且没有断言失败”时为 true。fill、type、click、press、select、check 视为有副作用：它们超时则 `executionStatus` 为 `outcome_unknown`、`effects` 为 `unknown`。取消和整体 deadline 在每一步开始前以及最后一步之后检查；正在执行的 Playwright 步骤无法中断，调用会等它返回，已完成的步骤不回滚，session 页面保持打开。测试或运行只有在执行完成且没有断言失败时才算通过；没有 `assert` 步骤的旧式 recipe 仍可通过测试，但资产记为 `evidenceLevel: 'legacy-unverified'`。
+**recipe 的执行结果**：`automation.run_recipe`、`automation.run`、`automation.develop` 的 `test` 总是把完整的运行报告放在 `result` 里，失败时也一样（此时 `ok` 为 false，并附带 `error`）：`executionStatus`（`completed` / `failed` / `cancelled` / `outcome_unknown`）、`validationStatus`（`not_checked` / `passed` / `failed`）、`completedSteps`、`failedStep{index, action, errorCode, message, candidates?}`、`effects`（`none` / `observed` / `unknown`）、`outputs`。`ok` 只在“执行完成且没有断言失败”时为 true。extract 和 screenshot 的值只放在 `outputs`（v2 的 `extract` 带 `as` 时有 `name`），`completedSteps[].output` 是指向它的下标，不再重复一份。fill、clear、type、click、press、select、check 视为有副作用：如果超时发生在**已命中元素、动作已开始之后**，`executionStatus` 为 `outcome_unknown`、`effects` 为 `unknown`；如果 Playwright 的 call log 显示一直只在 “waiting for locator”（元素从未出现），该步没有动手，判为 `failed`、`LOCATOR_NOT_FOUND`，`effects` 不受影响；没有 call log 的超时无法证明元素从未命中，仍按 `outcome_unknown`。取消和整体 deadline 在每一步开始前以及最后一步之后检查；正在执行的 Playwright 步骤无法中断，调用会等它返回，已完成的步骤不回滚，session 页面保持打开。测试或运行只有在执行完成且没有断言失败时才算通过；没有 `assert` 步骤的旧式（v1）recipe 仍可通过测试，但资产记为 `evidenceLevel: 'legacy-unverified'`。
+
+**严格定位**：原子动作和 v2 recipe 步骤共用同一套定位（`src/locator.ts`）。locator 必须只匹配一个元素；匹配多个时该动作**不执行**，返回 `LOCATOR_AMBIGUOUS`，`error.candidates` 给出总数和前 5 个候选（`role`、`name`、文本片段、`visible`）。确需选其中一个时写 `index` 并同时写 `indexReason`，否则拒绝。
+
+**Recipe schema v2**：资产和内联 recipe 用 `schemaVersion: 2` 启用，缺省为 1，v1 的语义（CSS `selector`、永远取第一个匹配、fill 不允许空串）一律不变。v2 的变化：
+
+- 步骤用 `locator`（`{role,name?,exact?}` / `{label}` / `{text}` / `{testId}` / `{css}`，可加 `framePath`）；严格唯一，歧义时该步不执行且 `effects` 不变。
+- 新增 `goto`（URL 必须落在资产的 `domains` 内，保存时和运行时各查一次，也检查重定向落点；内联 recipe 可停留在起始页同源，或落在显式的 `allowedDomains`）和 `clear`；`fill` 的空串必须写 `allowEmpty: true`，或改用 `clear`。
+- `extract` 和 `assert` 默认最多等 5 秒（可用 `timeoutMs` 调整），选择器不存在时不再等约 30 秒；`extract` 可用 `as` 命名输出。
+- 资产级字段：`inputSchema`（`string` / `number` / `enum`，可带 `required`、`example`、`enumValues`，运行前按 schema 校验并转换）、`outputSchema`（命名输出及类型 `string` / `number` / `json`）、`postconditions`（`{selector}` / `{text}` / `{urlIncludes}` / `{output, nonEmpty|allowEmpty}`）、`requiredCapabilities`（只记录，不门控）。
+- `validationStatus` 为 `passed` 当且仅当所有 `assert` 和 postconditions 都成立。**没有任何 assert 或 postcondition 的 v2 资产可以保存为草稿，但测试不会记为 passed**，`testMessage` 会说明原因。
+- `automation.develop` 的 `convert` 把 v1 recipe 资产转成**新的** v2 草稿：CSS selector 变成 `{css, explicitFirst: true}`（仍取第一个匹配），全部列入 `pendingDisambiguation`，草稿记录 `sourceAssetId` / `sourceRevision`，原资产（含 active）不会被修改；未知的 extract mode 或 wait condition 会拒绝转换并说明哪一步。
 
 **审批按动作判断**：Host 的审批理由写明动作和关键参数（例如 `act.click role="button" name="Submit"`），`browser_index` 直接放行，`browser_call` 解析出动作后适用与下表相同的规则，不可用的动作在 `browser_call` 中再拒绝一次。Host 里按工具名设置的“总是允许”不会跳过插件策略。
 
@@ -217,11 +228,14 @@ cookie 与 storage，跨 session 串号正是要防的事。
 |---|---|
 | `target.open` | 打开 URL，返回标题/可读文本/全页截图路径；可显式启用 console/network 内存捕获 |
 | `target.close` | 关闭当前页（下次 open 全新） |
-| `target.list` | 列出本 session 的页面（每个 session 最多一个） |
+| `target.list` | 列出本 session 的页面（自己打开的页加上弹窗），含 `id`、`url`、`title`、`active` |
+| `target.select` | 把本 session 的某个页面（`target.list` 里的 id）切换为当前页；弹窗不会自动成为当前页 |
 | `observe.read` | 读当前页 URL/标题/文本（不截图） |
 | `observe.screenshot` | 当前页、locator 或区域截图；普通文件名固定落在 `snapshotDir` |
 | `act.click` | 按 CSS 或结构化 Playwright locator 点击 |
-| `act.fill` | 向 CSS 或语义定位的 input/textarea 填入文本（原 `browser_type`） |
+| `act.fill` | 向 CSS 或语义定位的 input/textarea 填入文本，整体替换（原 `browser_type`） |
+| `act.type` | 逐键输入（`pressSequentially`），触发每个按键事件；用于自动补全、掩码输入框 |
+| `act.clear` | 清空输入框并触发 input 事件，受控输入的状态会同步 |
 | `act.wait` | 等待 locator 状态、URL glob、networkidle 或固定时间 |
 | `act.press` | 对 locator 或全局键盘发送按键 |
 | `act.select` | 按 locator 选择一个或多个 option value |
@@ -238,9 +252,9 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `script.run_userscript` | 运行外部 UserScript；强制域名匹配，审批策略由模式决定 |
 | `runtime.status` | 运行时状态（含 automationMode、已暴露工具/动作及各类审批策略） |
 | `runtime.install` | 安装 playwright chromium（`runtime.status` 报缺失时执行一次） |
-| `automation.run_recipe` | 最多 25 步 Playwright Recipe；支持等待、定位、表单、键盘、提取、断言和截图 |
+| `automation.run_recipe` | 最多 25 步 Playwright Recipe；支持等待、定位、表单、键盘、提取、断言和截图；`schemaVersion: 2` 启用严格定位、`goto`、`clear` 与 postconditions |
 | `automation.search` | 只有显式关键词调用才检索；可限定 active/draft/all、域名和类型，最多返回 `retrievalTopK` 条摘要 |
-| `automation.develop` | 按确切 ID 读取源码，或显式保存、静态校验、真实回放草稿；永远不能激活资产 |
+| `automation.develop` | 按确切 ID 读取源码，或显式保存、静态校验、真实回放、`convert`（v1 转 v2 新草稿）；永远不能激活资产 |
 | `automation.run` | 按 ID 运行已激活资产；再次执行限域和输入大小校验，审批由 `automationMode` 决定 |
 | `opencli.status` | 实际运行 OpenCLI doctor，报告 daemon/extension/profile 连通性 |
 | `opencli.catalog` | 对 OpenCLI 大目录按 query/site/access/strategy 过滤，单次最多返回 100 条 |
@@ -272,7 +286,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 1. 调用 `automation.search(query="batch-index issues", status="draft|active", kind="recipe")`，仅得到 ID、名称、标签、域名、输入名和运行统计。
 2. 确认要修改某项后，调用 `automation.develop(action="get", id="...")`；只有这一步会把单个资产的完整 recipe/源码带入当前上下文。
-3. `action="save"` 可直接声明新的 recipe，或保存带 `@match` / `@grant none` 的 UserScript；只能生成/更新 draft。默认每个模型会话最多写 3 次，仍受全局 `maxDrafts` 限制。
+3. `action="save"` 可直接声明新的 recipe（建议 `schemaVersion: 2`，见上文），或保存带 `@match` / `@grant none` 的 UserScript；只能生成/更新 draft，且整体替换。`action="convert"` 把 v1 资产复制成新的 v2 草稿。默认每个模型会话最多写 3 次（save 与 convert 合计），仍受全局 `maxDrafts` 限制。
 4. `action="validate"` 只做结构与 UserScript 元数据校验，不提供激活资格；`action="test"` 必须给 URL 和声明输入，执行真实 Playwright 回放，成功后才标记 `passed`。
 5. 激活、归档和回滚只在可视化面板完成，模型开发工具没有对应动作。
 

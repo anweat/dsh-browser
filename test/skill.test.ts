@@ -10,6 +10,8 @@ import { validateArgs } from '../src/actions/schema.ts'
 import { COMPACT_GUIDE } from '../src/actions/index-view.ts'
 import { SKILL_DIR, SKILL_NAME, createSkillProvider, parseSkillFile, readSkill } from '../src/skill.ts'
 import plugin, { inject } from '../src/index.ts'
+import { AutomationAssetStore, resolveAutomationAssetPolicy } from '../src/automation-assets.ts'
+import { normalizePostconditions, validateRecipeV2 } from '../src/automation-v2.ts'
 
 const SKILL_FILES = ['SKILL.md', ...fs.readdirSync(path.join(SKILL_DIR, 'references')).filter(file => file.endsWith('.md')).map(file => 'references/' + file)]
 const read = (file: string): string => fs.readFileSync(path.join(SKILL_DIR, file), 'utf8')
@@ -171,4 +173,28 @@ test('when a skill service appears, the provider is registered and the guide giv
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('every v2 recipe the skill shows is accepted by the real v2 validators, not just by the parameter schema', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-skill-v2-'))
+  const store = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual' }))
+  let checked = 0
+  for (const file of SKILL_FILES) {
+    for (const block of read(file).matchAll(/```json call\n([\s\S]*?)```/g)) {
+      const call = JSON.parse(block[1]!) as { action: string; args: Record<string, any> }
+      if (call.args?.schemaVersion !== 2) continue
+      if (call.action === 'automation.run_recipe') {
+        validateRecipeV2(call.args.steps)
+        if (call.args.postconditions) normalizePostconditions(call.args.postconditions, call.args.steps)
+        checked += 1
+      } else if (call.action === 'automation.develop' && call.args.action === 'save') {
+        const { action: _action, ...draft } = call.args
+        const saved = store.saveDraft(draft as never)
+        assert.equal(saved.schemaVersion, 2, `${file}: the saved draft is v2`)
+        checked += 1
+      }
+    }
+  }
+  assert.ok(checked >= 3, `only ${checked} v2 examples were checked`)
+  // The converter example needs a real v1 asset id; its shape is covered by the schema check above.
 })

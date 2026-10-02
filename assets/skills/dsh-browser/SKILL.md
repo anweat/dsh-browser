@@ -53,10 +53,11 @@ A wrong argument returns `INVALID_ARGS` with the schema attached. Fix the call a
 
 ## 3. Locating elements
 
-- Prefer a `locator` with `role` + `name`, then `label`, then `text`. Use a CSS `selector` only when nothing semantic exists.
-- A locator that matches several elements fails with `LOCATOR_AMBIGUOUS`. Read the page, then make the locator specific (`exact: true`, a more precise name, or an iframe `frame`) instead of guessing.
+- Prefer a `locator` with `role` + `name`, then `label`, `text`, `testId`; a CSS `selector` only when nothing semantic exists.
+- Locators are strict: one that matches several elements does nothing and fails with `LOCATOR_AMBIGUOUS`. `error.candidates` lists the first five matches (role, name, text, visible). Narrow the locator (`exact`, a better name, `frame`/`framePath`); only if you must pick one, add `index` and an `indexReason`.
 - After a navigation or a large re-render, earlier observations are stale. Read the page again before acting.
 - Do not repeat an action blindly because the page looks unchanged; read the page to see what happened.
+- `act.fill` replaces, `act.type` presses keys, `act.clear` empties. A popup joins `target.list`; switch with `target.select`.
 
 ## 4. Side effects and failure
 
@@ -65,12 +66,12 @@ A wrong argument returns `INVALID_ARGS` with the schema attached. Fix the call a
 | code | what to do |
 |---|---|
 | `INVALID_ARGS` | fix the arguments using the attached schema |
-| `LOCATOR_NOT_FOUND` | read the page, adjust the locator, `act.wait` for dynamic content |
-| `LOCATOR_AMBIGUOUS` | more than one element matched: narrow the locator |
+| `LOCATOR_NOT_FOUND` | read the page, adjust the locator, `act.wait` for dynamic content; in a recipe the step did nothing (`effects` stays as before) |
+| `LOCATOR_AMBIGUOUS` | several elements matched and nothing was done: choose from `error.candidates` |
 | `NOT_ACTIONABLE` | the element is hidden, disabled, or covered: wait or dismiss the overlay |
 | `TARGET_CLOSED` | call `target.open` again |
 | `DEADLINE` | with `executionStatus: "outcome_unknown"` the action may have taken effect: verify with `observe.read`, never resubmit blindly |
-| `OUTCOME_UNKNOWN` | a step that changes the page (click, fill, press, select, check) timed out, so it may or may not have happened: check the real state with `observe.read`, never resend a submit |
+| `OUTCOME_UNKNOWN` | a step that changes the page timed out AFTER it found the element, so it may or may not have happened: check the real state with `observe.read`, never resend a submit |
 | `VALIDATION_FAILED` | the steps ran but an `assert` did not hold, so the result is not confirmed: read the page, then fix the recipe or the assert; earlier steps are not undone and must not be repeated blindly |
 | `CANCELLED` | the call was stopped; steps that already ran stay done (see `effects` in the result) |
 | `POLICY_DENIED` / `CAPABILITY_UNAVAILABLE` | not allowed or not set up here (for example Chromium missing: `runtime.install`) |
@@ -89,7 +90,7 @@ For a submit, purchase, or any irreversible step, confirm the business result on
 
 ## 6. Turning a success into an asset
 
-When an exploration worked and the task will likely repeat, save it as a draft with `automation.develop` (`save`, then `validate`, then `test` with real inputs). A draft is not usable until the user activates it; never claim it is ready. Do not put cookies, tokens, passwords, or page content in an asset.
+When an exploration worked and the task will likely repeat, save it as a draft with `automation.develop` (`save`, then `validate`, then `test` with real inputs). Write new recipes as schema v2 (`"schemaVersion":2`: strict `locator`s, `goto`, `clear`, typed `inputSchema`, `postconditions`); see `references/recipes.md`. A v2 test passes only if an `assert` step or a postcondition checks the result. An old v1 asset is copied into a new v2 draft with `{"action":"convert","id":...}`; the original stays untouched. A draft is not usable until the user activates it; never claim it is ready. Do not put cookies, tokens, passwords, or page content in an asset.
 
 ## 7. Boundaries
 
