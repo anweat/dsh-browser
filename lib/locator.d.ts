@@ -53,6 +53,16 @@ export declare class LocatorAmbiguousError extends Error {
     readonly ambiguity: LocatorAmbiguity;
     constructor(message: string, ambiguity: LocatorAmbiguity);
 }
+/** Where a page stands now: what a stale caller needs to re-bind to it. */
+export interface PageGeneration {
+    targetId: string;
+    generation: number;
+}
+/** Raised, before anything is done, when `expectGeneration` is not the page's current generation. */
+export declare class TargetStaleError extends Error {
+    readonly current: PageGeneration;
+    constructor(message: string, current: PageGeneration);
+}
 export declare const MAX_CANDIDATES = 5;
 /** Check a locator's shape. Throws a message the model can act on; used before resolving and when a recipe is saved. */
 export declare function validateLocatorSpec(spec: unknown, label?: string): BrowserLocatorSpec;

@@ -29,6 +29,7 @@ import { type AutomationMode } from './freedom.ts';
 import { type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts';
 import { UsageGovernor } from './usage-policy.ts';
 import { type BrowserTarget } from './locator.ts';
+import { type ObserveRegion, type ObserveSection } from './observe.ts';
 export interface RenderRule {
     hostname: string;
     contentSelectors: string[];
@@ -63,6 +64,14 @@ export interface InteractiveState {
     url: string;
     title: string;
     text: string;
+    /** The session page this state describes (`t1`, `t2`, ...). Absent only when the page is already gone. */
+    targetId?: string;
+    /**
+     * The page's generation when this state was read. It changes whenever the page's main frame navigates
+     * (see {@link SessionState.generationClock}); pass it back as `expectGeneration` to refuse acting on a page
+     * that moved on since it was observed.
+     */
+    generation?: number;
     screenshotPath?: string;
     /** The page the action ran on closed itself (a popup's own close button): url/title/text describe the page the session fell back to, or are empty. */
     closedPage?: true;
@@ -199,12 +208,17 @@ interface SessionState {
     /** The ACTIVE page: the one every action targets. Always one of `pages` while set. */
     page?: any;
     /** Every open page of this session's context (the page it opened plus popups), in the order they appeared. */
-    pages: {
-        id: string;
-        page: any;
-    }[];
+    pages: SessionPage[];
     /** Counter behind the `t1`, `t2`, ... target ids of this session. */
     nextTarget: number;
+    /**
+     * Source of page generations. A page takes the next value when it is tracked and again on every main-frame
+     * navigation (cross-document, reload, history back/forward, `location` assignment, `pushState`/`replaceState`,
+     * hash changes), so values only grow and never repeat inside a session, not even across pages: an
+     * `expectGeneration` from one page can never match another page by coincidence. Subframe navigation and
+     * DOM re-rendering do not change it.
+     */
+    generationClock: number;
     profile?: ResolvedAuthProfile;
     rulePack?: ResolvedRulePack;
     captureConsole: boolean;
@@ -213,6 +227,12 @@ interface SessionState {
     capturedRequests: BrowserRequestRecord[];
     /** Monotonic tick of last use, for least-recently-used eviction. */
     lastUsed: number;
+}
+/** One tracked page of a session. */
+interface SessionPage {
+    id: string;
+    page: any;
+    generation: number;
 }
 /**
  * Session key for a tool execution.
@@ -246,6 +266,8 @@ export declare class BrowserService {
     private launching?;
     /** Per-session interactive state. Replaces the former global activePage. */
     private readonly sessions;
+    /** The tracked entry (target id, generation) of every page the service created. */
+    private readonly pageEntries;
     private clock;
     private readonly authProfiles;
     private readonly usageGovernor;
@@ -379,6 +401,13 @@ export declare class BrowserService {
     private onTarget;
     private screenshotFile;
     private captureScreenshot;
+    /** `{targetId, generation}` of a tracked page (empty for a page the service does not track). */
+    private stamp;
+    /**
+     * Refuse to act when the page's generation is not the one the caller observed. Nothing has been done yet
+     * at this point, so the caller only needs to observe again.
+     */
+    private assertGeneration;
     private readState;
     open(url: string, opts?: {
         waitMs?: number;
@@ -388,21 +417,25 @@ export declare class BrowserService {
         session?: string;
     }): Promise<InteractiveState>;
     click(target: BrowserTarget, opts?: {
+        expectGeneration?: number;
         timeoutMs?: number;
         waitMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
     type(target: BrowserTarget, text: string, opts?: {
+        expectGeneration?: number;
         timeoutMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
     /** Type key by key (pressSequentially), so per-key handlers fire; unlike `type`, which replaces the whole value. */
     typeKeys(target: BrowserTarget, text: string, opts?: {
+        expectGeneration?: number;
         delayMs?: number;
         timeoutMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
     clear(target: BrowserTarget, opts?: {
+        expectGeneration?: number;
         timeoutMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
@@ -415,23 +448,28 @@ export declare class BrowserService {
         session?: string;
     }): Promise<InteractiveState>;
     press(target: BrowserTarget | undefined, key: string, opts?: {
+        expectGeneration?: number;
         timeoutMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
     select(target: BrowserTarget, values: readonly string[], opts?: {
+        expectGeneration?: number;
         timeoutMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
     check(target: BrowserTarget, checked?: boolean, opts?: {
+        expectGeneration?: number;
         timeoutMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
     hover(target: BrowserTarget, opts?: {
+        expectGeneration?: number;
         timeoutMs?: number;
         waitMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
     setFiles(target: BrowserTarget, files: readonly string[], opts?: {
+        expectGeneration?: number;
         timeoutMs?: number;
         session?: string;
     }): Promise<FileUploadResult>;
@@ -452,6 +490,7 @@ export declare class BrowserService {
             url: string;
             title: string;
             active: boolean;
+            generation: number;
         }[];
     }>;
     /** Make one of this session's pages the active page: every later action, read, and screenshot targets it. */
@@ -461,12 +500,28 @@ export declare class BrowserService {
         id: string;
     }>;
     scroll(deltaY: number, opts?: {
+        expectGeneration?: number;
         waitMs?: number;
         session?: string;
     }): Promise<InteractiveState>;
     read(opts?: {
         session?: string;
     }): Promise<InteractiveState>;
+    /**
+     * Structured observation of the active page (or of one element's subtree): readable text, controls, links,
+     * and tables, each section bounded by `maxItems` and the whole record by `maxBytes` (see src/observe.ts).
+     * With only the default `content` section, no scope and no limits it is exactly {@link read}.
+     */
+    observe(opts?: {
+        sections?: readonly ObserveSection[];
+        target?: BrowserTarget;
+        region?: ObserveRegion;
+        maxItems?: number;
+        maxBytes?: number;
+        includeValues?: boolean;
+        timeoutMs?: number;
+        session?: string;
+    }): Promise<Record<string, unknown>>;
     consoleMessages(opts?: {
         level?: string;
         limit?: number;

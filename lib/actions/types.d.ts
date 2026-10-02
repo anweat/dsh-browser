@@ -12,7 +12,7 @@ import type { ResolvedConfig } from '../config.ts';
 import type { BrowserService } from '../browser-service.ts';
 import type { AutomationAssetStore } from '../automation-assets.ts';
 import type { AutomationDevelopmentService } from '../automation-development.ts';
-import type { LocatorAmbiguity } from '../locator.ts';
+import type { LocatorAmbiguity, PageGeneration } from '../locator.ts';
 export declare const ACTION_GROUPS: readonly ["runtime", "target", "observe", "act", "inspect", "script", "automation", "crawl", "opencli"];
 export type ActionGroup = typeof ACTION_GROUPS[number];
 /** Shared sub-schemas defined once and referenced by name from parameters. */
@@ -88,6 +88,11 @@ export interface SubActionSet {
     common: readonly string[];
     items: Record<string, SubActionDef>;
 }
+/** An extra detail page of an action, read with `browser_index({action:"<action>.<topic>"})`. Keeps the action's own detail short. */
+export interface ActionTopic {
+    summary: string;
+    text: string;
+}
 export interface ActionDef {
     /** `group.action`. */
     name: string;
@@ -109,6 +114,8 @@ export interface ActionDef {
     concurrencySafe: boolean;
     /** Operations behind one `action` argument, each with its own flags, detail view, and approval. */
     subActions?: SubActionSet;
+    /** Detail pages for parts of the result (observe.read: one per section), listed in the action detail. */
+    topics?: Record<string, ActionTopic>;
     /** Per-call budget; exceeded budgets return DEADLINE. */
     timeoutMs: number;
     /**
@@ -132,7 +139,7 @@ export declare class ActionUnavailableError extends Error {
     readonly hint?: string | undefined;
     constructor(message: string, hint?: string | undefined);
 }
-export declare const ERROR_CODES: readonly ["INVALID_ARGS", "UNKNOWN_ACTION", "CAPABILITY_UNAVAILABLE", "POLICY_DENIED", "LOCATOR_NOT_FOUND", "LOCATOR_AMBIGUOUS", "NOT_ACTIONABLE", "TARGET_CLOSED", "DEADLINE", "CANCELLED", "NOT_FOUND", "ACTION_FAILED", "VALIDATION_FAILED", "OUTCOME_UNKNOWN", "INVALID_RECIPE", "VALIDATION_MISSING"];
+export declare const ERROR_CODES: readonly ["INVALID_ARGS", "UNKNOWN_ACTION", "CAPABILITY_UNAVAILABLE", "POLICY_DENIED", "LOCATOR_NOT_FOUND", "LOCATOR_AMBIGUOUS", "NOT_ACTIONABLE", "TARGET_CLOSED", "TARGET_STALE", "DEADLINE", "CANCELLED", "NOT_FOUND", "ACTION_FAILED", "VALIDATION_FAILED", "OUTCOME_UNKNOWN", "INVALID_RECIPE", "VALIDATION_MISSING"];
 export type ErrorCode = typeof ERROR_CODES[number];
 export type ExecutionStatus = 'completed' | 'failed' | 'cancelled' | 'outcome_unknown';
 export interface ActionErrorBody {
@@ -143,6 +150,8 @@ export interface ActionErrorBody {
     schema?: string;
     /** The first matches of an ambiguous locator (LOCATOR_AMBIGUOUS): role, name, text snippet, visibility. */
     candidates?: LocatorAmbiguity;
+    /** The page's current target id and generation (TARGET_STALE): what the next call should expect after observing again. */
+    current?: PageGeneration;
 }
 /**
  * How an executor tells the dispatcher that a returned value is not a plain

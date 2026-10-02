@@ -11,6 +11,8 @@ import type { ParamNode, ParamSchema, SharedSchemaName } from './types.ts';
 export declare const SHARED_SCHEMAS: Record<SharedSchemaName, ParamNode>;
 /** The two params every element-targeting action accepts. */
 export declare const TARGET_PARAMS: ParamSchema;
+/** Optional guard of the act.* actions that change or press into the page. */
+export declare const EXPECT_PARAMS: ParamSchema;
 /** Expand every `ref` inline: the self-contained shape a flat tool needs. */
 export declare function expandNode(node: ParamNode): ParamNode;
 export declare function expandParams(params: ParamSchema): ParamSchema;

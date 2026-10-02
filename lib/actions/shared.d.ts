@@ -8,6 +8,12 @@ export declare function targetOf(args: {
     selector?: unknown;
     locator?: unknown;
 }, required?: boolean): BrowserTarget | undefined;
+/** The `expectGeneration` guard of an act.* call, ready to spread into the service options. */
+export declare function expectOf(args: {
+    expectGeneration?: unknown;
+}): {
+    expectGeneration?: number;
+};
 /**
  * Serialize a value for the model with a hard size cap. Values under the cap
  * are returned as-is (so they stay structured); larger ones are replaced by a

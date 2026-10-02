@@ -19,6 +19,11 @@ export declare function findSubAction(name: unknown): {
     action: ActionDef;
     sub: string;
 } | undefined;
+/** `observe.read.controls` resolves to the action and its detail topic; undefined for anything else. */
+export declare function findTopic(name: unknown): {
+    action: ActionDef;
+    topic: string;
+} | undefined;
 export declare function isActionGroup(value: unknown): value is ActionGroup;
 export declare function findAction(name: unknown): ActionDef | undefined;
 export declare function actionsInGroup(group: ActionGroup): ActionDef[];
