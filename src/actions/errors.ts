@@ -17,10 +17,48 @@ const HINTS: Partial<Record<ErrorCode, string>> = {
   CAPABILITY_UNAVAILABLE: 'This capability is not available in the current setup (see browser_index() for runtime state; runtime.install installs Chromium).',
   POLICY_DENIED: 'Blocked by the plugin policy for this automationMode or by input validation.',
   NOT_FOUND: 'The referenced item does not exist. Use automation.search to find valid ids.',
+  VALIDATION_FAILED: 'The steps ran but an assert step did not hold, so the business result is not confirmed. Read the page (observe.read) to see what happened; if earlier steps submitted something, do not run them again blindly.',
+  OUTCOME_UNKNOWN: 'A side-effecting step timed out, so it may or may not have taken effect. Verify the real result on the page (observe.read) before any retry; never resubmit blindly.',
+  INVALID_RECIPE: 'The recipe itself is malformed (see the message). Fix the step and send it again; nothing ran.',
 }
 
 export function hintFor(code: ErrorCode): string | undefined {
   return HINTS[code]
+}
+
+/** Thrown by a recipe `assert` step whose condition did not become true in time. */
+export class RecipeAssertionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RecipeAssertionError'
+  }
+}
+
+/** Thrown for a malformed recipe (bad step fields, out-of-range limits, unknown enum values). */
+export class RecipeValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RecipeValidationError'
+  }
+}
+
+/** The abort reason of an action whose overall deadline expired, so a stop can be told apart from a user cancel. */
+export class DeadlineError extends Error {
+  constructor(message = 'deadline') {
+    super(message)
+    this.name = 'DeadlineError'
+  }
+}
+
+/** True when the signal was aborted because the overall deadline expired. */
+export function abortedByDeadline(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && (signal.reason as { name?: unknown } | undefined)?.name === 'DeadlineError'
+}
+
+/** True for a Playwright timeout (waiting for a locator, an actionability check, or a navigation). */
+export function isTimeoutError(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'TimeoutError') return true
+  return /Timeout \d+ms exceeded|timed out after/i.test(messageOf(error))
 }
 
 function messageOf(error: unknown): string {
@@ -44,6 +82,9 @@ export function mapError(error: unknown, action: string, opts: { signal?: AbortS
   const name = error instanceof Error ? error.name : ''
   const result = (code: ErrorCode, hint = HINTS[code]): ActionErrorBody => ({ code, message, ...hint ? { hint } : {} })
 
+  if (error instanceof RecipeValidationError) return result('INVALID_RECIPE')
+  if (error instanceof RecipeAssertionError) return result('VALIDATION_FAILED')
+  if (abortedByDeadline(opts.signal)) return result('DEADLINE')
   if (opts.signal?.aborted || name === 'AbortError' || /\baborted\b/i.test(message)) return result('CANCELLED')
   if (CLOSED.test(message)) return result('TARGET_CLOSED')
   if (name === 'TimeoutError' || /Timeout \d+ms exceeded|timed out after/i.test(message)) {

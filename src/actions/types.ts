@@ -120,6 +120,8 @@ export const ERROR_CODES = [
   'INVALID_ARGS', 'UNKNOWN_ACTION', 'CAPABILITY_UNAVAILABLE', 'POLICY_DENIED',
   'LOCATOR_NOT_FOUND', 'LOCATOR_AMBIGUOUS', 'NOT_ACTIONABLE', 'TARGET_CLOSED',
   'DEADLINE', 'CANCELLED', 'NOT_FOUND', 'ACTION_FAILED',
+  // Recipe execution (B2): the failure says what already happened, not only that something failed.
+  'VALIDATION_FAILED', 'OUTCOME_UNKNOWN', 'INVALID_RECIPE',
 ] as const
 export type ErrorCode = typeof ERROR_CODES[number]
 

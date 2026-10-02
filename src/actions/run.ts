@@ -12,7 +12,7 @@ import type { ActionContext, ActionEnvelope, ActionErrorBody, ExecutionStatus } 
 import { ACTIONS, findAction } from './registry.ts'
 import { actionUnavailableReason, type AutomationMode, type ExposureOptions } from '../freedom.ts'
 import { compactSchema, validateArgs } from './schema.ts'
-import { hintFor, mapError } from './errors.ts'
+import { DeadlineError, hintFor, mapError } from './errors.ts'
 
 /** Serialized-result cap; larger results get their longest strings shortened. */
 export const RESULT_CHAR_LIMIT = 100_000
@@ -76,7 +76,7 @@ function withDeadline<T>(run: (signal: AbortSignal) => Promise<T>, timeoutMs: nu
   else parent.addEventListener('abort', onAbort, { once: true })
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<{ timedOut: true }>(resolve => {
-    timer = setTimeout(() => { controller.abort(new Error('deadline')); resolve({ timedOut: true }) }, timeoutMs)
+    timer = setTimeout(() => { controller.abort(new DeadlineError('deadline')); resolve({ timedOut: true }) }, timeoutMs)
   })
   const work = run(controller.signal).then(value => ({ timedOut: false as const, value }))
   // If the deadline wins, the work may still reject later; swallow it.
