@@ -7,7 +7,7 @@
  * `browser_call` or through a flat per-action tool.
  * @module dsh-browser/actions/run
  */
-import type { ActionContext, ActionEnvelope } from './types.ts';
+import { type ActionContext, type ActionEnvelope } from './types.ts';
 import { type AutomationMode, type ExposureOptions } from '../freedom.ts';
 /** Serialized-result cap; larger results get their longest strings shortened. */
 export declare const RESULT_CHAR_LIMIT = 100000;

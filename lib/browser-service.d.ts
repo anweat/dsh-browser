@@ -22,7 +22,7 @@ import { type CliResult } from './deps.ts';
 import type { ResolvedConfig } from './config.ts';
 import { type ResolvedAuthProfile } from './auth-profiles.ts';
 import { type ResolvedRulePack } from './rule-packs.ts';
-import { type BrowserRecipeStep, type RecipeStepResult } from './automation.ts';
+import { type BrowserRecipeStep, type RecipeRunResult, type RecipeStepResult } from './automation.ts';
 import { type UserscriptValidation } from './scripts.ts';
 import { type AutomationMode } from './freedom.ts';
 import { type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts';
@@ -63,7 +63,9 @@ export interface InteractiveState {
     text: string;
     screenshotPath?: string;
 }
-export interface RecipeRunResult extends InteractiveState {
+/** The page state after a recipe, plus what the run did ({@link RecipeRunResult}). */
+export interface RecipeServiceResult extends InteractiveState, RecipeRunResult {
+    /** Same array as `completedSteps`; kept for service consumers written before B2. */
     steps: RecipeStepResult[];
 }
 export interface ScriptRunResult {
@@ -449,6 +451,18 @@ export declare class BrowserService {
     }): Promise<{
         path: string;
     }>;
+    /**
+     * Run a recipe on the session's page.
+     *
+     * A business failure comes back as a value (`executionStatus`, `failedStep`,
+     * `completedSteps`, `effects`), never as an exception; only problems before
+     * any step ran (no page, navigation failure, a malformed recipe) throw.
+     *
+     * Cancelling stops this recipe only: the session page stays open and usable.
+     * A step that is already running cannot be interrupted, so the call returns
+     * once that step has returned. The caller therefore still holds the session
+     * (browser_call is serialized per agent) until the page is quiet again.
+     */
     recipe(steps: readonly BrowserRecipeStep[], opts?: {
         url?: string;
         waitMs?: number;
@@ -456,7 +470,8 @@ export declare class BrowserService {
         rulePack?: string;
         signal?: AbortSignal;
         session?: string;
-    }): Promise<RecipeRunResult>;
+        legacyRecipe?: boolean;
+    }): Promise<RecipeServiceResult>;
     /**
      * Close one session's page.
      *

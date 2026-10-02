@@ -75,6 +75,12 @@ export interface ActionDef {
     concurrencySafe: boolean;
     /** Per-call budget; exceeded budgets return DEADLINE. */
     timeoutMs: number;
+    /**
+     * Set for an executor that honours the abort signal at safe points and returns a structured partial
+     * result (recipes). After the deadline aborts it, the call waits up to this many ms for it to return,
+     * so the browser is quiet again before the next call and the completed steps are not lost.
+     */
+    settleMs?: number;
     examples?: ActionExample[];
     /** Which error codes callers should expect beyond the generic set. */
     errors?: string[];
@@ -90,7 +96,7 @@ export declare class ActionUnavailableError extends Error {
     readonly hint?: string | undefined;
     constructor(message: string, hint?: string | undefined);
 }
-export declare const ERROR_CODES: readonly ["INVALID_ARGS", "UNKNOWN_ACTION", "CAPABILITY_UNAVAILABLE", "POLICY_DENIED", "LOCATOR_NOT_FOUND", "LOCATOR_AMBIGUOUS", "NOT_ACTIONABLE", "TARGET_CLOSED", "DEADLINE", "CANCELLED", "NOT_FOUND", "ACTION_FAILED"];
+export declare const ERROR_CODES: readonly ["INVALID_ARGS", "UNKNOWN_ACTION", "CAPABILITY_UNAVAILABLE", "POLICY_DENIED", "LOCATOR_NOT_FOUND", "LOCATOR_AMBIGUOUS", "NOT_ACTIONABLE", "TARGET_CLOSED", "DEADLINE", "CANCELLED", "NOT_FOUND", "ACTION_FAILED", "VALIDATION_FAILED", "OUTCOME_UNKNOWN", "INVALID_RECIPE"];
 export type ErrorCode = typeof ERROR_CODES[number];
 export type ExecutionStatus = 'completed' | 'failed' | 'cancelled' | 'outcome_unknown';
 export interface ActionErrorBody {
@@ -100,6 +106,19 @@ export interface ActionErrorBody {
     /** Compact parameter schema, attached to INVALID_ARGS so the model can fix the call at once. */
     schema?: string;
 }
+/**
+ * How an executor tells the dispatcher that a returned value is not a plain
+ * success: a recipe that ran but failed still returns its full report, and the
+ * envelope carries `ok: false` and an error next to it.
+ */
+export interface ActionOutcome {
+    ok: boolean;
+    executionStatus: ExecutionStatus;
+    error?: ActionErrorBody;
+}
+/** Attach an outcome to a result object without changing its serialized form. */
+export declare function withOutcome<T extends object>(value: T, outcome: ActionOutcome): T;
+export declare function outcomeOf(value: unknown): ActionOutcome | undefined;
 export interface ActionEnvelope {
     ok: boolean;
     action: string;

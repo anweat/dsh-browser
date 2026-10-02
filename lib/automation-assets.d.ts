@@ -1,11 +1,19 @@
 /** Bounded, local automation-asset lifecycle and retrieval. */
-import type { BrowserRecipeStep } from './automation.ts';
+import { type BrowserRecipeStep } from './automation.ts';
 export declare const ASSET_PERSISTENCE_MODES: readonly ["off", "manual", "suggest", "auto-draft"];
 export type AssetPersistenceMode = typeof ASSET_PERSISTENCE_MODES[number];
 export declare const ASSET_ACTIVATION_MODES: readonly ["manual", "auto-tested"];
 export type AssetActivationMode = typeof ASSET_ACTIVATION_MODES[number];
 export type AutomationAssetKind = 'recipe' | 'userscript';
 export type AutomationAssetStatus = 'draft' | 'active' | 'archived';
+/**
+ * How strongly the last passing test confirmed the result. `verified`: a recipe
+ * with assert steps ran and every one held. `legacy-unverified`: the steps ran
+ * without raising, but nothing checked the outcome (recipes without an assert
+ * step, UserScripts, and every asset saved before B2). A missing value on stored
+ * data means `legacy-unverified`.
+ */
+export type EvidenceLevel = 'verified' | 'legacy-unverified';
 export interface AutomationAssetPolicyInput {
     enabled?: boolean;
     directory?: string;
@@ -72,6 +80,8 @@ export interface AutomationAsset {
     revision: number;
     testStatus: 'untested' | 'passed' | 'failed';
     testMessage?: string;
+    /** Optional on stored data; absent means `legacy-unverified`. Set only by a passing runtime test. */
+    evidenceLevel?: EvidenceLevel;
     successCount: number;
     failureCount: number;
     createdAt: string;
@@ -130,7 +140,7 @@ export declare class AutomationAssetStore {
     setStatus(id: string, status: AutomationAssetStatus): AutomationAsset;
     search(query: string, domain?: string, status?: AutomationAssetStatus | 'all', kind?: AutomationAssetKind): AutomationAssetSummary[];
     noteRun(id: string, ok: boolean): void;
-    noteTestResult(id: string, ok: boolean, url: string): void;
+    noteTestResult(id: string, ok: boolean, url: string, evidenceLevel?: EvidenceLevel): void;
     assertTarget(asset: AutomationAsset, url: string): void;
     private requireAsset;
     private prune;
