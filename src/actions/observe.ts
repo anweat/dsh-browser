@@ -28,7 +28,7 @@ const OBSERVE_TOPICS: Record<string, ActionTopic> = {
   links: {
     summary: 'fields of a links record',
     text: [
-      'One record per a[href] / area[href]: {text, href, locator, visible, target?}. href is absolute. locator is verified unique (role link + name, else the href, id, or testId); same-text links get distinct locators or ambiguous:true as for controls (browser_index({action:"observe.read.controls"})).',
+      'One record per a[href] / area[href]: {text, href, locator, visible, target?}. href is absolute. locator is verified unique (role link + name, else the href, id, or testId); same-text links get distinct locators or ambiguous:true as for controls (browser_index({action:"observe.read.controls"})). A secret-looking query value (token, secret, password, session, ...) shows as [redacted] and the link gets no href locator.',
     ].join('\n'),
   },
   tables: {

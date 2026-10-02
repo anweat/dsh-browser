@@ -145,3 +145,13 @@ test('a radio group lists one locator per option and a cross-origin frame become
   assert.equal(described.frames!.length, 1)
   assert.match(described.limits[0]!, /cross-origin or sandboxed iframe/)
 })
+
+test('fitObservation gives up the frame list last, and says so when it had to', () => {
+  const frames = Array.from({ length: 20 }, (_, index) => ({ framePath: [`iframe#f${index}`], crossOrigin: true, limitation: 'content not observed (cross-origin or sandboxed frame)' }))
+  const cut = fitObservation({ head: { url: 'u', frames }, controls: [control(1), control(2)] }, 2_000, { controls: 2 }, 50)
+  const record = { ...cut.record, truncation: cut.truncation }
+  assert.ok(bytes(record) <= 2_000, `${bytes(record)} bytes`)
+  assert.equal((cut.record.controls as unknown[]).length, 0, 'controls went before the frame list')
+  assert.ok((cut.record.frames as unknown[]).length > 0 && (cut.record.frames as unknown[]).length < 20)
+  assert.equal(cut.truncation!.omittedBySection.frames, 20 - (cut.record.frames as unknown[]).length)
+})

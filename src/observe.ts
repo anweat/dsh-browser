@@ -150,6 +150,8 @@ export interface RawScan {
   links: RawLink[]
   tables: RawTable[]
   frames: RawFrame[]
+  /** Iframes past the 50th, not listed at all. */
+  framesOmitted?: number
   counts: { controls: number; links: number; tables: number }
   shadowRoots: number
 }
@@ -346,6 +348,7 @@ export async function describeScan(page: any, raw: RawScan, request: ObserveRequ
   const crossOrigin = raw.frames.filter(frame => frame.crossOrigin).length
   if (crossOrigin) limits.push(`${crossOrigin} cross-origin or sandboxed iframe(s) are listed in frames but their content is not observed; act.* can still reach into one with its framePath if you know the element`)
   if (raw.frames.some(frame => frame.skipped)) limits.push('some iframes were not entered (nesting or count limit)')
+  if (raw.framesOmitted) limits.push(`${raw.framesOmitted} more iframe(s) were neither listed nor entered`)
 
   return {
     ...request.sections.includes('controls') ? { controls } : {},
@@ -397,7 +400,8 @@ function cutText(text: string, drop: number): string {
  */
 export function fitObservation(input: FitInput, maxBytes: number, found: { controls?: number; links?: number; tables?: number }, maxItems: number): { record: Json; truncation?: Truncation } {
   let text = input.text
-  const lists: Record<'controls' | 'links' | 'tables', Json[] | undefined> = {
+  const lists: Record<'controls' | 'links' | 'tables' | 'frames', Json[] | undefined> = {
+    frames: Array.isArray(input.head.frames) ? [...input.head.frames as Json[]] : undefined,
     controls: input.controls ? [...input.controls] : undefined,
     links: input.links ? [...input.links] : undefined,
     tables: input.tables ? input.tables.map(table => ({ ...table, rows: [...(table.rows as unknown[][])] })) : undefined,
@@ -405,6 +409,7 @@ export function fitObservation(input: FitInput, maxBytes: number, found: { contr
   const droppedText = { chars: 0 }
   const compose = (): Json => ({
     ...input.head,
+    ...lists.frames ? { frames: lists.frames } : {},
     ...text !== undefined ? { text } : {},
     ...lists.controls ? { controls: lists.controls } : {},
     ...lists.links ? { links: lists.links } : {},
@@ -429,6 +434,8 @@ export function fitObservation(input: FitInput, maxBytes: number, found: { contr
     const sizes: { name: string; size: number }[] = []
     if (text !== undefined && text.length > 0) sizes.push({ name: 'content', size: bytes(text) })
     for (const name of ['controls', 'links', 'tables'] as const) if (lists[name]?.length) sizes.push({ name, size: bytes(lists[name]) })
+    // The frame list is the last thing to give up: it explains what was not covered.
+    if (!sizes.length && lists.frames?.length) sizes.push({ name: 'frames', size: bytes(lists.frames) })
     if (!sizes.length) break
     sizes.sort((a, b) => b.size - a.size)
     const target = sizes[0]!
@@ -440,7 +447,7 @@ export function fitObservation(input: FitInput, maxBytes: number, found: { contr
       droppedText.chars += before - text.length
       continue
     }
-    const list = lists[target.name as 'controls' | 'links' | 'tables']!
+    const list = lists[target.name as 'controls' | 'links' | 'tables' | 'frames']!
     let freed = 0
     while (freed < step && list.length) {
       if (target.name === 'tables') {
@@ -463,6 +470,8 @@ export function fitObservation(input: FitInput, maxBytes: number, found: { contr
     const listed = lists[name]
     if (listed && found[name] !== undefined && found[name]! > listed.length) omittedBySection[name] = found[name]! - listed.length
   }
+  const framesTotal = Array.isArray(input.head.frames) ? (input.head.frames as Json[]).length : 0
+  if (lists.frames && lists.frames.length < framesTotal) omittedBySection.frames = framesTotal - lists.frames.length
   if (lists.tables) {
     if (found.tables !== undefined && found.tables > lists.tables.length) omittedBySection.tables = found.tables - lists.tables.length
     const rowsOmitted = lists.tables.reduce((sum, table) => sum + Math.max(0, Number(table.totalRows) - (table.rows as unknown[]).length), 0)

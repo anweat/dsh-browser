@@ -36,6 +36,7 @@
         field(form, 'Bio', 'textarea', { id: 'bio', name: 'bio', maxlength: '200', value: 'Hello there' })
         field(form, 'Password', 'input', { id: 'password', name: 'password', type: 'password', value: 'hunter2-secret' })
         field(form, 'Reference', 'input', { id: 'reference', name: 'reference', type: 'text', value: 'a8F3kd92LzQw0Xv7Bn41Tt65' })
+        field(form, 'Payment ref', 'input', { id: 'payref', name: 'payref', type: 'text', value: '4111 1111 1111 1111' })
         el('input', { id: 'csrf', name: 'csrf_token', type: 'hidden', value: 'csrf-9f8e7d6c5b4a' }, form)
         var country = field(form, 'Country', 'select', { id: 'country', name: 'country', required: true })
         el('option', { value: '' }, country, 'Choose…')

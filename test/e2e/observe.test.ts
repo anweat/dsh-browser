@@ -54,9 +54,9 @@ describe('dsh-browser structured observation in a real browser', { skip: detecti
     })
 
     it('lists controls that script inserted after load, each with role, name, type, actions, and source', async () => {
-      assert.equal(controls.length, 28)
+      assert.equal(controls.length, 29)
       const result = await observe({ sections: ['controls'] })
-      assert.equal(result.counts.controls, 28)
+      assert.equal(result.counts.controls, 29)
       assert.equal(result.truncation, undefined)
       assert.equal(result.text, undefined, 'content was not asked for')
       assert.match(result.targetId, /^t\d+$/)
@@ -175,16 +175,18 @@ describe('dsh-browser structured observation in a real browser', { skip: detecti
 
     it('values are withheld by default; includeValues returns plain fields and never password, hidden, or token-like ones', async () => {
       const text = JSON.stringify((await observe({ sections: ['controls'] })))
-      for (const secret of ['hunter2-secret', 'csrf-9f8e7d6c5b4a', 'a8F3kd92LzQw0Xv7Bn41Tt65', 'ada@example.com']) assert.ok(!text.includes(secret), `${secret} must not appear without includeValues`)
+      for (const secret of ['hunter2-secret', 'csrf-9f8e7d6c5b4a', 'a8F3kd92LzQw0Xv7Bn41Tt65', '4111 1111 1111 1111', 'ada@example.com']) assert.ok(!text.includes(secret), `${secret} must not appear without includeValues`)
       assert.ok(!controls.some(control => 'value' in control))
 
       const withValues = (await observe({ sections: ['controls'], includeValues: true })).controls as Json[]
       const raw = JSON.stringify(withValues)
-      for (const secret of ['hunter2-secret', 'csrf-9f8e7d6c5b4a', 'a8F3kd92LzQw0Xv7Bn41Tt65']) assert.ok(!raw.includes(secret), `${secret} must never be returned`)
+      for (const secret of ['hunter2-secret', 'csrf-9f8e7d6c5b4a', 'a8F3kd92LzQw0Xv7Bn41Tt65', '4111 1111 1111 1111']) assert.ok(!raw.includes(secret), `${secret} must never be returned`)
       const password = byName(withValues, 'Password')
       assert.deepEqual([password.hasValue, password.sensitive, 'value' in password], [true, true, false])
       const reference = byName(withValues, 'Reference')
       assert.deepEqual([reference.hasValue, reference.sensitive, 'value' in reference], [true, true, false], 'a token-looking value is withheld although the field is named innocently')
+      const payment = byName(withValues, 'Payment ref')
+      assert.deepEqual([payment.hasValue, payment.sensitive, 'value' in payment], [true, true, false], 'a card number is withheld whatever the field is called')
       const csrf = withValues.find(control => control.type === 'hidden')!
       assert.deepEqual([csrf.hasValue, 'value' in csrf], [true, false])
       assert.equal(byName(withValues, 'Email').value, 'ada@example.com')
@@ -240,6 +242,11 @@ describe('dsh-browser structured observation in a real browser', { skip: detecti
       const everything = await observe({ sections: ['controls'] })
       const top = await observe({ sections: ['controls'], region: { x: 0, y: 0, width: 4000, height: 60 } })
       assert.ok(top.counts.controls < everything.counts.controls && top.counts.controls >= 1, `region keeps a subset (${top.counts.controls} of ${everything.counts.controls})`)
+
+      // A scope with the default sections reads that element's text, nothing else.
+      const textOnly = await observe({ locator: { selector: '#status' } })
+      assert.equal(textOnly.text, 'Ready')
+      assert.equal(textOnly.controls, undefined)
 
       const missing = await harness.action(S, 'observe.read', { sections: ['controls'], locator: { selector: '#no-such-container' }, timeoutMs: 300 })
       assert.equal(missing.ok, false)
@@ -337,12 +344,17 @@ describe('dsh-browser structured observation in a real browser', { skip: detecti
       await harness.result(S, 'target.open', { url: url('observe-tables.html') })
       const result = await observe({ sections: ['links'] })
       const links = result.links as Json[]
-      assert.equal(result.counts.links, 5)
-      assert.deepEqual(links.map(link => link.text), ['Home', 'Form page', 'Docs', 'Docs', ''])
+      assert.equal(result.counts.links, 6)
+      assert.deepEqual(links.map(link => link.text), ['Home', 'Form page', 'Docs', 'Docs', 'Reset link', ''])
       assert.equal(links[1]!.target, '_blank')
       assert.equal(links[2]!.href, url('search.html?q=1'))
       assert.ok(links.every(link => link.locator && !link.ambiguous))
       assert.notDeepEqual(links[2]!.locator, links[3]!.locator)
+      // A secret in a link's query is not echoed, neither in href nor in a locator built from it.
+      const reset = links[4]!
+      assert.equal(reset.href, url('index.html?reset_token=[redacted]&page=2'))
+      assert.ok(!JSON.stringify(reset).includes('s3cr3t-value-123'))
+      assert.deepEqual(reset.locator, { role: 'link', name: 'Reset link', exact: true })
       const second = await harness.result(S, 'act.click', { locator: links[3]!.locator })
       assert.equal(second.url, url('search.html?q=2'))
     })

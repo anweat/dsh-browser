@@ -35,7 +35,7 @@ export const IDENTITY_SOURCE = String.raw`(els) => {
 export const OBSERVE_SOURCE = String.raw`(root, opts) => {
   const SYM = Symbol.for('dsh.observe')
   const MAX = opts.maxItems
-  const out = { controls: [], links: [], tables: [], frames: [], counts: { controls: 0, links: 0, tables: 0 }, shadowRoots: 0 }
+  const out = { controls: [], links: [], tables: [], frames: [], framesOmitted: 0, counts: { controls: 0, links: 0, tables: 0 }, shadowRoots: 0 }
   let nextId = 0
   const items = []
   const radioGroups = new Map()
@@ -138,8 +138,16 @@ export const OBSERVE_SOURCE = String.raw`(root, opts) => {
   }
 
   // ---- sensitive values ----
-  const SENSITIVE = /(^|[^a-z])(pass(word|wd|phrase|code)?|pwd|secret|token|api[-_ ]?key|credential|bearer|jwt|otp|csrf|xsrf|session[-_ ]?(id|key)?|ssn|cvv|cvc|private[-_ ]?key|authori[sz]ation|auth[-_ ]?(token|key|code))([^a-z]|$)/i
+  const SENSITIVE = /(^|[^a-z])(pass(word|wd|phrase|code)?|pwd|secret|token|api[-_ ]?key|credential|bearer|jwt|otp|csrf|xsrf|session[-_ ]?(id|key)?|ssn|cvv|cvc|private[-_ ]?key|authori[sz]ation|auth[-_ ]?(token|key|code)|one[-_ ]?time[-_ ]?code|card[-_ ]?(number|num|no)|cc[-_ ]?(number|num|csc|exp)|iban|account[-_ ]?(number|num))([^a-z]|$)/i
+  const cardLike = (v) => {
+    const digits = String(v).replace(/[ -]/g, '')
+    if (!/^\d{13,19}$/.test(digits)) return false
+    let sum = 0
+    for (let i = 0; i < digits.length; i++) { let d = Number(digits[digits.length - 1 - i]); if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9 } sum += d }
+    return sum % 10 === 0
+  }
   const tokenLike = (v) => {
+    if (cardLike(v)) return true
     if (!v || v.length < 20 || /\s/.test(v)) return false
     if (/^eyJ[\w-]+\.[\w-]+\.[\w-]*$/.test(v)) return true
     return /^[A-Za-z0-9_\-+\/=.~]+$/.test(v) && /\d/.test(v) && /[A-Za-z]/.test(v)
@@ -190,6 +198,7 @@ export const OBSERVE_SOURCE = String.raw`(root, opts) => {
     return cssPath(node)
   }
   const enterFrame = (node, frame) => {
+    if (out.frames.length >= 50) { out.framesOmitted++; return }
     let doc = null
     try { doc = node.contentDocument } catch (e) { doc = null }
     const selector = frameSelector(node, frame)
@@ -334,6 +343,11 @@ export const OBSERVE_SOURCE = String.raw`(root, opts) => {
     return ['click']
   }
 
+  // A link whose address carries a secret in its query shows the value as [redacted] and gets no href-based locator.
+  const QUERY_PARAM = /([?&#;])([^=&#;]+)=([^&#;]*)/g
+  const redactHref = (h) => h.replace(QUERY_PARAM, (m, d, k) => (SENSITIVE.test(camel(k)) ? d + k + '=[redacted]' : m))
+  const hrefHasSecret = (h) => { let hit = false; h.replace(QUERY_PARAM, (m, d, k) => { if (SENSITIVE.test(camel(k))) hit = true; return m }); return hit }
+
   const candidatesFor = (el, role, name) => {
     const c = []
     const tag = el.localName
@@ -350,7 +364,7 @@ export const OBSERVE_SOURCE = String.raw`(root, opts) => {
     }
     const ph = attr(el, 'placeholder')
     if (ph && (tag === 'input' || tag === 'textarea')) c.push({ selector: tag + '[placeholder="' + cssStr(ph) + '"]' })
-    if (tag === 'a' && has(el, 'href')) c.push({ selector: 'a[href="' + cssStr(attr(el, 'href')) + '"]' })
+    if (tag === 'a' && has(el, 'href') && !hrefHasSecret(attr(el, 'href'))) c.push({ selector: 'a[href="' + cssStr(attr(el, 'href')) + '"]' })
     return c
   }
 
@@ -429,7 +443,7 @@ export const OBSERVE_SOURCE = String.raw`(root, opts) => {
     rec.text = nameOf(el, 'link')
     let href = ''
     try { href = typeof el.href === 'string' ? el.href : String(el.href && el.href.baseVal || '') } catch (e) {}
-    rec.href = cut(href || attr(el, 'href') || '', 500)
+    rec.href = cut(redactHref(href || attr(el, 'href') || ''), 500)
     rec.visible = isVisible(el)
     if (attr(el, 'target') === '_blank') rec.target = '_blank'
     rec.cands = candidatesFor(el, 'link', rec.text)
