@@ -7,6 +7,10 @@
 import { RecipeAssertionError, RecipeValidationError, abortedByDeadline, isTimeoutError, mapError, neverReachedElement } from './actions/errors.ts'
 import type { ErrorCode } from './actions/types.ts'
 import type { LocatorAmbiguity } from './locator.ts'
+import {
+  assertGotoAllowed, coerceOutput, evaluatePostconditions, runStepV2, validateRecipeV2,
+  type BrowserRecipeStepV2, type RecipeV2Options,
+} from './automation-v2.ts'
 
 export const WAIT_CONDITIONS = ['selector', 'text', 'load', 'time'] as const
 export const EXTRACT_MODES = ['text', 'html', 'links', 'attribute'] as const
@@ -25,9 +29,14 @@ export type BrowserRecipeStep =
   | { type: 'assert'; selector?: string; text?: string; timeoutMs?: number }
   | { type: 'screenshot' }
 
+/** Every step type a run can report: v1 and v2 names. */
+export type RecipeStepType = BrowserRecipeStep['type'] | BrowserRecipeStepV2['type']
+/** A step of either schema version; `schemaVersion` of the asset (or run) says which. */
+export type AnyRecipeStep = BrowserRecipeStep | BrowserRecipeStepV2
+
 export interface RecipeStepResult {
   step: number
-  action: BrowserRecipeStep['type']
+  action: RecipeStepType
   ok: boolean
   /** For extract and screenshot steps: the index of this step's value in `outputs`. The value itself is stored once, there. */
   output?: number
@@ -40,7 +49,7 @@ export type RecipeEffects = 'none' | 'observed' | 'unknown'
 export interface RecipeFailedStep {
   /** 1-based, the same numbering as {@link RecipeStepResult.step}. */
   index: number
-  action: BrowserRecipeStep['type'] | 'userscript'
+  action: RecipeStepType | 'userscript' | 'postcondition'
   errorCode: ErrorCode
   /** The original Playwright or service message, unchanged. */
   message: string
@@ -51,7 +60,10 @@ export interface RecipeFailedStep {
 export interface RecipeOutput {
   step: number
   action: 'extract' | 'screenshot'
-  value: string
+  /** v2 `extract` with `as`: the output's name. */
+  name?: string
+  /** The extracted text or screenshot path; typed (number, parsed JSON) when the asset's outputSchema says so. */
+  value: unknown
 }
 
 /**
@@ -78,14 +90,17 @@ export interface RecipeRunResult {
   legacyFallback?: true
 }
 
-export interface RunRecipeOptions {
+export interface RunRecipeOptions extends RecipeV2Options {
   /** Stored v1 assets keep their old behaviour for an unknown extract mode instead of being rejected. */
   legacy?: boolean
+  /** 2: steps use LocatorSpec (strict), goto/clear exist, and postconditions/outputSchema apply. Default 1 (`.first()`, selectors). */
+  schemaVersion?: 1 | 2
 }
 
-const READ_ONLY_ACTIONS = new Set<BrowserRecipeStep['type']>(['wait', 'extract', 'assert', 'screenshot'])
+/** Steps that never change page or remote state. `goto` is navigation limited to the recipe's domains, like target.open. */
+export const READ_ONLY_ACTIONS = new Set<string>(['wait', 'extract', 'assert', 'screenshot', 'goto'])
 /** Steps that change page or remote state. A failure here may have partly taken effect. */
-const EFFECT_ACTIONS = new Set<BrowserRecipeStep['type']>(['fill', 'type', 'click', 'press', 'select', 'check'])
+const EFFECT_ACTIONS = new Set<string>(['fill', 'clear', 'type', 'click', 'press', 'select', 'check'])
 
 function finite(value: number | undefined, fallback: number, min: number, max: number, label: string): number {
   const resolved = value ?? fallback
@@ -189,7 +204,7 @@ function validateRecipeShape(steps: readonly BrowserRecipeStep[], options: RunRe
   }
 }
 
-export function recipeNeedsApproval(steps: readonly BrowserRecipeStep[]): boolean {
+export function recipeNeedsApproval(steps: readonly AnyRecipeStep[]): boolean {
   return steps.some(step => !READ_ONLY_ACTIONS.has(step.type))
 }
 
@@ -280,24 +295,30 @@ async function runStep(page: any, step: BrowserRecipeStep, captureScreenshot: ()
  */
 export async function runRecipe(
   page: any,
-  steps: readonly BrowserRecipeStep[],
+  steps: readonly AnyRecipeStep[],
   captureScreenshot: () => Promise<string>,
   signal?: AbortSignal,
   options: RunRecipeOptions = {},
 ): Promise<RecipeRunResult> {
-  validateRecipe(steps, options)
+  const v2 = options.schemaVersion === 2
+  if (v2) {
+    // Nothing runs when a goto leaves the allowed domains or a step is malformed.
+    assertGotoAllowed(steps as readonly BrowserRecipeStepV2[], options)
+    validateRecipeV2(steps as readonly BrowserRecipeStepV2[])
+  } else validateRecipe(steps as readonly BrowserRecipeStep[], options)
   const completedSteps: RecipeStepResult[] = []
   const outputs: RecipeOutput[] = []
-  const assertTotal = steps.filter(step => step.type === 'assert').length
-  let assertPassed = 0
-  let assertFailed = false
+  const postconditions = v2 ? options.postconditions ?? [] : []
+  const verifiers = steps.filter(step => step.type === 'assert').length + postconditions.length
+  let verified = 0
+  let validationFailed = false
   let effectsObserved = false
   let effectsUnknown = false
-  const legacyFallback = options.legacy === true && hasLegacyExtractMode(steps)
+  const legacyFallback = !v2 && options.legacy === true && hasLegacyExtractMode(steps as readonly BrowserRecipeStep[])
 
   const finish = (executionStatus: RecipeExecutionStatus, failedStep?: RecipeFailedStep, message?: string): RecipeRunResult => ({
     executionStatus,
-    validationStatus: assertFailed ? 'failed' : (assertTotal > 0 && assertPassed === assertTotal ? 'passed' : 'not_checked'),
+    validationStatus: validationFailed ? 'failed' : (verifiers > 0 && verified === verifiers ? 'passed' : 'not_checked'),
     completedSteps,
     ...failedStep ? { failedStep } : {},
     effects: effectsUnknown ? 'unknown' : (effectsObserved ? 'observed' : 'none'),
@@ -321,11 +342,13 @@ export async function runRecipe(
     const step = steps[index]!
     let value: string | undefined
     try {
-      value = await runStep(page, step, captureScreenshot)
+      value = v2
+        ? await runStepV2(page, step as BrowserRecipeStepV2, { ...options, captureScreenshot })
+        : await runStep(page, step as BrowserRecipeStep, captureScreenshot)
     } catch (error) {
       const body = mapError(error, 'recipe.step', { signal })
       const effectful = EFFECT_ACTIONS.has(step.type)
-      if (step.type === 'assert' && body.code === 'VALIDATION_FAILED') assertFailed = true
+      if (step.type === 'assert' && body.code === 'VALIDATION_FAILED') validationFailed = true
       // The element was never found (or the locator was ambiguous / the step malformed): the action did not start, so nothing happened.
       const neverStarted = body.code === 'LOCATOR_AMBIGUOUS' || body.code === 'INVALID_RECIPE' || neverReachedElement(error)
       // Otherwise the action may have partly happened.
@@ -337,11 +360,40 @@ export async function runRecipe(
       return finish('failed', failedStep, summary + (effectful && neverStarted ? ' The step did not start (no element was acted on), so it had no effect.' : ''))
     }
     if (EFFECT_ACTIONS.has(step.type)) effectsObserved = true
-    if (step.type === 'assert') assertPassed += 1
+    if (step.type === 'assert') verified += 1
     const produced = value !== undefined && (step.type === 'extract' || step.type === 'screenshot')
-    if (produced) outputs.push({ step: index + 1, action: step.type as 'extract' | 'screenshot', value: value! })
+    if (produced) {
+      const name = v2 && step.type === 'extract' ? (step as BrowserRecipeStepV2).as : undefined
+      outputs.push({ step: index + 1, action: step.type as 'extract' | 'screenshot', ...name ? { name } : {}, value: value! })
+    }
     completedSteps.push({ step: index + 1, action: step.type, ok: true, ...produced ? { output: outputs.length - 1 } : {} })
   }
   if (signal?.aborted) return stopped(undefined)
+
+  if (v2) {
+    // Declared output types: a value that does not convert is a validation failure, not an execution failure.
+    const problems: string[] = []
+    for (const spec of options.outputSchema ?? []) {
+      const output = outputs.find(entry => entry.name === spec.name)
+      if (!output) continue
+      const converted = coerceOutput(spec, output.value)
+      if (converted.ok) output.value = converted.value
+      else problems.push(converted.problem)
+    }
+    const checked = await evaluatePostconditions(page, postconditions, outputs, signal)
+    if (checked.error !== undefined) {
+      const body = mapError(checked.error, 'recipe.postcondition', { signal })
+      const failedStep: RecipeFailedStep = { index: steps.length + 1, action: 'postcondition', errorCode: body.code, message: body.message }
+      return finish(body.code === 'CANCELLED' ? 'cancelled' : 'failed', failedStep, 'A postcondition could not be checked (' + body.code + '); the steps themselves ran and are not rolled back.')
+    }
+    if (signal?.aborted) return stopped(undefined)
+    verified += postconditions.length - checked.failures.length
+    const failures = [...problems, ...checked.failures]
+    if (failures.length) {
+      validationFailed = true
+      const message = failures.join(' | ')
+      return finish('completed', { index: steps.length + 1, action: 'postcondition', errorCode: 'VALIDATION_FAILED', message }, 'All ' + steps.length + ' steps ran, but ' + failures.length + ' of the recipe\'s postconditions or output types did not hold, so the result is not confirmed.')
+    }
+  }
   return finish('completed')
 }
