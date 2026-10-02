@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Popup Child</title></head>
+<body>
+  <h1>Child page</h1>
+  <button id="ping" type="button">Ping</button>
+  <button id="close-me" type="button">Close me</button>
+  <p id="pings">Pings: 0</p>
+  <script>
+    var pings = 0
+    document.getElementById('ping').addEventListener('click', function () { pings += 1; document.getElementById('pings').textContent = 'Pings: ' + pings })
+    document.getElementById('close-me').addEventListener('click', function () { window.close() })
+  </script>
+</body>
+</html>

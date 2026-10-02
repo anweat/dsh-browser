@@ -83,4 +83,57 @@ describe('dsh-browser strict locating in a real browser', { skip: detection.ok ?
     const index = await harness.index({ action: 'act.type' })
     assert.match(index, /act\.type/)
   })
+  it('a popup joins the session page list; target.select switches to it, and closing it falls back to the opener', async () => {
+    const S2 = 'e2e-locating-other'
+    await harness.result(S, 'target.close')
+    await harness.result(S, 'target.open', { url: url('popup-opener.html') })
+    const single = await harness.result(S, 'target.list')
+    // Ids are never reused within a session, even after target.close, so a stale id cannot alias a new page.
+    assert.equal(single.targets.length, 1)
+    assert.deepEqual([single.targets[0].active, single.targets[0].title], [true, 'E2E Popup Opener'])
+    const opener: string = single.targets[0].id
+
+    await harness.result(S, 'act.click', { locator: { role: 'link', name: 'Open child' } })
+    let targets: any[] = []
+    for (let attempt = 0; attempt < 20 && targets.length < 2; attempt += 1) {
+      targets = (await harness.result(S, 'target.list')).targets
+      if (targets.length < 2) await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.equal(targets.length, 2, 'the popup is in the list')
+    assert.equal(targets.find(target => target.active).id, opener, 'a popup does not take over the active page by itself')
+    const child = targets.find(target => target.id !== opener)
+    assert.match(child.url, /popup-child\.html$/)
+
+    // Actions still go to the opener until the model selects the popup.
+    assert.match((await harness.result(S, 'observe.read')).text, /Opener page/)
+    const selected = await harness.result(S, 'target.select', { id: child.id })
+    assert.equal(selected.title, 'E2E Popup Child')
+    assert.match(selected.text, /Pings: 0/)
+    assert.match((await harness.result(S, 'act.click', { selector: '#ping' })).text, /Pings: 1/)
+    assert.match((await harness.result(S, 'observe.read')).text, /Child page/)
+    assert.equal((await harness.result(S, 'target.list')).targets.find((target: any) => target.active).id, child.id)
+
+    // Another session sees none of this.
+    await harness.result(S2, 'target.open', { url: url('index.html') })
+    assert.equal((await harness.result(S2, 'target.list')).targets.length, 1)
+    assert.match((await harness.result(S2, 'observe.read')).text, /DSH Browser Fixture/)
+
+    // Back to the opener, then close the popup from inside: the session keeps working on the opener.
+    await harness.result(S, 'target.select', { id: opener })
+    assert.match((await harness.result(S, 'observe.read')).text, /Opener page/)
+    await harness.result(S, 'target.select', { id: child.id })
+    await harness.result(S, 'act.click', { selector: '#close-me' })
+    let after: any[] = []
+    for (let attempt = 0; attempt < 20 && after.length !== 1; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      after = (await harness.result(S, 'target.list')).targets
+    }
+    assert.deepEqual(after.map(target => [target.id, target.active]), [[opener, true]])
+    assert.match((await harness.result(S, 'observe.read')).text, /Opener page/, 'the active page fell back to the opener')
+
+    const stale = await harness.action(S, 'target.select', { id: child.id })
+    assert.equal(stale.ok, false)
+    assert.equal(stale.error.code, 'TARGET_CLOSED')
+    await harness.result(S2, 'target.close')
+  })
 })

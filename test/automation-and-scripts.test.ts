@@ -118,12 +118,12 @@ test('approval policy asks for arbitrary userscripts, OpenCLI, and mutating reci
 })
 
 test('automation modes expose predictable tool sets and retain validation when approval is disabled', () => {
-  // The 30 former tools map onto 30 actions, plus target.list.
-  assert.equal(ALL_BROWSER_ACTION_NAMES.length, 33)
-  assert.equal(browserActionsForMode('read-only').length, 18)
-  assert.equal(browserActionsForMode('standard').length, 33)
-  assert.equal(browserActionsForMode('autonomous').length, 33)
-  assert.equal(browserActionsForMode('unrestricted').length, 33)
+  // The 30 former tools map onto 30 actions, plus target.list, act.type, act.clear and target.select.
+  assert.equal(ALL_BROWSER_ACTION_NAMES.length, 34)
+  assert.equal(browserActionsForMode('read-only').length, 19)
+  assert.equal(browserActionsForMode('standard').length, 34)
+  assert.equal(browserActionsForMode('autonomous').length, 34)
+  assert.equal(browserActionsForMode('unrestricted').length, 34)
   assert.equal(browserActionsForMode('read-only').includes('script.run_userscript'), false)
   assert.equal(browserActionsForMode('read-only').includes('automation.run_recipe'), true)
   assert.equal(browserActionsForMode('read-only').includes('automation.search'), true)
@@ -134,8 +134,8 @@ test('automation modes expose predictable tool sets and retain validation when a
   // The model-visible tool names are the surface, not the actions.
   assert.deepEqual(configuredBrowserTools('read-only', { modelDevelopmentEnabled: true }), ['browser_index', 'browser_call'])
   assert.deepEqual(configuredBrowserTools('standard', { modelDevelopmentEnabled: true }, false), [])
-  assert.equal(configuredBrowserTools('standard', { modelDevelopmentEnabled: true }, true, 'flat').length, 33)
-  assert.equal(configuredBrowserTools('read-only', { modelDevelopmentEnabled: true }, true, 'flat').length, 18)
+  assert.equal(configuredBrowserTools('standard', { modelDevelopmentEnabled: true }, true, 'flat').length, 34)
+  assert.equal(configuredBrowserTools('read-only', { modelDevelopmentEnabled: true }, true, 'flat').length, 19)
 
   assert.equal(browserPolicyDecision('act.click', { selector: 'button' }, 'read-only').kind, 'deny')
   assert.equal(browserPolicyDecision('act.click', { selector: 'button' }, 'standard').kind, 'ask')
@@ -374,7 +374,7 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     assert.equal(status.usageGovernor.totalRuns > 0, true)
     assert.equal(status.automationMode, 'standard')
     assert.deepEqual(status.exposedTools, ['browser_index', 'browser_call'])
-    assert.equal(status.exposedActions.length, 33)
+    assert.equal(status.exposedActions.length, 34)
     assert.equal(status.directInteractionPolicy, 'ask')
     assert.equal(status.pageEvaluatePolicy, 'ask')
     assert.equal(status.fileUploadPolicy, 'ask')

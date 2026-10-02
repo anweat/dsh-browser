@@ -80,6 +80,8 @@ export interface InteractiveState {
   title: string
   text: string
   screenshotPath?: string
+  /** The page the action ran on closed itself (a popup's own close button): url/title/text describe the page the session fell back to, or are empty. */
+  closedPage?: true
 }
 
 /** The page state after a recipe, plus what the run did ({@link RecipeRunResult}). */
@@ -323,7 +325,12 @@ function redactCaptureUrl(value: string): string {
  */
 interface SessionState {
   context?: any
+  /** The ACTIVE page: the one every action targets. Always one of `pages` while set. */
   page?: any
+  /** Every open page of this session's context (the page it opened plus popups), in the order they appeared. */
+  pages: { id: string; page: any }[]
+  /** Counter behind the `t1`, `t2`, ... target ids of this session. */
+  nextTarget: number
   profile?: ResolvedAuthProfile
   rulePack?: ResolvedRulePack
   captureConsole: boolean
@@ -336,6 +343,8 @@ interface SessionState {
 
 function newSessionState(): SessionState {
   return {
+    pages: [],
+    nextTarget: 1,
     captureConsole: false,
     captureNetwork: false,
     capturedConsole: [],
@@ -474,6 +483,7 @@ export class BrowserService {
     const page = state.page
     const context = state.context
     state.page = undefined
+    state.pages = []
     state.context = undefined
     state.profile = undefined
     state.rulePack = undefined
@@ -964,16 +974,27 @@ export class BrowserService {
       const browser = await this.ensure()
       state.context = await browser.newContext(storageStateOptions(this.config.storageStatePath, 'global'))
     }
+    // A popup (window.open, target=_blank) joins this session's page list; it never takes over the active page by itself.
+    state.context.on('page', (opened: any) => { if (state.context) this.trackPage(state, opened) })
     state.page = await state.context.newPage()
-    this.attachCapture(state, state.page)
+    this.trackPage(state, state.page)
     return state.page
   }
 
-  private attachCapture(state: SessionState, page: any): void {
-    const release = () => {
-      // Only clear this session's bucket, and only if the page is still the
-      // one we attached to: another session must not be affected.
+  /**
+   * Add a page to the session's list and wire its capture and close handling.
+   * Idempotent: the context 'page' event and the explicit call both land here.
+   */
+  private trackPage(state: SessionState, page: any): void {
+    if (state.pages.some(entry => entry.page === page)) return
+    state.pages.push({ id: 't' + state.nextTarget++, page })
+    const gone = () => {
+      state.pages = state.pages.filter(entry => entry.page !== page)
+      // A page that was not the active one just leaves the list.
       if (state.page !== page) return
+      // The active page closed: fall back to another open page of the same context before giving up the session.
+      const fallback = state.pages[0]?.page
+      if (fallback && !fallback.isClosed?.()) { state.page = fallback; return }
       const context = state.context
       const profile = state.profile
       state.page = undefined
@@ -982,8 +1003,8 @@ export class BrowserService {
       state.rulePack = undefined
       if (context) void this.persistAndClose({ context, ...profile ? { profile } : {} }).catch(() => {})
     }
-    page.on('close', release)
-    page.on('crash', release)
+    page.on('close', gone)
+    page.on('crash', gone)
     page.on('console', (message: any) => {
       if (!state.captureConsole) return
       const location = message.location?.() as { url?: string } | undefined
@@ -1106,8 +1127,13 @@ export class BrowserService {
   async click(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     await this.onTarget(page, target, locator => locator.click({ timeout: boundedTimeout(opts.timeoutMs, 'act.click timeoutMs') }))
-    if (opts.waitMs !== undefined) await page.waitForTimeout(opts.waitMs)
-    else await page.waitForTimeout(500)
+    // The click may have closed the page it hit (a popup's own close button). That is a success, not TARGET_CLOSED.
+    await page.waitForTimeout(opts.waitMs ?? 500).catch((error: unknown) => { if (!page.isClosed()) throw error })
+    if (page.isClosed()) {
+      const fallback = this.peek(opts.session)?.page
+      if (!fallback || fallback.isClosed()) return { url: '', title: '', text: '', closedPage: true }
+      return { ...await this.readState(fallback, true), closedPage: true }
+    }
     return this.readState(page, true)
   }
 
@@ -1245,6 +1271,35 @@ export class BrowserService {
     }
   }
 
+  /**
+   * The pages this session holds: the one it opened plus any popup that page
+   * (or a later one) opened in the same context. Pure query: it never creates
+   * a bucket and never changes the active page.
+   */
+  async listTargets(opts: { session?: string } = {}): Promise<{ targets: { id: string; url: string; title: string; active: boolean }[] }> {
+    const state = this.peek(opts.session)
+    if (!state || !this.browserConnected()) return { targets: [] }
+    const targets: { id: string; url: string; title: string; active: boolean }[] = []
+    for (const entry of [...state.pages]) {
+      if (entry.page.isClosed()) continue
+      let title = ''
+      try { title = String(await entry.page.title()).slice(0, 200) } catch { /* a page that is mid-navigation has no title yet */ }
+      targets.push({ id: entry.id, url: entry.page.url(), title, active: entry.page === state.page })
+    }
+    return { targets }
+  }
+
+  /** Make one of this session's pages the active page: every later action, read, and screenshot targets it. */
+  async selectTarget(id: string, opts: { session?: string } = {}): Promise<InteractiveState & { id: string }> {
+    const state = this.peek(opts.session)
+    const entry = state?.pages.find(candidate => candidate.id === id && !candidate.page.isClosed())
+    if (!state || !entry) throw new Error(`no active page with target id ${JSON.stringify(id)} in this session; target.list shows the open pages`)
+    state.page = entry.page
+    await entry.page.bringToFront().catch(() => {})
+    await entry.page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {})
+    return { id, ...await this.readState(entry.page, false) }
+  }
+
   async scroll(deltaY: number, opts: { waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
     await page.mouse?.wheel(0, deltaY || 2000).catch(() => {})
@@ -1331,6 +1386,7 @@ export class BrowserService {
     const context = session.context
     const profile = session.profile
     session.page = undefined
+    session.pages = []
     session.context = undefined
     session.profile = undefined
     session.rulePack = undefined
