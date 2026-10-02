@@ -120,7 +120,7 @@ test('a legitimately empty result is told apart from a failed extraction', async
   assert.equal(empty.executionStatus, 'completed')
   assert.equal(empty.failedStep, undefined)
   assert.deepEqual(empty.outputs, [{ step: 1, action: 'extract', value: '' }])
-  assert.deepEqual(empty.completedSteps, [{ step: 1, action: 'extract', ok: true, value: '' }])
+  assert.deepEqual(empty.completedSteps, [{ step: 1, action: 'extract', ok: true, output: 0 }], 'the value lives once, in outputs; the step points at it')
 
   const missing = await runRecipe(fakePage({ '#nope': { innerText: () => { throw timeout('innerText') } } }).page, [{ type: 'extract', selector: '#nope', mode: 'text' }], shot)
   assert.equal(missing.executionStatus, 'failed')
@@ -158,7 +158,7 @@ test('an assert that fails for a reason other than "never appeared" keeps its ow
   assert.equal(run.validationStatus, 'not_checked')
 })
 
-test('a side-effecting step that times out is outcome_unknown, while a read-only step that times out is a plain failure', async () => {
+test('a side-effecting step whose locator never matched did nothing: failed, effects none, LOCATOR_NOT_FOUND', async () => {
   for (const [step, handler] of [
     [{ type: 'click', selector: '#pay' }, 'click'],
     [{ type: 'fill', selector: '#pay', value: '1' }, 'fill'],
@@ -168,23 +168,47 @@ test('a side-effecting step that times out is outcome_unknown, while a read-only
     [{ type: 'type', selector: '#pay', value: 'a' }, 'pressSequentially'],
   ] as [BrowserRecipeStep, string][]) {
     const run = await runRecipe(fakePage({ '#pay': { [handler]: () => { throw timeout(handler) } } }).page, [step], shot)
-    assert.equal(run.executionStatus, 'outcome_unknown', step.type)
-    assert.equal(run.effects, 'unknown', step.type)
-    assert.equal(run.failedStep?.errorCode, 'LOCATOR_NOT_FOUND', 'the specific cause is kept next to the unknown outcome')
+    assert.equal(run.executionStatus, 'failed', step.type)
+    assert.equal(run.effects, 'none', step.type)
+    assert.equal(run.failedStep?.errorCode, 'LOCATOR_NOT_FOUND', step.type)
+    assert.match(run.message!, /did not start/, step.type)
+    assert.match(run.failedStep!.message, /Timeout 1000ms exceeded/, 'the Playwright message is kept')
   }
-  // A timeout without a call log (for example a navigation-style timeout) is DEADLINE but equally unknown.
+  const earlier = await runRecipe(fakePage({ '#pay': { click: () => { throw timeout('click') } } }).page, [{ type: 'fill', selector: '#q', value: 'a' }, { type: 'click', selector: '#pay' }], shot)
+  assert.equal(earlier.executionStatus, 'failed')
+  assert.equal(earlier.effects, 'observed', 'the earlier fill did take effect; only the missing click did nothing')
+  assert.equal(earlier.completedSteps.length, 1)
+  assert.equal(earlier.failedStep?.index, 2)
+})
+
+test('a side-effecting step that timed out AFTER it found the element keeps outcome_unknown', async () => {
+  const afterStart = (log: string): Error => Object.assign(new Error(`locator.click: Timeout 15000ms exceeded.\nCall log:\n  - waiting for locator('#pay')\n  - ${log}`), { name: 'TimeoutError' })
+  for (const log of [
+    'locator resolved to <button id="pay">',
+    'attempting click action',
+    'waiting for scheduled navigations to finish',
+    'performing click action',
+  ]) {
+    const run = await runRecipe(fakePage({ '#pay': { click: () => { throw afterStart(log) } } }).page, [{ type: 'click', selector: '#pay' }], shot)
+    assert.equal(run.executionStatus, 'outcome_unknown', log)
+    assert.equal(run.effects, 'unknown', log)
+    assert.notEqual(run.failedStep?.errorCode, 'LOCATOR_NOT_FOUND', 'once the element was resolved, "not found" would be a wrong cause: ' + log)
+  }
+  // A timeout without any call log cannot prove the element was never reached, so it stays unknown too.
   const bare = await runRecipe(fakePage({ '#pay': { click: () => { throw Object.assign(new Error('Timeout 15000ms exceeded.'), { name: 'TimeoutError' }) } } }).page, [{ type: 'click', selector: '#pay' }], shot)
   assert.equal(bare.executionStatus, 'outcome_unknown')
   assert.equal(bare.failedStep?.errorCode, 'DEADLINE')
+  assert.equal(bare.effects, 'unknown')
+  // Resolved but blocked (disabled, covered): the element was reached, so it is not "never found" either.
+  const blocked = Object.assign(new Error('locator.click: Timeout 15000ms exceeded.\nCall log:\n  - waiting for locator(\'#pay\')\n  - locator resolved to <button disabled>\n  - element is not enabled'), { name: 'TimeoutError' })
+  const notActionable = await runRecipe(fakePage({ '#pay': { click: () => { throw blocked } } }).page, [{ type: 'click', selector: '#pay' }], shot)
+  assert.equal(notActionable.executionStatus, 'outcome_unknown')
+  assert.equal(notActionable.failedStep?.errorCode, 'NOT_ACTIONABLE')
 
   const read = await runRecipe(fakePage({ '#late': { waitFor: () => { throw timeout('waitFor') } } }).page, [{ type: 'wait', condition: 'selector', value: '#late' }], shot)
-  assert.equal(read.executionStatus, 'failed')
+  assert.equal(read.executionStatus, 'failed', 'a read-only step that times out is a plain failure')
   assert.equal(read.effects, 'none')
   assert.equal(read.failedStep?.errorCode, 'LOCATOR_NOT_FOUND')
-
-  const earlier = await runRecipe(fakePage({ '#pay': { click: () => { throw timeout('click') } } }).page, [{ type: 'fill', selector: '#q', value: 'a' }, { type: 'click', selector: '#pay' }], shot)
-  assert.equal(earlier.executionStatus, 'outcome_unknown')
-  assert.equal(earlier.completedSteps.length, 1, 'the fill before it is still reported')
 })
 
 test('other failures map to the shared error codes and mark effects on side-effecting steps', async () => {

@@ -61,15 +61,24 @@ test('run_recipe: a failed assert is ok:false with VALIDATION_FAILED; a passing 
   assert.equal((passing.result as any).validationStatus, 'passed')
 })
 
-test('run_recipe: a side-effecting timeout is outcome_unknown with OUTCOME_UNKNOWN, keeping the specific cause in the report', async () => {
+test('run_recipe: a side-effecting timeout after the element was found is outcome_unknown; a click on an element that never appeared is a plain failure with no effects', async () => {
+  const started = Object.assign(new Error("locator.click: Timeout 15000ms exceeded.\nCall log:\n  - waiting for locator('#pay')\n  - locator resolved to <button id=pay>\n  - attempting click action\n  - waiting for scheduled navigations to finish"), { name: 'TimeoutError' })
   const envelope = await runAction('automation.run_recipe', { url: 'https://example.com/', steps: [{ type: 'click', selector: '#pay' }] },
-    ctxFor(serviceOver({ '#pay': { click: () => { throw timeout(15000) } } })), ENV)
+    ctxFor(serviceOver({ '#pay': { click: () => { throw started } } })), ENV)
   assert.equal(envelope.ok, false)
   assert.equal(envelope.executionStatus, 'outcome_unknown')
   assert.equal(envelope.error?.code, 'OUTCOME_UNKNOWN')
   assert.match(envelope.error!.hint!, /verify/i)
   assert.equal((envelope.result as any).effects, 'unknown')
-  assert.equal((envelope.result as any).failedStep.errorCode, 'LOCATOR_NOT_FOUND')
+  assert.equal((envelope.result as any).failedStep.errorCode, 'NOT_ACTIONABLE', 'the specific cause is kept next to the unknown outcome')
+
+  const never = await runAction('automation.run_recipe', { url: 'https://example.com/', steps: [{ type: 'click', selector: '#pay' }] },
+    ctxFor(serviceOver({ '#pay': { click: () => { throw timeout(15000) } } })), ENV)
+  assert.equal(never.ok, false)
+  assert.equal(never.executionStatus, 'failed')
+  assert.equal(never.error?.code, 'LOCATOR_NOT_FOUND')
+  assert.equal((never.result as any).effects, 'none')
+  assert.match(never.error!.message, /did not start/)
 })
 
 test('run_recipe: a cancel mid-recipe returns cancelled with the completed prefix and effects instead of an empty error', async () => {

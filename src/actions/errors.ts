@@ -75,6 +75,24 @@ const POLICY = /is not allowed (for|on)|outside its allowed match|userscript is 
 const NOT_FOUND_RE = /(asset|candidate) not found|unknown (auth profile|rule pack|built-in script)/i
 const INVALID = /(must be|must contain|must use|must end|must start|must include|requires|exceeds|is invalid|invalid |unsupported|exactly one|only valid with|cannot combine|not a file|absolute file|missing declared|undeclared|is required|only supports|only draft|only http)/i
 
+/** Call-log lines that only appear once Playwright has resolved the element and started working on it. */
+const ACTION_STARTED_LOG = /locator resolved to|resolved to \d+ elements|attempting .* action|performing .* action|scrolling into view|waiting for element to be|element is |intercepts pointer events|waiting for scheduled navigations|waiting for navigation/i
+
+/**
+ * True when a failure proves the action never touched an element: the locator
+ * never matched anything (a timeout whose call log only says "waiting for
+ * locator", or a frame that does not exist). A timeout after the element was
+ * resolved and the action began says nothing about whether it took effect, so
+ * it is not this. Judged from Playwright's call log; a timeout without a call
+ * log is treated as "unknown", never as "never reached".
+ */
+export function neverReachedElement(error: unknown): boolean {
+  const message = messageOf(error)
+  if (/target frame was not found/i.test(message)) return true
+  if (!isTimeoutError(error)) return false
+  return /waiting for (locator|selector|getBy|frameLocator)/i.test(message) && !ACTION_STARTED_LOG.test(message)
+}
+
 /** Map any thrown value to a structured error body. */
 export function mapError(error: unknown, action: string, opts: { signal?: AbortSignal } = {}): ActionErrorBody {
   if (error instanceof ActionArgError) return { code: 'INVALID_ARGS', message: error.message, ...error.hint ? { hint: error.hint } : {} }
@@ -93,7 +111,8 @@ export function mapError(error: unknown, action: string, opts: { signal?: AbortS
     // Waits time out by design; everything else distinguishes "never found" from "found but blocked".
     if (action === 'act.wait' || /timed out after/i.test(message)) return result('DEADLINE')
     if (NOT_ACTIONABLE_LOG.test(message)) return result('NOT_ACTIONABLE')
-    if (/waiting for (locator|selector|getBy|frameLocator)/i.test(message)) return result('LOCATOR_NOT_FOUND')
+    // "Never found" only when the log stops at the wait; once the element was resolved and the action began, the cause is the deadline.
+    if (/waiting for (locator|selector|getBy|frameLocator)/i.test(message) && !ACTION_STARTED_LOG.test(message)) return result('LOCATOR_NOT_FOUND')
     return result('DEADLINE')
   }
   if (/strict mode violation/i.test(message)) return result('LOCATOR_AMBIGUOUS')

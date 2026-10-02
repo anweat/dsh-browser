@@ -278,7 +278,8 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
       { type: 'wait', condition: 'selector', value: '#copy' },
       { type: 'extract', selector: '#copy', mode: 'text' },
     ], { url })
-    assert.equal(recipe.steps[1]?.value, 'Browser automation fixture.')
+    assert.equal(recipe.outputs[0]?.value, 'Browser automation fixture.')
+    assert.equal(recipe.steps[1]?.output, 0, 'the step points at its output instead of repeating the value')
 
     const external = await service.runUserscript(url, VALID_SCRIPT, { inputs: { query: 'runtime-only' } })
     assert.equal(JSON.parse(external.resultJson).heading, 'Hello DSH')

@@ -92,11 +92,14 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     assert.deepEqual(result.completedSteps.map((step: any) => [step.action, step.ok]), [
       ['fill', true], ['click', true], ['assert', true], ['extract', true], ['extract', true],
     ])
-    const text = result.completedSteps[3].value as string
+    // Values live once, in outputs; completedSteps only point at them.
+    assert.deepEqual(result.completedSteps.map((step: any) => step.output), [undefined, undefined, undefined, 0, 1])
+    assert.ok(result.completedSteps.every((step: any) => !('value' in step)), 'completedSteps carry no copy of the extracted text')
+    const text = result.outputs[result.completedSteps[3].output].value as string
     assert.match(text, /apple/)
     assert.match(text, /apricot/)
     assert.doesNotMatch(text, /banana/)
-    assert.match(result.completedSteps[4].value, /<li class="hit">apple<\/li>/)
+    assert.match(result.outputs[result.completedSteps[4].output].value, /<li class="hit">apple<\/li>/)
     assert.match(result.text, /2 results for ap/)
   })
 
@@ -142,16 +145,31 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     assert.equal(envelope.error.code, 'LOCATOR_NOT_FOUND')
   })
 
-  it('a click on a missing element times out as outcome_unknown; an empty existing container extracts as completed', async () => {
-    const unknown = await harness.action(S1, 'automation.run_recipe', {
+  it('a click on an element that never appeared fails with effects none; a click that started and then hung stays outcome_unknown; an empty existing container extracts as completed', async () => {
+    server.resetHits()
+    const never = await harness.action(S1, 'automation.run_recipe', {
       url: url('search.html'),
       steps: [{ type: 'click', selector: '#no-such-button', timeoutMs: 400 }],
     })
-    assert.equal(unknown.ok, false)
-    assert.equal(unknown.executionStatus, 'outcome_unknown')
-    assert.equal(unknown.error.code, 'OUTCOME_UNKNOWN')
-    assert.equal(unknown.result.effects, 'unknown')
-    assert.equal(unknown.result.failedStep.errorCode, 'LOCATOR_NOT_FOUND')
+    assert.equal(never.ok, false)
+    assert.equal(never.executionStatus, 'failed', 'the element never resolved, so nothing was done')
+    assert.equal(never.error.code, 'LOCATOR_NOT_FOUND')
+    assert.equal(never.result.effects, 'none')
+    assert.equal(never.result.failedStep.errorCode, 'LOCATOR_NOT_FOUND')
+    assert.match(never.result.failedStep.message, /Timeout 400ms exceeded/, 'the Playwright text is kept')
+
+    // The element exists but is disabled: the action began (actionability checks) and then timed out.
+    const blocked = await harness.action(S1, 'automation.run_recipe', {
+      url: url('strict.html'),
+      steps: [{ type: 'click', selector: '#disabled-pay', timeoutMs: 400 }],
+    })
+    assert.equal(blocked.ok, false)
+    assert.equal(blocked.executionStatus, 'outcome_unknown')
+    assert.equal(blocked.error.code, 'OUTCOME_UNKNOWN')
+    assert.equal(blocked.result.effects, 'unknown')
+    assert.equal(blocked.result.failedStep.errorCode, 'NOT_ACTIONABLE')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    assert.deepEqual(server.hits(), {}, 'neither click reached the backend')
 
     const empty = await harness.action(S1, 'automation.run_recipe', {
       url: url('search.html'),

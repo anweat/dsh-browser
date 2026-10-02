@@ -1,12 +1,17 @@
 /**
+ * FROZEN COPY of the recipe runner as it was at the end of B2 (commit 302ea56), kept only so the
+ * v1 behaviour tests can compare the current runner against it step by step. Do not edit and do
+ * not import it from src/. Differences from the live runner are intentional and listed in
+ * test/recipe-v1-compat.test.ts.
+ */
+/**
  * Bounded, auditable Playwright recipes for model-generated browser flows.
  * Recipes deliberately expose named operations instead of arbitrary JavaScript.
  * @module dsh-browser/automation
  */
 
-import { RecipeAssertionError, RecipeValidationError, abortedByDeadline, isTimeoutError, mapError, neverReachedElement } from './actions/errors.ts'
-import type { ErrorCode } from './actions/types.ts'
-import type { LocatorAmbiguity } from './locator.ts'
+import { RecipeAssertionError, RecipeValidationError, abortedByDeadline, isTimeoutError, mapError } from '../../src/actions/errors.ts'
+import type { ErrorCode } from '../../src/actions/types.ts'
 
 export const WAIT_CONDITIONS = ['selector', 'text', 'load', 'time'] as const
 export const EXTRACT_MODES = ['text', 'html', 'links', 'attribute'] as const
@@ -29,8 +34,7 @@ export interface RecipeStepResult {
   step: number
   action: BrowserRecipeStep['type']
   ok: boolean
-  /** For extract and screenshot steps: the index of this step's value in `outputs`. The value itself is stored once, there. */
-  output?: number
+  value?: string
 }
 
 export type RecipeExecutionStatus = 'completed' | 'failed' | 'cancelled' | 'outcome_unknown'
@@ -44,8 +48,6 @@ export interface RecipeFailedStep {
   errorCode: ErrorCode
   /** The original Playwright or service message, unchanged. */
   message: string
-  /** For LOCATOR_AMBIGUOUS: the first matches, so the locator can be made unique. */
-  candidates?: LocatorAmbiguity
 }
 
 export interface RecipeOutput {
@@ -70,7 +72,7 @@ export interface RecipeRunResult {
   failedStep?: RecipeFailedStep
   /** Whether state-changing steps (fill, type, click, press, select, check) took effect. */
   effects: RecipeEffects
-  /** Values produced by extract and screenshot steps; `completedSteps[].output` points into this array. */
+  /** Values produced by extract and screenshot steps. */
   outputs: RecipeOutput[]
   /** One-line summary of why the run is not `completed`. */
   message?: string
@@ -326,21 +328,18 @@ export async function runRecipe(
       const body = mapError(error, 'recipe.step', { signal })
       const effectful = EFFECT_ACTIONS.has(step.type)
       if (step.type === 'assert' && body.code === 'VALIDATION_FAILED') assertFailed = true
-      // The element was never found (or the locator was ambiguous / the step malformed): the action did not start, so nothing happened.
-      const neverStarted = body.code === 'LOCATOR_AMBIGUOUS' || body.code === 'INVALID_RECIPE' || neverReachedElement(error)
-      // Otherwise the action may have partly happened.
-      if (effectful && !neverStarted) effectsUnknown = true
-      const failedStep: RecipeFailedStep = { index: index + 1, action: step.type, errorCode: body.code, message: body.message, ...body.candidates ? { candidates: body.candidates } : {} }
+      // The action may have partly happened unless the failure proves it was never attempted.
+      if (effectful && body.code !== 'LOCATOR_AMBIGUOUS' && body.code !== 'INVALID_RECIPE') effectsUnknown = true
+      const failedStep: RecipeFailedStep = { index: index + 1, action: step.type, errorCode: body.code, message: body.message }
       const summary = 'Step ' + (index + 1) + ' (' + step.type + ') failed with ' + body.code + '; ' + completedSteps.length + ' earlier steps ran and are not rolled back.'
       if (body.code === 'CANCELLED') return finish('cancelled', failedStep, summary)
-      if (effectful && isTimeoutError(error) && !neverStarted) return finish('outcome_unknown', failedStep, summary + ' The side-effecting step timed out, so its outcome is unknown.')
-      return finish('failed', failedStep, summary + (effectful && neverStarted ? ' The step did not start (no element was acted on), so it had no effect.' : ''))
+      if (effectful && isTimeoutError(error)) return finish('outcome_unknown', failedStep, summary + ' The side-effecting step timed out, so its outcome is unknown.')
+      return finish('failed', failedStep, summary)
     }
     if (EFFECT_ACTIONS.has(step.type)) effectsObserved = true
     if (step.type === 'assert') assertPassed += 1
-    const produced = value !== undefined && (step.type === 'extract' || step.type === 'screenshot')
-    if (produced) outputs.push({ step: index + 1, action: step.type as 'extract' | 'screenshot', value: value! })
-    completedSteps.push({ step: index + 1, action: step.type, ok: true, ...produced ? { output: outputs.length - 1 } : {} })
+    if (value !== undefined && (step.type === 'extract' || step.type === 'screenshot')) outputs.push({ step: index + 1, action: step.type, value })
+    completedSteps.push({ step: index + 1, action: step.type, ok: true, ...value !== undefined ? { value } : {} })
   }
   if (signal?.aborted) return stopped(undefined)
   return finish('completed')

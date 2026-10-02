@@ -38,5 +38,5 @@ export function recipeOutcome(run: Pick<RecipeRunResult, 'executionStatus' | 'va
   const original = run.failedStep ? ` [step ${run.failedStep.index} ${run.failedStep.action}, ${run.failedStep.errorCode}] ${run.failedStep.message}` : ''
   const message = (run.message ?? 'The run did not complete.') + (run.message && original ? ' Original error:' + original : original)
   const hint = hintFor(code) ?? 'The run did not complete; read completedSteps, failedStep and effects before deciding what to do.'
-  return { ok: false, executionStatus: run.executionStatus, error: { code, message, hint } }
+  return { ok: false, executionStatus: run.executionStatus, error: { code, message, hint, ...run.failedStep?.candidates ? { candidates: run.failedStep.candidates } : {} } }
 }
