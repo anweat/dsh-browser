@@ -64,29 +64,29 @@ Web Search Pro 与浏览器插件应同步升级；面向 `dsh-v0.1.7-rc.2` 不�
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17 dsh-web-search-pro@0.1.17
 ```
 
-升级后完整停止并重启 Web profile，再调用 `browser_status`、`browser_opencli_status` 和 `web_backend_status`；仅刷新网页不会重新加载插件服务或 Web Search Pro 配置面板。尤其不要只升级 Web Search Pro：新的工具目录、Patchright 运行时和调用缓冲都来自浏览器插件。
+升级后完整停止并重启 Web profile，再调用 `runtime.status`、`opencli.status` 和 `web_backend_status`；仅刷新网页不会重新加载插件服务或 Web Search Pro 配置面板。尤其不要只升级 Web Search Pro：新的工具目录、Patchright 运行时和调用缓冲都来自浏览器插件。
 
 ## 快速使用与适用情形
 
-安装并重启后，可先让模型调用 `browser_status`，再按任务选择工具。默认
+安装并重启后，模型通过 `browser_index` 查看能力目录、用 `browser_call` 执行动作（`runtime.status` 可查看运行时状态），再按任务选择动作。默认
 `automationMode: standard`：读取直接执行，点击、输入、按键、选择、勾选、悬停、文件上传及页面写操作走 DSH 原生一次性审批。页面脚本和本地文件上传在 `autonomous` 下仍需审批，只有 `unrestricted` 会跳过确认。
 
 | 情形 | 推荐方式 | 关键边界 |
 |---|---|---|
-| 公开网页读取、截图 | `browser_open` → `browser_read` / `browser_screenshot` | 不需要登录态 |
-| 表单、分页、懒加载 | `browser_click` / `browser_type` / `browser_press` / `browser_select` / `browser_check` / `browser_scroll` | CSS 或 role/text/label 语义定位；`standard` 下审批 |
-| SPA 条件等待 | `browser_wait` | 支持 locator、URL glob、networkidle 或最多 10 秒固定等待 |
-| 悬停菜单与提示 | `browser_hover` | 与直接页面交互使用相同审批策略 |
-| 文件上传 | `browser_set_files` | 只接受现有绝对文件路径；最多 20 个、合计 512 MiB；除 `unrestricted` 外审批会显示路径 |
-| 页面脚本表达式 | `browser_evaluate` | 使用当前页面来源和登录态；可访问 DOM、非 HttpOnly Cookie、Web Storage 和浏览器允许的网络 API |
-| 页面故障排查 | `browser_open(capture=[console,network])` → `browser_console` / `browser_requests` | 只在内存保留最多 200 条；网络仅记录失败及 4xx/5xx，不记录 body/header |
+| 公开网页读取、截图 | `target.open` → `observe.read` / `observe.screenshot` | 不需要登录态 |
+| 表单、分页、懒加载 | `act.click` / `act.fill` / `act.press` / `act.select` / `act.check` / `act.scroll` | CSS 或 role/text/label 语义定位；`standard` 下审批 |
+| SPA 条件等待 | `act.wait` | 支持 locator、URL glob、networkidle 或最多 10 秒固定等待 |
+| 悬停菜单与提示 | `act.hover` | 与直接页面交互使用相同审批策略 |
+| 文件上传 | `act.upload` | 只接受现有绝对文件路径；最多 20 个、合计 512 MiB；除 `unrestricted` 外审批会显示路径 |
+| 页面脚本表达式 | `script.evaluate` | 使用当前页面来源和登录态；可访问 DOM、非 HttpOnly Cookie、Web Storage 和浏览器允许的网络 API |
+| 页面故障排查 | `target.open(capture=[console,network])` → `inspect.console` / `inspect.requests` | 只在内存保留最多 200 条；网络仅记录失败及 4xx/5xx，不记录 body/header |
 | 登录后站点 | `authProfile` | 必须配置 `allowedDomains`；默认不回写 Cookie |
 | 固定站点增强 | `rulePack` | 只允许有界步骤；本地 init script 必须 SHA-256 固定且 ≤64KB |
-| 模型生成的多步操作 | `browser_recipe_run` | 声明式步骤；审批策略由 `automationMode` 决定 |
-| 默认只读脚本 | `browser_script_catalog` → `browser_script_run_builtin` | 内置 article/links/JSON-LD/forms，不执行外来代码 |
-| 外部模型生成 UserScript | `browser_script_validate` → `browser_userscript_run` | 必须 `@match` + `@grant none`；除 `unrestricted` 外执行前审批 |
-| 有限站点遍历 | `browser_crawl` | 页数、深度、并发、突发与退避始终受 `usagePolicy` 约束 |
-| Reddit/小红书等 OpenCLI 平台 | `browser_opencli_status` → `browser_opencli_catalog` → `browser_opencli_run` | 先发现精确 adapter；通用调用除 `unrestricted` 外需审批 |
+| 模型生成的多步操作 | `automation.run_recipe` | 声明式步骤；审批策略由 `automationMode` 决定 |
+| 默认只读脚本 | `script.catalog` → `script.run_builtin` | 内置 article/links/JSON-LD/forms，不执行外来代码 |
+| 外部模型生成 UserScript | `script.validate` → `script.run_userscript` | 必须 `@match` + `@grant none`；除 `unrestricted` 外执行前审批 |
+| 有限站点遍历 | `crawl.crawl` | 页数、深度、并发、突发与退避始终受 `usagePolicy` 约束 |
+| Reddit/小红书等 OpenCLI 平台 | `opencli.status` → `opencli.catalog` → `opencli.run` | 先发现精确 adapter；通用调用除 `unrestricted` 外需审批 |
 | 普通站点兼容性不佳 | `browserRuntime: patchright` | Chromium-only；建议专用 Chrome profile，不与指纹注入库叠加 |
 
 所有网页访问、交互、脚本、Cookie 使用、上传和下载都必须由调用方或操作者根据目标网站规则及适用要求判断并使用。插件只执行被请求或批准的浏览器操作，不判断具体用途是否获得网站授权，也不承担调用方的合规责任。限流、审批、域名和文件边界用于约束执行面，不能替代目标网站规则。
@@ -94,7 +94,7 @@ dsh plugin --profile web add @anweat/dsh-browser@0.1.17 dsh-web-search-pro@0.1.1
 DSH 会话示例：
 
 ```text
-先调用 browser_status；然后用 browser_open 打开目标页。
+先调用 browser_call({action:"runtime.status"})；然后用 target.open 打开目标页。
 若页面需要登录，使用 authProfile=forum；不要把 Cookie 放进工具参数。
 ```
 
@@ -102,7 +102,7 @@ DSH 会话示例：
 
 | 层 | 实际是什么 | 打包还是复用 |
 |---|---|---|
-| **chromium 内核** | 共享缓存 `%LOCALAPPDATA%\ms-playwright`（约 400MB） | **永远复用共享缓存**，不塞进插件、不重复下载；缺失时 `browser_install` 一键补 |
+| **chromium 内核** | 共享缓存 `%LOCALAPPDATA%\ms-playwright`（约 400MB） | **永远复用共享缓存**，不塞进插件、不重复下载；缺失时 `runtime.install` 一键补 |
 | **playwright 驱动**（JS 包） | `playwright` npm 依赖 | 插件本地 node_modules 优先，缺省回退全局 npm |
 | **patchright 驱动**（可选） | 与 Playwright 同版本的 Chromium 兼容驱动 | 插件内置；配置 `browserRuntime: patchright` 才启用 |
 | **opencli**（纯 Node CLI） | `@jackwener/opencli` npm 依赖 | 同上，本地优先 / 全局复用 |
@@ -118,8 +118,8 @@ DSH 会话示例：
     executablePath: 'E:/caches/ms-playwright/chromium-1234/chrome-win64/chrome.exe'
 ```
 
-`executablePath` 必须指向真实的内核可执行文件（不是目录）；设置后 `browser_status` 会显示该路径，
-`browser_install` 不再需要执行。`browserRuntime: patchright` 时同样适用。
+`executablePath` 必须指向真实的内核可执行文件（不是目录）；设置后 `runtime.status` 会显示该路径，
+`runtime.install` 不再需要执行。`browserRuntime: patchright` 时同样适用。
 注意该字段在插件挂载时解析：改完需要重新加载 profile（重启 Web profile），仅刷新网页不生效。
 
 ## 服务：`browser`
@@ -159,16 +159,16 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 | 工具 | 作用域 |
 |---|---|
-| `browser_open` / `click` / `type` / `press` / `select` / `check` / `hover` / `set_files` / `evaluate` / `scroll` / `read` / `wait` / `screenshot` / `browser_close` | 仅调用方 session |
-| `browser_console` / `browser_requests` | 仅返回调用方 session 抓到的记录 |
-| `browser_status` 的 `activeUrl` | 仅报告调用方 session 的页面 |
+| `target.open` / `act.*` / `script.evaluate` / `observe.*` / `target.close` | 仅调用方 session |
+| `inspect.console` / `inspect.requests` | 仅返回调用方 session 抓到的记录 |
+| `runtime.status` 的 `activeUrl` | 仅报告调用方 session 的页面 |
 | `render` / `snapshot` / `searchResults` / `crawl` / OpenCLI | 每次调用自建临时 context，本就无共享状态 |
 
-`browser_close` 关闭的是**调用方**的页面，不影响其他 session；插件卸载时
+`target.close` 关闭的是**调用方**的页面，不影响其他 session；插件卸载时
 `close()` 才整体拆掉所有 session 的 context 与进程。
 
 会话槽位上限由 `maxSessions`（默认 8）控制，超出后关闭最久未使用的 session。
-读取类调用（`browser_status` / `browser_console` / `browser_requests`）**不会**
+读取类调用（`runtime.status` / `inspect.console` / `inspect.requests`）**不会**
 创建槽位，也不会触发淘汰——否则一次查询就会挤掉别人的页面。
 
 不带 `exec.agent` 的调用方（例如其他插件直接消费服务）落在共享桶里，行为与
@@ -187,53 +187,80 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 `unrestricted` 会允许模型直接运行外部脚本、通用 CLI 和安装命令，只应在隔离的测试 profile 或明确授权的自动化环境中使用；日常 profile 保持 `standard`。它只取消人工确认，**不会取消 `usagePolicy` 的并发、突发、页数、深度、重试与冷却保护**。模式改变后需要重启 DSH profile，工具目录才会按新配置重新注册。
 
-## 工具（最多 30 个）
+## 工具与动作
 
-| 工具 | 作用 |
+模型可见的工具面由 `toolSurface` 决定：
+
+| `toolSurface` | 注册的工具 | 常驻上下文 | 用途 |
+|---|---|---|---|
+| `indexed`（默认） | `browser_index`、`browser_call` 两个 | 约 0.3k token | 渐进披露：先看目录，再按需查看单个动作的 schema |
+| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 9k token（31 个工具） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
+
+`indexed` 下：`browser_index()` 列出能力组和当前环境状态（`automationMode`、Chromium 是否已安装）；`browser_index({group})` 列出该组动作；`browser_index({action})` 给出完整参数 schema；`browser_index({query})` 按关键词检索。`browser_call({action, args})` 执行动作，服务端按 schema 校验参数，校验失败返回 `INVALID_ARGS` 并附上精简 schema。所有动作的返回值使用同一信封：
+
+```json
+{ "ok": true, "action": "act.click", "executionStatus": "completed", "result": { } }
+{ "ok": false, "action": "act.click", "executionStatus": "failed", "error": { "code": "LOCATOR_NOT_FOUND", "message": "<Playwright 原始信息>", "hint": "…" } }
+```
+
+错误码：`INVALID_ARGS`、`UNKNOWN_ACTION`、`CAPABILITY_UNAVAILABLE`、`POLICY_DENIED`、`LOCATOR_NOT_FOUND`、`LOCATOR_AMBIGUOUS`、`NOT_ACTIONABLE`、`TARGET_CLOSED`、`DEADLINE`、`CANCELLED`、`NOT_FOUND`、`ACTION_FAILED`。会产生副作用的动作超时时 `executionStatus` 为 `outcome_unknown`，调用方应先核验页面再决定是否重试。
+
+**审批按动作判断**：Host 的审批理由写明动作和关键参数（例如 `act.click role="button" name="Submit"`），`browser_index` 直接放行，`browser_call` 解析出动作后适用与下表相同的规则，不可用的动作在 `browser_call` 中再拒绝一次。Host 里按工具名设置的“总是允许”不会跳过插件策略。
+
+旧的 30 个 `browser_*` 工具名已不再注册（`flat` 形态中 `browser_<group>_<action>` 与个别旧名相同，但它们现在就是注册表里的动作，返回统一信封）。
+
+### 动作目录
+
+| 动作 | 作用 |
 |---|---|
-| `browser_open` | 打开 URL，返回标题/可读文本/全页截图路径；可显式启用 console/network 内存捕获 |
-| `browser_click` | 按 CSS 或结构化 Playwright locator 点击 |
-| `browser_type` | 向 CSS 或语义定位的 input/textarea 输入 |
-| `browser_wait` | 等待 locator 状态、URL glob、networkidle 或固定时间 |
-| `browser_press` | 对 locator 或全局键盘发送按键 |
-| `browser_select` | 按 locator 选择一个或多个 option value |
-| `browser_check` | 按 locator 勾选或取消勾选控件 |
-| `browser_hover` | 悬停 CSS 或语义 locator 并返回页面状态与截图 |
-| `browser_set_files` | 把现有本地文件设置到 `input[type=file]`；绝对路径、数量和总大小受限 |
-| `browser_evaluate` | 在当前页执行最长 20,000 字符的 JavaScript 表达式，返回最多 100,000 字符 JSON |
-| `browser_console` | 读取本次显式捕获的脱敏 console 记录 |
-| `browser_requests` | 读取本次显式捕获的失败及 HTTP 4xx/5xx 请求；无 body/header |
-| `browser_scroll` | 纵向滚动（触发懒加载） |
-| `browser_read` | 读当前页 URL/标题/文本（不截图） |
-| `browser_screenshot` | 当前页、locator 或区域截图；普通文件名固定落在 `snapshotDir` |
-| `browser_close` | 关闭当前页（下次 open 全新） |
-| `browser_status` | 运行时状态（含 automationMode、已暴露工具及各类审批策略） |
-| `browser_install` | 安装 playwright chromium（`browser_status` 报缺失时执行一次） |
-| `browser_script_catalog` | 列出内置只读脚本及其 SHA-256 |
-| `browser_script_validate` | 解析外部 UserScript 的元数据、域名、grant、能力与哈希，不执行 |
-| `browser_script_run_builtin` | 在独立 Playwright context 中运行内置只读脚本 |
-| `browser_userscript_run` | 运行外部 UserScript；强制域名匹配，审批策略由模式决定 |
-| `browser_recipe_run` | 最多 25 步 Playwright Recipe；支持等待、定位、表单、键盘、提取、断言和截图 |
-| `browser_automation_search` | 只有显式关键词调用才检索；可限定 active/draft/all、域名和类型，最多返回 `retrievalTopK` 条摘要 |
-| `browser_automation_develop` | 按确切 ID 读取源码，或显式保存、静态校验、真实回放草稿；永远不能激活资产 |
-| `browser_automation_run` | 按 ID 运行已激活资产；再次执行限域和输入大小校验，审批由 `automationMode` 决定 |
-| `browser_opencli_status` | 实际运行 OpenCLI doctor，报告 daemon/extension/profile 连通性 |
-| `browser_opencli_catalog` | 对 OpenCLI 大目录按 query/site/access/strategy 过滤，单次最多返回 100 条 |
-| `browser_opencli_run` | 通用 OpenCLI argv 网关；除 `unrestricted` 外触发 DSH 原生一次性审批 |
-| `browser_crawl` | 匿名、有限广度遍历；默认同源，强制使用全局调用缓冲和单次页数/深度预算 |
+| `target.open` | 打开 URL，返回标题/可读文本/全页截图路径；可显式启用 console/network 内存捕获 |
+| `target.close` | 关闭当前页（下次 open 全新） |
+| `target.list` | 列出本 session 的页面（每个 session 最多一个） |
+| `observe.read` | 读当前页 URL/标题/文本（不截图） |
+| `observe.screenshot` | 当前页、locator 或区域截图；普通文件名固定落在 `snapshotDir` |
+| `act.click` | 按 CSS 或结构化 Playwright locator 点击 |
+| `act.fill` | 向 CSS 或语义定位的 input/textarea 填入文本（原 `browser_type`） |
+| `act.wait` | 等待 locator 状态、URL glob、networkidle 或固定时间 |
+| `act.press` | 对 locator 或全局键盘发送按键 |
+| `act.select` | 按 locator 选择一个或多个 option value |
+| `act.check` | 按 locator 勾选或取消勾选控件 |
+| `act.hover` | 悬停 CSS 或语义 locator 并返回页面状态 |
+| `act.scroll` | 纵向滚动（触发懒加载） |
+| `act.upload` | 把现有本地文件设置到 `input[type=file]`；绝对路径、数量和总大小受限 |
+| `inspect.console` | 读取本次显式捕获的脱敏 console 记录 |
+| `inspect.requests` | 读取本次显式捕获的失败及 HTTP 4xx/5xx 请求；无 body/header |
+| `script.evaluate` | 在当前页执行最长 20,000 字符的 JavaScript 表达式，返回最多 100,000 字符 JSON |
+| `script.catalog` | 列出内置只读脚本及其 SHA-256 |
+| `script.validate` | 解析外部 UserScript 的元数据、域名、grant、能力与哈希，不执行 |
+| `script.run_builtin` | 在独立 Playwright context 中运行内置只读脚本 |
+| `script.run_userscript` | 运行外部 UserScript；强制域名匹配，审批策略由模式决定 |
+| `runtime.status` | 运行时状态（含 automationMode、已暴露工具/动作及各类审批策略） |
+| `runtime.install` | 安装 playwright chromium（`runtime.status` 报缺失时执行一次） |
+| `automation.run_recipe` | 最多 25 步 Playwright Recipe；支持等待、定位、表单、键盘、提取、断言和截图 |
+| `automation.search` | 只有显式关键词调用才检索；可限定 active/draft/all、域名和类型，最多返回 `retrievalTopK` 条摘要 |
+| `automation.develop` | 按确切 ID 读取源码，或显式保存、静态校验、真实回放草稿；永远不能激活资产 |
+| `automation.run` | 按 ID 运行已激活资产；再次执行限域和输入大小校验，审批由 `automationMode` 决定 |
+| `opencli.status` | 实际运行 OpenCLI doctor，报告 daemon/extension/profile 连通性 |
+| `opencli.catalog` | 对 OpenCLI 大目录按 query/site/access/strategy 过滤，单次最多返回 100 条 |
+| `opencli.run` | 通用 OpenCLI argv 网关；除 `unrestricted` 外触发 DSH 原生一次性审批 |
+| `crawl.crawl` | 匿名、有限广度遍历；默认同源，强制使用全局调用缓冲和单次页数/深度预算 |
+
+### dsh-browser skill
+
+插件在 Host 提供 `skills` 服务时注册 `dsh-browser` skill（`assets/skills/dsh-browser/`：SKILL.md 与 `references/`），内容为复用优先、定位策略、按错误码处理失败、沉淀资产和边界。`skills` 不是必需依赖：没有该服务时插件照常工作，`browser_index()` 的根目录附一段不超过 300 token 的精简指南。
 
 ## 可复用自动化资产（实验性）
 
 > **Experimental:** Recipe/UserScript 的积累、模型开发、检索和复用接口仍可能调整。建议先在隔离 profile 中启用，审阅草稿并完成真实浏览器回放后再手动激活；不要把它作为无人监管的生产写操作入口。
 
-自动化执行自由度与资产持久化是两套独立开关。`automationMode: unrestricted` 只影响执行审批，不会让 Agent 自动保存脚本；默认 `automationAssets.persistenceMode: suggest` 仅对成功的 `browser_recipe_run` 记录脱敏语义步骤。具体输入会替换为 `{{input}}` / `{{secret}}`，会话 ID 只保存短哈希，不保存页面正文、cookie、token、密码或聊天记录。
+自动化执行自由度与资产持久化是两套独立开关。`automationMode: unrestricted` 只影响执行审批，不会让 Agent 自动保存脚本；默认 `automationAssets.persistenceMode: suggest` 仅对成功的 `automation.run_recipe` 记录脱敏语义步骤。具体输入会替换为 `{{input}}` / `{{secret}}`，会话 ID 只保存短哈希，不保存页面正文、cookie、token、密码或聊天记录。
 
 默认在 14 天窗口内，同一域名和步骤指纹至少成功 3 次、来自至少 2 个会话且成功率达到 80%，面板才出现“是否总结”候选。每天最多提示 2 次；候选、草稿和已激活资产均有数量上限。推荐流程是：
 
 1. 候选达到阈值后，在“浏览器自动化 → 可复用自动化资产”选择“总结为草稿”或“暂不总结”。
 2. 在脚本列表点选草稿；只有此时前端才按 ID 读取完整 recipe / UserScript。编辑器支持 recipe 和带 `@match`、`@grant none` 的 UserScript。UserScript 可从只读对象 `__DSH_INPUTS__` 读取 `inputNames` 声明的运行时输入，输入不会写入资产文件。
 3. 保存后先做静态校验，再填写测试 URL/输入执行真实浏览器回放。只有真实回放成功才可手动激活；已激活版本不可原地编辑，避免后台行为静默漂移。
-4. Agent 用 `browser_automation_search` 获取有界摘要，再用 `browser_automation_run` 按 ID 调用。检索默认 top 5、目录预算约 800 tokens，源码不会进入模型上下文。
+4. Agent 用 `automation.search` 获取有界摘要，再用 `automation.run` 按 ID 调用。检索默认 top 5、目录预算约 800 tokens，源码不会进入模型上下文。
 
 `persistenceMode` 可选 `off | manual | suggest | auto-draft`。日常使用建议 `suggest`；`auto-draft` 只适合隔离测试 profile，并且仍不会自动激活。`activationMode` 当前默认并推荐 `manual`；`auto-tested` 作为后续真实沙箱回放策略的保留配置，不会把一次静态校验当成生产激活依据。
 
@@ -241,8 +268,8 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 模型目录不会预载任何 recipe 或源码。需要批量索引等强指向自动化时，模型按以下顺序显式访问：
 
-1. 调用 `browser_automation_search(query="batch-index issues", status="draft|active", kind="recipe")`，仅得到 ID、名称、标签、域名、输入名和运行统计。
-2. 确认要修改某项后，调用 `browser_automation_develop(action="get", id="...")`；只有这一步会把单个资产的完整 recipe/源码带入当前上下文。
+1. 调用 `automation.search(query="batch-index issues", status="draft|active", kind="recipe")`，仅得到 ID、名称、标签、域名、输入名和运行统计。
+2. 确认要修改某项后，调用 `automation.develop(action="get", id="...")`；只有这一步会把单个资产的完整 recipe/源码带入当前上下文。
 3. `action="save"` 可直接声明新的 recipe，或保存带 `@match` / `@grant none` 的 UserScript；只能生成/更新 draft。默认每个模型会话最多写 3 次，仍受全局 `maxDrafts` 限制。
 4. `action="validate"` 只做结构与 UserScript 元数据校验，不提供激活资格；`action="test"` 必须给 URL 和声明输入，执行真实 Playwright 回放，成功后才标记 `passed`。
 5. 激活、归档和回滚只在可视化面板完成，模型开发工具没有对应动作。
@@ -258,16 +285,16 @@ recipe 建议把检索意图固化在 `name`、`description` 和 `tags`，例如
 - `maxConcurrency` 限制同时发起的导航，超出后排队；`burst` + `minDelayMs` 限制单站点短时突发。
 - OpenCLI adapter / Browser Bridge 调度也占用同一全局并发与 burst 缓冲，不会因绕过 Playwright 而失去节流。
 - 站点返回 429、502、503、504 时，按 `Retry-After` 或指数退避进入站点级冷却，最多重试 `retryLimit` 次。
-- `browser_crawl` 还受 `maxPagesPerRun` 和 `maxDepth` 硬上限约束；调用参数只能收紧，不能突破配置。
+- `crawl.crawl` 还受 `maxPagesPerRun` 和 `maxDepth` 硬上限约束；调用参数只能收紧，不能突破配置。
 - 泛爬取默认使用匿名 context，不继承全局 `storageStatePath` 或 `defaultAuthProfile`；登录后读取仍使用显式限域的单页/Recipe 工具。
-- `browser_status` 显示累计运行、排队、等待和 backoff 次数，便于判断是否调用过密。
+- `runtime.status` 显示累计运行、排队、等待和 backoff 次数，便于判断是否调用过密。
 - 泛爬取能力本身不隐藏，但调用方仍应遵守目标站点条款、robots 指令、版权、隐私和适用法律；工具每次返回该警告。
 
 ## 外部模型脚本：推荐流程
 
 外部模型可以输出 Tampermonkey/UserScript 格式源码，但不要直接执行。让当前 DSH Agent 先调用
-`browser_script_validate`，展示名称、`@match`、SHA-256 和能力，再调用
-`browser_userscript_run`。除 `unrestricted` 外，执行调用会进入 Harness 的
+`script.validate`，展示名称、`@match`、SHA-256 和能力，再调用
+`script.run_userscript`。除 `unrestricted` 外，执行调用会进入 Harness 的
 `tools/pre-execute → approval` 原生流程；用户拒绝、没有 approval 服务或调用不属于 Agent 时都不会运行。
 
 最小脚本示例：
@@ -292,15 +319,15 @@ return [...document.querySelectorAll('.result')].slice(0, 20).map(card => ({
 - 使用显式 URL，新建独立 Playwright context；需要登录态时只能选已限域的 `authProfile`。
 - 审批代表允许该脚本以当前站点登录身份操作页面；静态能力报告只用于解释，不是沙箱。
 
-`browser_evaluate` 是面向当前持久页的短表达式入口，不使用 UserScript 元数据。它能调用页面已有 JavaScript、读取或修改 DOM、访问非 HttpOnly Cookie 和 Web Storage，也能通过 `fetch` 等浏览器 API 发起页面来源允许的请求。插件会明确报告这些能力，但不会判断具体网站是否允许该访问；调用方应根据目标网站规则及适用要求使用并承担相应责任，插件只执行被批准的浏览器操作。表达式没有 Node.js 全局对象或直接主机文件系统权限，结果必须可 JSON 序列化；超时会通过 Chromium DevTools 终止页面 JavaScript，保留当前 page/context 供后续读取或导航。需要可复用、可审阅的脚本时仍使用 UserScript 资产流程。
+`script.evaluate` 是面向当前持久页的短表达式入口，不使用 UserScript 元数据。它能调用页面已有 JavaScript、读取或修改 DOM、访问非 HttpOnly Cookie 和 Web Storage，也能通过 `fetch` 等浏览器 API 发起页面来源允许的请求。插件会明确报告这些能力，但不会判断具体网站是否允许该访问；调用方应根据目标网站规则及适用要求使用并承担相应责任，插件只执行被批准的浏览器操作。表达式没有 Node.js 全局对象或直接主机文件系统权限，结果必须可 JSON 序列化；超时会通过 Chromium DevTools 终止页面 JavaScript，保留当前 page/context 供后续读取或导航。需要可复用、可审阅的脚本时仍使用 UserScript 资产流程。
 
 ## Cookie 与文件落盘
 
 - `authProfile` 从配置的 `storageStatePath` 载入 Cookie、localStorage 等登录态。只有 `persistState: true` 才在 context 关闭时原子回写该文件；全局兼容路径默认不会被交互会话改写。
-- `browser_evaluate` 可读取 `document.cookie`，因此能看到当前来源的非 HttpOnly Cookie；浏览器不会向页面 JavaScript 暴露 HttpOnly Cookie。除 `unrestricted` 外，每次执行都需要确认。
-- `browser_set_files` 只读取调用中列出的绝对路径并交给当前页面上传控件，不修改源文件，也不会遍历目录。除 `unrestricted` 外，即使在 `autonomous` 模式也需要确认。
-- `browser_screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；自定义截图名只允许普通文件名，拒绝绝对路径、目录分隔符和 `..`。持久登录态只写配置的状态文件。`browser_evaluate` 触发的浏览器下载不会由该工具保存或返回，下载落盘需要后续单独设计显式目录和文件名规则。
-- console/network 捕获必须由 `browser_open.capture` 显式启用，只在内存保留最多 200 条；记录文本和 URL 查询中的常见 token/cookie/password 字段会脱敏，网络只保留方法、URL、失败原因或 4xx/5xx 状态，不保存 header/body。
+- `script.evaluate` 可读取 `document.cookie`，因此能看到当前来源的非 HttpOnly Cookie；浏览器不会向页面 JavaScript 暴露 HttpOnly Cookie。除 `unrestricted` 外，每次执行都需要确认。
+- `act.upload` 只读取调用中列出的绝对路径并交给当前页面上传控件，不修改源文件，也不会遍历目录。除 `unrestricted` 外，即使在 `autonomous` 模式也需要确认。
+- `observe.screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；自定义截图名只允许普通文件名，拒绝绝对路径、目录分隔符和 `..`。持久登录态只写配置的状态文件。`script.evaluate` 触发的浏览器下载不会由该工具保存或返回，下载落盘需要后续单独设计显式目录和文件名规则。
+- console/network 捕获必须由 `target.open.capture` 显式启用，只在内存保留最多 200 条；记录文本和 URL 查询中的常见 token/cookie/password 字段会脱敏，网络只保留方法、URL、失败原因或 4xx/5xx 状态，不保存 header/body。
 
 常见读取任务优先用内置脚本：`article-clean`、`links`、`jsonld`、`forms`。它们不返回表单当前值，
 也不触发点击或网络写操作。
@@ -336,6 +363,7 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
       name: '@anweat/dsh-browser'
       config:
         automationMode: standard # read-only | standard | autonomous | unrestricted
+        toolSurface: indexed     # indexed（默认，browser_index + browser_call）| flat（每个动作一个工具）
         browserRuntime: playwright # playwright | patchright
         channel: chromium        # 'chromium'（打包内核）| 'msedge'（系统 Edge）
         headless: true
@@ -397,7 +425,7 @@ channel: chrome
 headless: false
 ```
 
-`channel: chrome + headless: false` 是更贴近其推荐的兼容配置；CI/无人值守也可使用 headless，但 `browser_status.runtimeWarnings` 会如实提示差异。Patchright 会禁用 Playwright console API，因此依赖控制台监听的 Recipe/脚本不应切换到它。不要再叠加自定义 User-Agent、额外请求头或指纹注入器；这类组合更容易形成自相矛盾的指纹。
+`channel: chrome + headless: false` 是更贴近其推荐的兼容配置；CI/无人值守也可使用 headless，但 `runtime.status.runtimeWarnings` 会如实提示差异。Patchright 会禁用 Playwright console API，因此依赖控制台监听的 Recipe/脚本不应切换到它。不要再叠加自定义 User-Agent、额外请求头或指纹注入器；这类组合更容易形成自相矛盾的指纹。
 
 Camoufox 当前没有硬集成：截至本版，其 JS 包要求 Node 22 且 peer 约束为 `playwright-core <1.61`，与本插件验证的 Playwright/Patchright 1.62.1 不兼容，并需要独立下载 Firefox 内核。后续等版本边界对齐后再作为第三 provider 接入，避免安装后才发生依赖漂移。
 
@@ -405,7 +433,7 @@ Camoufox 当前没有硬集成：截至本版，其 JS 包要求 Node 22 且 pee
 
 - `channel: chromium` + `storageStatePath` 指向一份 storageState JSON，即可用你已登录的身份抓受限页面。
 - 新配置优先使用 `authProfiles`：按名称复用全局登录态，但必须用 `allowedDomains` 限域；默认只读，避免一次搜索意外改写 Cookie Vault。
-- `browser_open` 和 web-search-pro 的平台搜索可选择 `authProfile` / `rulePack`。`browser_status` 只显示 profile 名称、域名和回写状态，不显示文件路径或 Cookie。
+- `target.open` 和 web-search-pro 的平台搜索可选择 `authProfile` / `rulePack`。`runtime.status` 只显示 profile 名称、域名和回写状态，不显示文件路径或 Cookie。
 - RulePack 仍只允许有界动作；init script 必须是本地、SHA-256 固定且不超过 64KB。外部模型 JavaScript 使用独立的 UserScript 工具，不能冒充 RulePack；除 `unrestricted` 外需一次性审批。
 - 生成登录态：`npx playwright codegen --save-storage=storageState.json`（或复用 `dsh-web-search-pro` 的 `scripts/save-login.mjs`），把产物路径填进 `storageStatePath`。
 - opencli 的社交平台后端（小红书/推特/Reddit/IG/FB）仍需浏览器扩展 + 登录态在线，即使 opencli 已打包为依赖也绕不开扩展。
@@ -422,9 +450,9 @@ opencli doctor
 
 健康状态应同时包含 daemon running、extension connected 和一个 connected Chrome profile。仅安装 npm 包不等于 Browser Bridge 可用；Chrome 扩展断开时，OpenCLI 社区搜索会明确失败，而普通 Playwright 浏览器工具不受影响。
 
-在 DSH Desktop（Electron）中，插件会从 `PATH` 查找真正的 Node.js 可执行文件来运行内置 OpenCLI 和浏览器运行时 CLI。若 `browser_opencli_status` 报告找不到 Node.js，可在启动 DSH Desktop 的环境中设置 `DSH_BROWSER_NODE` 为 `node.exe` 的绝对路径，然后重启 Desktop。
+在 DSH Desktop（Electron）中，插件会从 `PATH` 查找真正的 Node.js 可执行文件来运行内置 OpenCLI 和浏览器运行时 CLI。若 `opencli.status` 报告找不到 Node.js，可在启动 DSH Desktop 的环境中设置 `DSH_BROWSER_NODE` 为 `node.exe` 的绝对路径，然后重启 Desktop。
 
-插件内先调用 `browser_opencli_status`，不要只看 `browser_status.opencliEnabled`。后者表示配置开关，
+插件内先调用 `opencli.status`，不要只看 `runtime.status.opencliEnabled`。后者表示配置开关，
 前者才是真实连接。通用调用以 argv 数组传入，不经过 shell，也不会自行拼接引号：
 
 ```json
@@ -440,7 +468,7 @@ opencli doctor
 { "query": "search", "site": "reddit", "access": "read", "limit": 10 }
 ```
 
-`browser_opencli_catalog` 从 `opencli list -f json` 读取并缓存目录，只暴露过滤后的最多 100 条；它不执行站点命令，也不读取站点登录数据。
+`opencli.catalog` 从 `opencli list -f json` 读取并缓存目录，只暴露过滤后的最多 100 条；它不执行站点命令，也不读取站点登录数据。
 
 优先级建议：已有站点 adapter（`opencli <site> <command>`）→ `opencli web read` / `extract` →
 `browser network` → DOM state/find/action → 最后才是只读 `eval`。`opencli browser` 必须包含显式 session：
@@ -453,7 +481,7 @@ opencli doctor
 ["browser", "research", "close"]
 ```
 
-`browser_opencli_run` 是通用高级入口，可能调用发布、删除、发帖等 adapter，因此无论命令看起来是否只读，
+`opencli.run` 是通用高级入口，可能调用发布、删除、发帖等 adapter，因此无论命令看起来是否只读，
 除 `unrestricted` 外都要求原生一次性审批。常规搜索仍优先走 `dsh-web-search-pro` 的只读工具。
 
 ## 发布 / 构建
