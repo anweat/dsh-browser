@@ -86,14 +86,17 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
       ],
     })
     assert.equal(result.title, 'E2E Search')
-    assert.deepEqual(result.steps.map((step: any) => [step.action, step.ok]), [
+    assert.equal(result.executionStatus, 'completed')
+    assert.equal(result.validationStatus, 'passed')
+    assert.equal(result.effects, 'observed')
+    assert.deepEqual(result.completedSteps.map((step: any) => [step.action, step.ok]), [
       ['fill', true], ['click', true], ['assert', true], ['extract', true], ['extract', true],
     ])
-    const text = result.steps[3].value as string
+    const text = result.completedSteps[3].value as string
     assert.match(text, /apple/)
     assert.match(text, /apricot/)
     assert.doesNotMatch(text, /banana/)
-    assert.match(result.steps[4].value, /<li class="hit">apple<\/li>/)
+    assert.match(result.completedSteps[4].value, /<li class="hit">apple<\/li>/)
     assert.match(result.text, /2 results for ap/)
   })
 
@@ -108,9 +111,12 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     })
     assert.equal(envelope.ok, false)
     assert.equal(envelope.executionStatus, 'failed')
-    assert.equal(envelope.result, undefined)
-    assert.equal(envelope.error.code, 'LOCATOR_NOT_FOUND', 'the expected text never appeared')
+    assert.equal(envelope.error.code, 'VALIDATION_FAILED', 'the expected text never appeared')
     assert.match(envelope.error.message, /Timeout 500ms exceeded/, 'the Playwright message is preserved')
+    assert.equal(envelope.result.validationStatus, 'failed')
+    assert.equal(envelope.result.failedStep.index, 3)
+    assert.equal(envelope.result.completedSteps.length, 2, 'the fill and the click ran and are reported')
+    assert.equal(envelope.result.effects, 'observed')
   })
 
   it('browser_index discloses in layers: root, group, then one action', async () => {

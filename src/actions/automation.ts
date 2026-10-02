@@ -1,10 +1,13 @@
 /** `automation` group: reusable assets and inline recipes. @module dsh-browser/actions/automation */
 
 import type { ActionDef } from './types.ts'
-import { ActionUnavailableError } from './types.ts'
+import { ActionUnavailableError, withOutcome } from './types.ts'
 import type { BrowserRecipeStep } from '../automation.ts'
 import { executeAutomationAsset } from '../automation-execution.ts'
-import { capJson } from './shared.ts'
+import { capJson, recipeOutcome } from './shared.ts'
+
+/** After the deadline aborts a recipe, how long to wait for its in-flight step to return (a step times out within 30 s). */
+const RECIPE_SETTLE_MS = 40_000
 
 const DEVELOP_LIMIT = 100_000
 
@@ -53,7 +56,7 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
       authProfile: { type: 'string' },
       rulePack: { type: 'string' },
     },
-    approval: 'asset-develop', readOnly: true, mutating: false, concurrencySafe: false, timeoutMs: 30_000,
+    approval: 'asset-develop', readOnly: true, mutating: false, concurrencySafe: false, timeoutMs: 30_000, settleMs: RECIPE_SETTLE_MS,
     examples: [{ args: { action: 'get', id: 'asset-id' } }],
     async execute(args, ctx) {
       const { assets, development } = ctx
@@ -77,7 +80,13 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
           session: ctx.session,
         })
         const capped = capJson(result.value, 50_000)
-        return developmentResult('test', { id: result.asset.id, testStatus: result.asset.testStatus, testMessage: result.asset.testMessage, result: capped.value, truncated: capped.truncated }, result.asset)
+        // Flat on purpose: executionStatus, validationStatus, completedSteps, failedStep and effects sit next to testStatus.
+        return withOutcome({
+          action: 'test', assetId: result.asset.id, status: result.asset.status,
+          testStatus: result.asset.testStatus, testMessage: result.asset.testMessage,
+          ...result.execution,
+          result: capped.value, truncated: capped.truncated,
+        }, recipeOutcome(result.execution))
       }
       if (args.action !== 'save' || !args.kind || !args.name) throw new Error('automation development save requires kind and name')
       const asset = development.save({
@@ -101,7 +110,7 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
       inputs: { type: 'object', additionalProperties: true, description: 'Declared string inputs used by named recipe placeholders.' },
       authProfile: { type: 'string' }, rulePack: { type: 'string' },
     },
-    approval: 'asset-run', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 120_000,
+    approval: 'asset-run', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 120_000, settleMs: RECIPE_SETTLE_MS,
     examples: [{ args: { id: 'asset-id', url: 'https://example.com/search', inputs: { query: 'dsh' } } }],
     async execute(args, ctx) {
       if (!ctx.assets) throw new ActionUnavailableError('automation assets are unavailable')
@@ -112,7 +121,7 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
         session: ctx.session,
       })
       const capped = capJson(result.value, DEVELOP_LIMIT)
-      return { assetId: result.asset.id, kind: result.asset.kind, result: capped.value, truncated: capped.truncated }
+      return withOutcome({ assetId: result.asset.id, kind: result.asset.kind, ...result.execution, result: capped.value, truncated: capped.truncated }, recipeOutcome(result.execution))
     },
   },
   {
@@ -127,12 +136,12 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
       waitMs: { type: 'number' },
       steps: { type: 'array', required: true, items: { ref: 'recipeStep' } },
     },
-    approval: 'recipe', readOnly: true, mutating: true, concurrencySafe: false, timeoutMs: 120_000,
+    approval: 'recipe', readOnly: true, mutating: true, concurrencySafe: false, timeoutMs: 120_000, settleMs: RECIPE_SETTLE_MS,
     examples: [{ args: { url: 'https://example.com/', steps: [{ type: 'extract', selector: 'main', mode: 'text', limit: 5 }] } }],
     async execute(args, ctx) {
       const steps = args.steps as BrowserRecipeStep[]
       try {
-        const result = await ctx.service.recipe(steps, {
+        const { steps: _legacy, ...result } = await ctx.service.recipe(steps, {
           signal: ctx.signal,
           ...args.url ? { url: args.url } : {},
           ...args.waitMs !== undefined ? { waitMs: args.waitMs } : {},
@@ -140,8 +149,10 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
           ...args.rulePack ? { rulePack: args.rulePack } : {},
           session: ctx.session,
         })
-        ctx.assets?.recordRecipe(result.url, steps, ctx.sessionId, true)
-        return result
+        const outcome = recipeOutcome(result)
+        const where = result.url || args.url
+        if (where) ctx.assets?.recordRecipe(where, steps, ctx.sessionId, outcome.ok)
+        return withOutcome(result, outcome)
       } catch (error) {
         if (args.url) ctx.assets?.recordRecipe(args.url, steps, ctx.sessionId, false)
         throw error

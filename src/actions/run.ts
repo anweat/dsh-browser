@@ -8,11 +8,11 @@
  * @module dsh-browser/actions/run
  */
 
-import type { ActionContext, ActionEnvelope, ActionErrorBody, ExecutionStatus } from './types.ts'
+import { outcomeOf, type ActionContext, type ActionEnvelope, type ActionErrorBody, type ExecutionStatus } from './types.ts'
 import { ACTIONS, findAction } from './registry.ts'
 import { actionUnavailableReason, type AutomationMode, type ExposureOptions } from '../freedom.ts'
 import { compactSchema, validateArgs } from './schema.ts'
-import { DeadlineError, hintFor, mapError } from './errors.ts'
+import { DeadlineError, abortedByDeadline, hintFor, mapError } from './errors.ts'
 
 /** Serialized-result cap; larger results get their longest strings shortened. */
 export const RESULT_CHAR_LIMIT = 100_000
@@ -69,20 +69,27 @@ export function truncateResult(result: Record<string, unknown>, limit = RESULT_C
   return { result: copy, truncation: { omitted, reason: `result exceeded ${limit} characters; longest text fields were shortened` } }
 }
 
-function withDeadline<T>(run: (signal: AbortSignal) => Promise<T>, timeoutMs: number, parent: AbortSignal): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
+function withDeadline<T>(run: (signal: AbortSignal) => Promise<T>, timeoutMs: number, parent: AbortSignal, settleMs = 0): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
   const controller = new AbortController()
   const onAbort = (): void => controller.abort(parent.reason)
   if (parent.aborted) controller.abort(parent.reason)
   else parent.addEventListener('abort', onAbort, { once: true })
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<{ timedOut: true }>(resolve => {
-    timer = setTimeout(() => { controller.abort(new DeadlineError('deadline')); resolve({ timedOut: true }) }, timeoutMs)
-  })
   const work = run(controller.signal).then(value => ({ timedOut: false as const, value }))
   // If the deadline wins, the work may still reject later; swallow it.
   work.catch(() => {})
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let settleTimer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<{ timedOut: true }>(resolve => {
+    timer = setTimeout(() => {
+      controller.abort(new DeadlineError('deadline'))
+      // A cooperative executor gets a bounded window to stop at its next safe point; if it returns inside the window, `work` wins the race below.
+      if (settleMs > 0) settleTimer = setTimeout(() => resolve({ timedOut: true }), settleMs)
+      else resolve({ timedOut: true })
+    }, timeoutMs)
+  })
   return Promise.race([work, deadline]).finally(() => {
     clearTimeout(timer)
+    clearTimeout(settleTimer)
     parent.removeEventListener('abort', onAbort)
   })
 }
@@ -117,8 +124,9 @@ export async function runAction(name: unknown, rawArgs: unknown, ctx: ActionCont
   }
   if (ctx.signal.aborted) return failure(action.name, 'cancelled', { code: 'CANCELLED', message: 'cancelled before start', hint: hintFor('CANCELLED')! })
 
+  let workSignal: AbortSignal = ctx.signal
   try {
-    const outcome = await withDeadline(signal => action.execute(validation.value, { ...ctx, signal }), action.timeoutMs, ctx.signal)
+    const outcome = await withDeadline(signal => { workSignal = signal; return action.execute(validation.value, { ...ctx, signal }) }, action.timeoutMs, ctx.signal, action.settleMs)
     if (outcome.timedOut) {
       // The work may still finish after the deadline, so a side-effecting action has an unknown outcome.
       const status: ExecutionStatus = action.mutating ? 'outcome_unknown' : 'failed'
@@ -128,10 +136,14 @@ export async function runAction(name: unknown, rawArgs: unknown, ctx: ActionCont
         hint: action.mutating ? 'Outcome unknown: verify the page state with observe.read before retrying; do not blindly repeat a submit.' : hintFor('DEADLINE')!,
       })
     }
+    // A result may carry its own outcome (a recipe that ran and failed still returns its whole report).
+    const own = outcomeOf(outcome.value)
     const { result, truncation } = truncateResult(asResult(outcome.value))
-    return { ok: true, action: action.name, executionStatus: 'completed', result, ...truncation ? { truncation } : {} }
+    return { ok: own?.ok ?? true, action: action.name, executionStatus: own?.executionStatus ?? 'completed', result, ...own?.error ? { error: own.error } : {}, ...truncation ? { truncation } : {} }
   } catch (error) {
-    const body = mapError(error, action.name, { signal: ctx.signal })
+    const body = mapError(error, action.name, { signal: workSignal })
+    // The deadline stopped work that had not returned: for a side-effecting action the outcome is unknown.
+    if (abortedByDeadline(workSignal) && action.mutating) return failure(action.name, 'outcome_unknown', { ...body, code: 'DEADLINE', hint: 'Outcome unknown: verify the page state with observe.read before retrying; do not blindly repeat a submit.' })
     return failure(action.name, body.code === 'CANCELLED' ? 'cancelled' : 'failed', body)
   }
 }

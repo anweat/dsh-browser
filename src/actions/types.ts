@@ -94,6 +94,12 @@ export interface ActionDef {
   concurrencySafe: boolean
   /** Per-call budget; exceeded budgets return DEADLINE. */
   timeoutMs: number
+  /**
+   * Set for an executor that honours the abort signal at safe points and returns a structured partial
+   * result (recipes). After the deadline aborts it, the call waits up to this many ms for it to return,
+   * so the browser is quiet again before the next call and the completed steps are not lost.
+   */
+  settleMs?: number
   examples?: ActionExample[]
   /** Which error codes callers should expect beyond the generic set. */
   errors?: string[]
@@ -133,6 +139,29 @@ export interface ActionErrorBody {
   hint?: string
   /** Compact parameter schema, attached to INVALID_ARGS so the model can fix the call at once. */
   schema?: string
+}
+
+/**
+ * How an executor tells the dispatcher that a returned value is not a plain
+ * success: a recipe that ran but failed still returns its full report, and the
+ * envelope carries `ok: false` and an error next to it.
+ */
+export interface ActionOutcome {
+  ok: boolean
+  executionStatus: ExecutionStatus
+  error?: ActionErrorBody
+}
+
+const OUTCOMES = new WeakMap<object, ActionOutcome>()
+
+/** Attach an outcome to a result object without changing its serialized form. */
+export function withOutcome<T extends object>(value: T, outcome: ActionOutcome): T {
+  OUTCOMES.set(value, outcome)
+  return value
+}
+
+export function outcomeOf(value: unknown): ActionOutcome | undefined {
+  return value !== null && typeof value === 'object' ? OUTCOMES.get(value) : undefined
 }
 
 export interface ActionEnvelope {

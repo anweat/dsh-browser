@@ -1,7 +1,9 @@
 /** Helpers shared by the action group modules. @module dsh-browser/actions/shared */
 
 import type { BrowserLocatorSpec, BrowserTarget } from '../browser-service.ts'
-import { ActionArgError } from './types.ts'
+import type { RecipeRunResult } from '../automation.ts'
+import { hintFor } from './errors.ts'
+import { ActionArgError, type ActionOutcome } from './types.ts'
 
 export const COMPLIANCE_NOTICE = 'The caller/operator must use this capability according to the target site rules and applicable requirements; dsh-browser only executes the requested browser operation and does not determine whether a particular use is permitted.'
 
@@ -22,4 +24,19 @@ export function capJson(value: unknown, limit: number): { value: unknown; trunca
   const raw = JSON.stringify(value)
   if (raw === undefined || raw.length <= limit) return { value, truncated: false }
   return { value: raw.slice(0, limit), truncated: true }
+}
+
+/**
+ * The envelope outcome of a recipe run. `ok` means the run completed and no
+ * assertion failed; a run that did less keeps its full report in `result` and
+ * gets an `error` that names what happened and what to do next.
+ */
+export function recipeOutcome(run: Pick<RecipeRunResult, 'executionStatus' | 'validationStatus' | 'failedStep' | 'message'>): ActionOutcome {
+  if (run.executionStatus === 'completed' && run.validationStatus !== 'failed') return { ok: true, executionStatus: 'completed' }
+  const code = run.executionStatus === 'outcome_unknown' ? 'OUTCOME_UNKNOWN'
+    : run.failedStep?.errorCode ?? (run.executionStatus === 'cancelled' ? 'CANCELLED' : run.validationStatus === 'failed' ? 'VALIDATION_FAILED' : 'ACTION_FAILED')
+  const original = run.failedStep ? ` [step ${run.failedStep.index} ${run.failedStep.action}, ${run.failedStep.errorCode}] ${run.failedStep.message}` : ''
+  const message = (run.message ?? 'The run did not complete.') + (run.message && original ? ' Original error:' + original : original)
+  const hint = hintFor(code) ?? 'The run did not complete; read completedSteps, failedStep and effects before deciding what to do.'
+  return { ok: false, executionStatus: run.executionStatus, error: { code, message, hint } }
 }
