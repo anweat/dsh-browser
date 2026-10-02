@@ -161,6 +161,24 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     }
   })
 
+  it('the flat surface runs the same actions through per-action tools with the same envelope', async () => {
+    assert.ok(detection.ok)
+    const flat = createHarness(detection, { toolSurface: 'flat' })
+    try {
+      assert.ok(flat.toolNames().includes('browser_act_click') && !flat.toolNames().includes('browser_call'))
+      const opened = await flat.call(S1, 'browser_target_open', { url: url('form.html') })
+      assert.equal(opened.ok, true)
+      assert.equal(opened.action, 'target.open')
+      const clicked = await flat.call(S1, 'browser_act_click', { locator: { role: 'button', name: 'Increment' } })
+      assert.equal(clicked.ok, true, JSON.stringify(clicked))
+      assert.match(clicked.result.text, /Count: 1/)
+      // On the flat surface the Host's own schema check runs first, so a bad call is rejected before dispatch.
+      await assert.rejects(flat.call(S1, 'browser_act_fill', { selector: '#name' }), /missing required property "text"/)
+    } finally {
+      await flat.dispose()
+    }
+  })
+
   it('a malformed call returns INVALID_ARGS with the schema, and the corrected call then succeeds', async () => {
     await harness.result(S1, 'target.open', { url: url('form.html') })
     // A typical model slip: wrong key name and a missing required value.
