@@ -338,11 +338,11 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     const assetStore = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory: path.join(snapshotDir, 'automations'), persistenceMode: 'manual' }))
     const draft = assetStore.saveDraft({ kind: 'userscript', name: 'Reusable heading reader', domains: ['127.0.0.1'], inputNames: ['query'], source: VALID_SCRIPT })
     assert.equal(assetStore.validate(draft.id).testStatus, 'untested')
-    assert.throws(() => assetStore.setStatus(draft.id, 'active'), /pass testing/)
+    assert.throws(() => assetStore.setStatus(draft.id, 'active', { expectedRevision: draft.revision }), /pass testing/)
     const replay = await executeAutomationAsset(service, assetStore, draft.id, url, { query: 'draft-replay' }, 'draft')
     assert.equal(JSON.parse((replay.value as { resultJson: string }).resultJson).input, 'draft-replay')
     assert.equal(assetStore.get(draft.id)?.testStatus, 'passed')
-    assert.equal(assetStore.setStatus(draft.id, 'active').status, 'active')
+    assert.equal(assetStore.setStatus(draft.id, 'active', { expectedRevision: draft.revision }).status, 'active')
 
     const extracted = await service.searchResults(url, {
       item: 'main', title: 'h1', link: 'a', text: '#copy',

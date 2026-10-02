@@ -44,7 +44,7 @@ const V1: BrowserRecipeStep[] = [
 function activeV1(store: AutomationAssetStore): AutomationAsset {
   const draft = store.saveDraft({ kind: 'recipe', name: 'Search issues', description: 'Search and read', domains: ['example.com'], tags: ['search'], recipe: V1 })
   store.noteTestResult(draft.id, true, URL)
-  store.setStatus(draft.id, 'active')
+  store.setStatus(draft.id, 'active', { expectedRevision: draft.revision })
   return store.get(draft.id)!
 }
 
@@ -99,7 +99,7 @@ test('converting an active asset leaves it, byte for byte, as it was, and create
   assert.equal(store.snapshot().assets.length, 2)
   assert.equal(store.search('search issues', 'example.com')[0]?.id, source.id, 'the active asset is still what search returns')
   assert.equal(store.search('search issues', 'example.com').length, 1, 'the draft is not active, so it is not offered')
-  assert.throws(() => store.setStatus(draft.id, 'active'), /pass testing/)
+  assert.throws(() => store.setStatus(draft.id, 'active', { expectedRevision: draft.revision }), /pass testing/)
 })
 
 test('a draft source and an archived source convert too; only recipes that are still v1 do', () => {

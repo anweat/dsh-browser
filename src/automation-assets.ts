@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { validateRecipeEnums, type AnyRecipeStep, type BrowserRecipeStep } from './automation.ts'
+import { validateRecipeEnums, type AnyRecipeStep, type BrowserRecipeStep, type RecipeExecutionStatus, type RecipeValidationStatus } from './automation.ts'
 import { RecipeValidationError } from './actions/errors.ts'
 import {
   normalizeInputSchema, normalizeOutputSchema, normalizePostconditions, normalizeRequiredCapabilities, pendingDisambiguation, placeholderNames, validateRecipeV2,
@@ -27,6 +27,33 @@ export type AutomationAssetStatus = 'draft' | 'active' | 'archived'
  */
 export type EvidenceLevel = 'verified' | 'legacy-unverified'
 
+/** Recipe/UserScript test credentials kept per asset unless `maxTestCredentials` says otherwise. */
+export const DEFAULT_TEST_CREDENTIALS = 5
+
+/**
+ * What one runtime test proved, bound to the exact content it ran against. Activation trusts
+ * only a credential whose revision and contentHash match the asset as it is now.
+ * Inputs are kept as a digest, never as values.
+ */
+export interface TestCredential {
+  revision: number
+  /** {@link computeContentHash} of the content that was tested. */
+  contentHash: string
+  /** sha256 of the typed inputSchema (or of the declared input names for v1 and UserScripts). */
+  inputSchemaHash: string
+  schemaVersion: 1 | 2
+  testedAt: string
+  /** Truncated sha256 of the canonical inputs the test ran with. */
+  inputsDigest: string
+  executionStatus: RecipeExecutionStatus
+  validationStatus: RecipeValidationStatus
+  evidenceLevel: EvidenceLevel
+  /** The test counted as passed: it completed, nothing failed, and (v2) something verified the result. */
+  passed: boolean
+  /** Synthesized when data written before B4 was loaded: `testStatus` was `passed` and nothing else is known. */
+  legacy?: true
+}
+
 export interface AutomationAssetPolicyInput {
   enabled?: boolean
   directory?: string
@@ -45,6 +72,8 @@ export interface AutomationAssetPolicyInput {
   catalogTokenBudget?: number
   modelDevelopmentEnabled?: boolean
   maxModelDraftWritesPerSession?: number
+  /** How many test credentials each asset keeps (the most recent ones). Default 5. */
+  maxTestCredentials?: number
 }
 
 export interface AutomationAssetPolicy {
@@ -65,6 +94,7 @@ export interface AutomationAssetPolicy {
   catalogTokenBudget: number
   modelDevelopmentEnabled: boolean
   maxModelDraftWritesPerSession: number
+  maxTestCredentials: number
 }
 
 export interface AutomationCandidate {
@@ -109,7 +139,12 @@ export interface AutomationAsset {
   /** Set when this draft was converted from another asset; the source is never modified. */
   sourceAssetId?: string
   sourceRevision?: number
+  /** Bumped by every save, never reused. */
   revision: number
+  /** sha256 over the recipe or source, schemaVersion, inputSchema, outputSchema, postconditions and domains. Derived; recomputed on load. */
+  contentHash?: string
+  /** The most recent runtime tests, oldest first. Activation checks the one bound to the current revision. */
+  testCredentials?: TestCredential[]
   testStatus: 'untested' | 'passed' | 'failed'
   testMessage?: string
   /** Optional on stored data; absent means `legacy-unverified`. Set only by a passing runtime test. */
@@ -205,12 +240,59 @@ export function resolveAutomationAssetPolicy(input: AutomationAssetPolicyInput =
     catalogTokenBudget: boundedInteger(input.catalogTokenBudget, 800, 100, 4_000),
     modelDevelopmentEnabled: input.modelDevelopmentEnabled ?? true,
     maxModelDraftWritesPerSession: boundedInteger(input.maxModelDraftWritesPerSession, 3, 1, 20),
+    maxTestCredentials: boundedInteger(input.maxTestCredentials, DEFAULT_TEST_CREDENTIALS, 1, 20),
   }
 }
 
 function nowIso(now = Date.now()): string { return new Date(now).toISOString() }
 function uid(): string { return crypto.randomUUID() }
 function hash(value: string): string { return crypto.createHash('sha256').update(value).digest('hex') }
+
+/** JSON with sorted keys and no undefined members: the same value always gives the same text. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(entry => canonicalJson(entry)).join(',') + ']'
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return '{' + Object.keys(record).filter(key => record[key] !== undefined).sort().map(key => JSON.stringify(key) + ':' + canonicalJson(record[key])).join(',') + '}'
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+type HashedContent = Pick<AutomationAsset, 'kind' | 'recipe' | 'source' | 'schemaVersion' | 'inputSchema' | 'outputSchema' | 'postconditions' | 'domains'>
+
+/**
+ * What a test vouches for: the steps or source, the schema version and the three v2 contracts, and the
+ * domains it may run on. Name, description, tags and counters are not content. Domains are a set.
+ */
+export function computeContentHash(asset: HashedContent): string {
+  return hash(canonicalJson({
+    ...asset.kind === 'userscript' ? { source: asset.source ?? '' } : { recipe: asset.recipe ?? [] },
+    schemaVersion: asset.schemaVersion ?? 1,
+    inputSchema: asset.inputSchema ?? null,
+    outputSchema: asset.outputSchema ?? null,
+    postconditions: asset.postconditions ?? null,
+    domains: [...asset.domains].sort(),
+  }))
+}
+
+function computeInputSchemaHash(asset: Pick<AutomationAsset, 'inputSchema' | 'inputNames'>): string {
+  return hash(canonicalJson(asset.inputSchema ?? { inputNames: [...asset.inputNames].sort() }))
+}
+
+/** A digest of the inputs a test ran with. The values themselves are never stored. */
+export function digestInputs(inputs: unknown): string {
+  return hash(canonicalJson(inputs ?? {})).slice(0, 16)
+}
+
+/** Why an activation request was refused; the message says what to do. */
+export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached'
+
+export class ActivationRefusedError extends Error {
+  constructor(readonly reason: ActivationRefusal, message: string) {
+    super(message)
+    this.name = 'ActivationRefusedError'
+  }
+}
 
 function safeDomain(url: string): string {
   const parsed = new URL(url)
@@ -288,7 +370,38 @@ function persistedState(value: unknown): PersistedState {
     || (asset.schemaVersion !== undefined && ![1, 2].includes(asset.schemaVersion))
     || !Number.isInteger(asset.revision) || !Number.isFinite(Date.parse(asset.createdAt)) || !Number.isFinite(Date.parse(asset.updatedAt)))
   if (malformedCandidate || malformedAsset) throw new Error('persisted asset entries are malformed')
+  const malformedCredentials = state.assets.some(asset => asset.testCredentials !== undefined
+    && (!Array.isArray(asset.testCredentials) || asset.testCredentials.some(entry => !entry || typeof entry !== 'object' || !Number.isInteger(entry.revision) || typeof entry.contentHash !== 'string')))
+  if (malformedCredentials) throw new Error('persisted test credentials are malformed')
+  for (const asset of state.assets) upgradeLegacyAsset(asset)
   return { version: 1, candidates: state.candidates, assets: state.assets }
+}
+
+/**
+ * Fill in what data written before B4 lacks, without touching any existing field: the content hash is
+ * derived, and a `testStatus` of `passed` becomes a legacy credential bound to the current revision.
+ */
+function upgradeLegacyAsset(asset: AutomationAsset): void {
+  asset.contentHash = computeContentHash(asset)
+  if (asset.testStatus === 'passed' && !asset.testCredentials?.some(entry => entry.revision === asset.revision)) {
+    const legacy: TestCredential = {
+      revision: asset.revision, contentHash: asset.contentHash, inputSchemaHash: computeInputSchemaHash(asset), schemaVersion: asset.schemaVersion ?? 1,
+      testedAt: asset.updatedAt, inputsDigest: 'legacy', executionStatus: 'completed',
+      validationStatus: asset.evidenceLevel === 'verified' ? 'passed' : 'not_checked', evidenceLevel: asset.evidenceLevel ?? 'legacy-unverified', passed: true, legacy: true,
+    }
+    asset.testCredentials = [...asset.testCredentials ?? [], legacy]
+  }
+}
+
+/** What a test reports besides pass/fail, for the credential it leaves. */
+export interface TestDetails {
+  /** The inputs the test ran with; only their digest is kept. */
+  inputs?: unknown
+  executionStatus?: RecipeExecutionStatus
+  validationStatus?: RecipeValidationStatus
+  inputSchemaHash?: string
+  /** The revision and content that were tested; defaults to the asset's current ones. */
+  tested?: { revision: number; contentHash: string }
 }
 
 export class AutomationAssetStore {
@@ -368,6 +481,7 @@ export class AutomationAssetStore {
       domains: [candidate.domain], tags: [`candidate:${candidate.id}`], inputNames: recipeInputNames(candidate.steps), recipe: structuredClone(candidate.steps), revision: 1,
       testStatus: 'untested', successCount: 0, failureCount: 0, createdAt: timestamp, updatedAt: timestamp,
     }
+    asset.contentHash = computeContentHash(asset)
     this.state.assets.push(asset)
     candidate.dismissedAt = timestamp
     this.write()
@@ -423,8 +537,11 @@ export class AutomationAssetStore {
       } : {},
       ...sourceAssetId !== undefined ? { sourceAssetId, sourceRevision: sourceRevision! } : {},
       revision: (existing?.revision ?? 0) + 1, testStatus: 'untested', successCount: existing?.successCount ?? 0, failureCount: existing?.failureCount ?? 0,
+      // Earlier credentials stay as history; each is bound to its own revision and never vouches for this one.
+      ...existing?.testCredentials?.length ? { testCredentials: existing.testCredentials.slice(-this.policy.maxTestCredentials) } : {},
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, ...existing?.lastRunAt ? { lastRunAt: existing.lastRunAt } : {},
     }
+    asset.contentHash = computeContentHash(asset)
     if (existing) this.state.assets[this.state.assets.indexOf(existing)] = asset
     else this.state.assets.push(asset)
     this.write()
@@ -485,18 +602,73 @@ export class AutomationAssetStore {
     return { ...structuredClone(asset), testMessage: message }
   }
 
-  setStatus(id: string, status: AutomationAssetStatus): AutomationAsset {
+  /**
+   * Copy an asset into a NEW draft that remembers where it came from (`sourceAssetId`, `sourceRevision`).
+   * This is how an active asset is repaired: active assets cannot be edited, the copy can, and the source
+   * keeps running until the copy is tested and activated (which then archives the source).
+   */
+  fork(id: string): AutomationAsset {
+    if (!this.policy.enabled || this.policy.persistenceMode === 'off') throw new Error('automation asset persistence is disabled')
+    const source = this.requireAsset(id)
+    if (this.state.assets.filter(item => item.status === 'draft').length >= this.policy.maxDrafts) throw new Error('automation draft limit reached')
+    const timestamp = nowIso()
+    const copy = structuredClone(source)
+    const draft: AutomationAsset = {
+      id: uid(), kind: copy.kind, status: 'draft', name: copy.name, description: copy.description, domains: copy.domains, tags: copy.tags, inputNames: copy.inputNames,
+      ...copy.recipe ? { recipe: copy.recipe } : {}, ...copy.source !== undefined ? { source: copy.source } : {},
+      ...copy.schemaVersion ? { schemaVersion: copy.schemaVersion } : {},
+      ...copy.inputSchema ? { inputSchema: copy.inputSchema } : {}, ...copy.outputSchema ? { outputSchema: copy.outputSchema } : {},
+      ...copy.postconditions ? { postconditions: copy.postconditions } : {}, ...copy.requiredCapabilities ? { requiredCapabilities: copy.requiredCapabilities } : {},
+      ...copy.pendingDisambiguation ? { pendingDisambiguation: copy.pendingDisambiguation } : {},
+      sourceAssetId: source.id, sourceRevision: source.revision,
+      revision: 1, testStatus: 'untested', successCount: 0, failureCount: 0, createdAt: timestamp, updatedAt: timestamp,
+    }
+    draft.contentHash = computeContentHash(draft)
+    this.state.assets.push(draft)
+    this.write()
+    return structuredClone(draft)
+  }
+
+  /**
+   * Change an asset's status. Activation is the guarded one: the request must name the revision the caller
+   * looked at (`expectedRevision`), and that revision, as it is now, needs a passed test credential bound to
+   * its exact content. A draft that was forked from (or converted from) an active asset replaces it: the
+   * source is archived in the same write, so the repaired asset never runs next to the one it fixes.
+   */
+  setStatus(id: string, status: AutomationAssetStatus, options: { expectedRevision?: number } = {}): AutomationAsset {
     const asset = this.requireAsset(id)
     if (!['draft', 'active', 'archived'].includes(status)) throw new Error('invalid automation asset status')
+    let replaced: AutomationAsset | undefined
     if (status === 'active') {
-      if (asset.testStatus !== 'passed') throw new Error('automation asset must pass testing before activation')
-      if (asset.domains.length < 1) throw new Error('automation asset must declare at least one domain before activation')
-      if (this.state.assets.filter(item => item.status === 'active' && item.id !== id).length >= this.policy.maxActiveAssets) throw new Error('active automation asset limit reached')
+      replaced = this.checkActivation(asset, options.expectedRevision)
     }
+    const timestamp = nowIso()
     asset.status = status
-    asset.updatedAt = nowIso()
+    asset.updatedAt = timestamp
+    if (replaced) { replaced.status = 'archived'; replaced.updatedAt = timestamp }
     this.write()
     return structuredClone(asset)
+  }
+
+  /** Throws {@link ActivationRefusedError} unless `asset` may become active; returns the active asset it replaces, if any. */
+  private checkActivation(asset: AutomationAsset, expectedRevision: number | undefined): AutomationAsset | undefined {
+    if (!Number.isInteger(expectedRevision)) throw new ActivationRefusedError('expected-revision-required', 'activation requires expectedRevision: the revision you looked at and tested')
+    if (asset.revision !== expectedRevision) {
+      throw new ActivationRefusedError('revision-mismatch', `activation refused: expectedRevision ${expectedRevision} is not the current revision ${asset.revision}; the asset changed after you looked at it. Reload it, test that revision, then activate it`)
+    }
+    const credentials = (asset.testCredentials ?? []).filter(entry => entry.revision === asset.revision)
+    const latest = credentials.at(-1)
+    if (!latest) throw new ActivationRefusedError('not-tested', `automation asset must pass testing before activation: revision ${asset.revision} has no test credential`)
+    if (!latest.passed || asset.testStatus !== 'passed') throw new ActivationRefusedError('test-failed', `automation asset must pass testing before activation: the latest test of revision ${asset.revision} did not pass`)
+    if (latest.contentHash !== computeContentHash(asset)) {
+      throw new ActivationRefusedError('content-changed', `automation asset must pass testing before activation: the passed test of revision ${asset.revision} covered different content than the asset has now; save and test it again`)
+    }
+    if (asset.domains.length < 1) throw new ActivationRefusedError('no-domain', 'automation asset must declare at least one domain before activation')
+    const replaced = asset.sourceAssetId ? this.state.assets.find(item => item.id === asset.sourceAssetId && item.id !== asset.id && item.status === 'active') : undefined
+    if (this.state.assets.filter(item => item.status === 'active' && item.id !== asset.id && item.id !== replaced?.id).length >= this.policy.maxActiveAssets) {
+      throw new ActivationRefusedError('limit-reached', 'active automation asset limit reached')
+    }
+    return replaced
   }
 
   search(query: string, domain?: string, status: AutomationAssetStatus | 'all' = 'active', kind?: AutomationAssetKind): AutomationAssetSummary[] {
@@ -533,16 +705,33 @@ export class AutomationAssetStore {
     this.write()
   }
 
-  noteTestResult(id: string, ok: boolean, url: string, evidenceLevel: EvidenceLevel = 'legacy-unverified', failureReason?: string): void {
+  /**
+   * Record one runtime test as a credential bound to the content that ran. The asset's own `testStatus`
+   * moves only if that content is still the asset's current content: a test that finishes after a newer
+   * save leaves a credential for the old revision and changes nothing else.
+   */
+  noteTestResult(id: string, ok: boolean, url: string, evidenceLevel: EvidenceLevel = 'legacy-unverified', failureReason?: string, details: TestDetails = {}): void {
     const asset = this.requireAsset(id)
     if (asset.status !== 'draft') throw new Error('only draft automation assets can record test results')
     const domain = safeDomain(url)
-    asset.testStatus = ok ? 'passed' : 'failed'
-    if (ok) asset.evidenceLevel = evidenceLevel
-    else delete asset.evidenceLevel
-    asset.testMessage = !ok ? (failureReason ?? `Runtime replay failed on ${domain}.`)
-      : evidenceLevel === 'verified' ? `Runtime replay passed on ${domain}; every assert step held.`
-        : `Runtime replay passed on ${domain}; no assert step checked the result (legacy-unverified).`
+    const currentHash = computeContentHash(asset)
+    const tested = details.tested ?? { revision: asset.revision, contentHash: currentHash }
+    const credential: TestCredential = {
+      revision: tested.revision, contentHash: tested.contentHash, inputSchemaHash: details.inputSchemaHash ?? computeInputSchemaHash(asset), schemaVersion: asset.schemaVersion ?? 1,
+      testedAt: nowIso(), inputsDigest: digestInputs(details.inputs),
+      executionStatus: details.executionStatus ?? (ok ? 'completed' : 'failed'),
+      validationStatus: details.validationStatus ?? (ok && evidenceLevel === 'verified' ? 'passed' : 'not_checked'),
+      evidenceLevel: ok ? evidenceLevel : 'legacy-unverified', passed: ok,
+    }
+    asset.testCredentials = [...asset.testCredentials ?? [], credential].slice(-this.policy.maxTestCredentials)
+    if (tested.revision === asset.revision && tested.contentHash === currentHash) {
+      asset.testStatus = ok ? 'passed' : 'failed'
+      if (ok) asset.evidenceLevel = evidenceLevel
+      else delete asset.evidenceLevel
+      asset.testMessage = !ok ? (failureReason ?? `Runtime replay failed on ${domain}.`)
+        : evidenceLevel === 'verified' ? `Runtime replay passed on ${domain}; every assert step held.`
+          : `Runtime replay passed on ${domain}; no assert step checked the result (legacy-unverified).`
+    }
     asset.updatedAt = nowIso()
     this.write()
   }

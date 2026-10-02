@@ -98,7 +98,7 @@ test('convert: a v1 recipe becomes a NEW v2 draft; the active source is untouche
   const { assets, development } = stores()
   const source = assets.saveDraft({ kind: 'recipe', name: 'Search', domains: ['example.com'], recipe: [{ type: 'fill', selector: '#q', value: '{{query}}' }, { type: 'click', selector: '#go' }, { type: 'assert', text: 'Done' }] })
   assets.noteTestResult(source.id, true, 'https://example.com/')
-  assets.setStatus(source.id, 'active')
+  assets.setStatus(source.id, 'active', { expectedRevision: source.revision })
   const before = JSON.stringify(assets.get(source.id))
 
   const converted = await runAction('automation.develop', { action: 'convert', id: source.id }, ctxFor({}, { assets, development, sessionId: 's1' }), ENV)
@@ -129,7 +129,7 @@ test('search shows a v2 asset\'s typed inputs so a caller can run it without ope
     inputSchema: [{ name: 'query', type: 'string', required: true, example: 'dsh' }],
   })
   assets.noteTestResult(draft.id, true, 'https://example.com/', 'verified')
-  assets.setStatus(draft.id, 'active')
+  assets.setStatus(draft.id, 'active', { expectedRevision: draft.revision })
   const found = await runAction('automation.search', { query: 'search issues' }, ctxFor({}, { assets }), ENV)
   const item = (found.result as any).items[0]
   assert.equal(item.schemaVersion, 2)

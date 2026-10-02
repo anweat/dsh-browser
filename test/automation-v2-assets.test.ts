@@ -131,7 +131,7 @@ test('a v2 test with no assert and no postcondition cannot pass, and says why; v
   assert.equal(result.asset.testStatus, 'failed')
   assert.match(result.asset.testMessage!, /no assert step and no postcondition, so nothing verified the result and the test cannot pass/)
   assert.match(result.execution.message!, /nothing verified the result/)
-  assert.throws(() => store.setStatus(draft.id, 'active'), /pass testing/)
+  assert.throws(() => store.setStatus(draft.id, 'active', { expectedRevision: draft.revision }), /pass testing/)
   assert.deepEqual(calls.map(call => [call.schemaVersion, call.legacyRecipe, call.allowedDomains, call.gotoSameOrigin]), [[2, undefined, ['example.com'], undefined]], 'asset goto is limited to its domains, with no same-origin allowance')
 
   const v1 = store.saveDraft({ kind: 'recipe', name: 'v1', domains: ['example.com'], recipe: [{ type: 'click', selector: '#a' }] })
@@ -153,7 +153,7 @@ test('a v2 asset with an assert or a postcondition can pass, and is verified', a
   const b = await executeAutomationAsset(serviceOver().service, store, withPost.id, URL, {}, 'draft')
   assert.equal(b.succeeded, true)
   assert.equal(b.asset.evidenceLevel, 'verified')
-  assert.equal(store.setStatus(withPost.id, 'active').status, 'active')
+  assert.equal(store.setStatus(withPost.id, 'active', { expectedRevision: withPost.revision }).status, 'active')
 })
 
 test('a failing postcondition makes the run completed but not validated, the test failed, and activation impossible', async () => {
@@ -168,7 +168,7 @@ test('a failing postcondition makes the run completed but not validated, the tes
   assert.equal(result.succeeded, false)
   assert.equal(result.asset.testStatus, 'failed')
   assert.equal(result.asset.evidenceLevel, undefined)
-  assert.throws(() => store.setStatus(draft.id, 'active'), /pass testing/)
+  assert.throws(() => store.setStatus(draft.id, 'active', { expectedRevision: draft.revision }), /pass testing/)
 })
 
 test('inputSchema types are enforced at run time and the converted values reach the steps', async () => {

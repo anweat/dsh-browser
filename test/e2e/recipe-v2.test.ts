@@ -232,7 +232,7 @@ describe('dsh-browser recipe v2 in a real browser', { skip: detection.ok ? false
     assert.equal(failing.result.testStatus, 'failed')
     assert.equal(failing.result.effects, 'observed')
     assert.match(failing.result.failedStep.message, /postcondition 1/)
-    assert.throws(() => harness.assets.setStatus(id, 'active'), /pass testing/)
+    assert.throws(() => harness.assets.setStatus(id, 'active', { expectedRevision: harness.assets.get(id)!.revision }), /pass testing/)
   })
 
   it('convert: a v1 asset becomes a new v2 draft, the active asset is untouched, and the pending first-match step is resolved by editing the draft', async () => {
@@ -242,7 +242,7 @@ describe('dsh-browser recipe v2 in a real browser', { skip: detection.ok ? false
       recipe: [{ type: 'click', selector: 'button[data-hit]' }, { type: 'assert', text: 'Clicked billing' }],
     })
     harness.assets.noteTestResult(v1.id, true, url('strict.html'), 'verified')
-    harness.assets.setStatus(v1.id, 'active')
+    harness.assets.setStatus(v1.id, 'active', { expectedRevision: v1.revision })
 
     const ran = await harness.action(S, 'automation.run', { id: v1.id, url: url('strict.html') })
     assert.equal(ran.ok, true, JSON.stringify(ran))

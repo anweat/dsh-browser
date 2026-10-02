@@ -45,7 +45,7 @@ test('a recipe whose asserts hold is verified, and the asset records that eviden
   assert.equal(result.asset.evidenceLevel, 'verified')
   assert.match(result.asset.testMessage!, /every assert step held/)
   assert.deepEqual(result.value, { url: URL, title: 'T', text: 'page text' }, 'the page state no longer carries the run fields')
-  assert.equal(store.setStatus(draft.id, 'active').status, 'active')
+  assert.equal(store.setStatus(draft.id, 'active', { expectedRevision: draft.revision }).status, 'active')
 })
 
 test('a recipe without asserts still passes the old activation gate, but is marked legacy-unverified', async () => {
@@ -59,7 +59,7 @@ test('a recipe without asserts still passes the old activation gate, but is mark
   assert.equal(result.asset.testStatus, 'passed', 'kept so existing assets can still be activated')
   assert.equal(result.asset.evidenceLevel, 'legacy-unverified')
   assert.match(result.asset.testMessage!, /legacy-unverified/)
-  assert.equal(store.setStatus(draft.id, 'active').status, 'active')
+  assert.equal(store.setStatus(draft.id, 'active', { expectedRevision: draft.revision }).status, 'active')
 })
 
 test('a failed assert is not a passed test, does not throw, and blocks activation', async () => {
@@ -74,7 +74,7 @@ test('a failed assert is not a passed test, does not throw, and blocks activatio
   assert.equal(result.execution.effects, 'observed')
   assert.equal(result.asset.testStatus, 'failed')
   assert.equal(result.asset.evidenceLevel, undefined)
-  assert.throws(() => store.setStatus(draft.id, 'active'), /pass testing/)
+  assert.throws(() => store.setStatus(draft.id, 'active', { expectedRevision: draft.revision }), /pass testing/)
 })
 
 test('a recipe that fails before its asserts is not a passed test either', async () => {
@@ -91,7 +91,7 @@ test('an active run counts a success only when the run completed without a faile
   const { store } = fixture()
   const draft = store.saveDraft({ kind: 'recipe', name: 'Check', domains: ['example.com'], recipe: [{ type: 'assert', text: 'Ready', timeoutMs: 500 }] })
   await executeAutomationAsset(serviceOver().service, store, draft.id, URL, {}, 'draft')
-  store.setStatus(draft.id, 'active')
+  store.setStatus(draft.id, 'active', { expectedRevision: draft.revision })
   const ok = await executeAutomationAsset(serviceOver().service, store, draft.id, URL, {}, 'active')
   assert.equal(ok.succeeded, true)
   assert.equal(ok.asset.successCount, 1)

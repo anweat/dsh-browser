@@ -93,7 +93,7 @@ const ASSET_POLICY_KEYS = new Set([
   'enabled', 'directory', 'persistenceMode', 'activationMode', 'minSuccessfulRuns', 'minDistinctSessions',
   'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay',
   'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget',
-  'modelDevelopmentEnabled', 'maxModelDraftWritesPerSession',
+  'modelDevelopmentEnabled', 'maxModelDraftWritesPerSession', 'maxTestCredentials',
 ])
 
 function validAssetPolicy(value: Record<string, unknown>): boolean {
@@ -103,7 +103,7 @@ function validAssetPolicy(value: Record<string, unknown>): boolean {
   if (value.modelDevelopmentEnabled !== undefined && typeof value.modelDevelopmentEnabled !== 'boolean') return false
   if (value.persistenceMode !== undefined && !['off', 'manual', 'suggest', 'auto-draft'].includes(String(value.persistenceMode))) return false
   if (value.activationMode !== undefined && !['manual', 'auto-tested'].includes(String(value.activationMode))) return false
-  const numeric = ['minSuccessfulRuns', 'minDistinctSessions', 'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay', 'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget', 'maxModelDraftWritesPerSession']
+  const numeric = ['minSuccessfulRuns', 'minDistinctSessions', 'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay', 'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget', 'maxModelDraftWritesPerSession', 'maxTestCredentials']
   return Object.entries(value).every(([key, entry]) => {
     if (!numeric.includes(key)) return true
     return typeof entry === 'number' && Number.isFinite(entry) && entry >= 0

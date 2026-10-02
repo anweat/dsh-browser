@@ -2,7 +2,7 @@
 
 import type { AnyRecipeStep, BrowserRecipeStep, RecipeRunResult } from './automation.ts'
 import { coerceInputs, materializeDeep, type BrowserRecipeStepV2 } from './automation-v2.ts'
-import type { AutomationAsset, AutomationAssetStore, EvidenceLevel } from './automation-assets.ts'
+import { computeContentHash, type AutomationAsset, type AutomationAssetStore, type EvidenceLevel } from './automation-assets.ts'
 import type { BrowserService } from './browser-service.ts'
 import { mapError } from './actions/errors.ts'
 
@@ -12,6 +12,8 @@ export interface AutomationExecutionOptions {
   rulePack?: string
   /** Session key, so an asset run uses the calling session's page bucket. */
   session?: string
+  /** Draft tests: refuse to run unless the asset is still at this revision (what the caller saved and looked at). */
+  expectedRevision?: number
 }
 
 /** What one run did, in the same shape for recipes and UserScripts, plus how strongly it was checked. */
@@ -27,6 +29,11 @@ export interface AutomationExecutionResult {
   execution: AutomationExecution
   /** The run completed and no assertion failed. Only this counts as a passed test or a successful run. */
   succeeded: boolean
+  /**
+   * Set when the steps ran cleanly but the test still cannot pass because nothing verifies the result
+   * (a v2 recipe with no assert step and no postcondition). The run is a failed test, not a success.
+   */
+  verifierMissing?: { message: string }
 }
 
 const RUN_FIELDS = ['executionStatus', 'validationStatus', 'completedSteps', 'failedStep', 'effects', 'outputs', 'message', 'legacyFallback', 'steps'] as const
@@ -95,7 +102,12 @@ export async function executeAutomationAsset(
 ): Promise<AutomationExecutionResult> {
   const asset = store.get(id)
   if (!asset || asset.status !== requiredStatus) throw new Error(`${requiredStatus} automation asset not found`)
+  if (options.expectedRevision !== undefined && options.expectedRevision !== asset.revision) {
+    throw new Error(`revision mismatch: asked to test revision ${options.expectedRevision}, but the asset is at revision ${asset.revision}; reload it and test again`)
+  }
   const v2 = asset.kind === 'recipe' && asset.schemaVersion === 2
+  // The credential left by a test names the revision and content that actually ran, even if the asset is saved again meanwhile.
+  const tested = { revision: asset.revision, contentHash: asset.contentHash ?? computeContentHash(asset) }
   // v2 assets with an inputSchema validate and convert inputs by type; everything else keeps the v1 string rules.
   const inputs = v2 && asset.inputSchema ? coerceInputs(asset.inputSchema, rawInputs) : automationInputs(asset, rawInputs)
   store.assertTarget(asset, url)
@@ -132,19 +144,21 @@ export async function executeAutomationAsset(
   } catch (error) {
     // Nothing ran: no page, navigation failure, or a malformed recipe.
     if (requiredStatus === 'active') store.noteRun(asset.id, false)
-    else store.noteTestResult(asset.id, false, url)
+    else store.noteTestResult(asset.id, false, url, 'legacy-unverified', undefined, { inputs, tested, executionStatus: 'failed', validationStatus: 'not_checked' })
     throw error
   }
   let succeeded = run.executionStatus === 'completed' && run.validationStatus !== 'failed'
   const evidenceLevel: EvidenceLevel = run.validationStatus === 'passed' ? 'verified' : 'legacy-unverified'
   let failureReason: string | undefined
+  let verifierMissing: AutomationExecutionResult['verifierMissing']
   if (requiredStatus === 'draft' && v2 && succeeded && !hasVerifier(asset)) {
     // v1 keeps its old gate (a passing test without asserts is legacy-unverified); a v2 asset must verify its result.
     succeeded = false
     failureReason = NO_VERIFIER
+    verifierMissing = { message: NO_VERIFIER }
     run = { ...run, message: NO_VERIFIER }
   }
   if (requiredStatus === 'active') store.noteRun(asset.id, succeeded)
-  else store.noteTestResult(asset.id, succeeded, url, evidenceLevel, failureReason)
-  return { asset: store.get(asset.id)!, value, execution: { ...run, evidenceLevel }, succeeded }
+  else store.noteTestResult(asset.id, succeeded, url, evidenceLevel, failureReason, { inputs, tested, executionStatus: run.executionStatus, validationStatus: run.validationStatus })
+  return { asset: store.get(asset.id)!, value, execution: { ...run, evidenceLevel }, succeeded, ...verifierMissing ? { verifierMissing } : {} }
 }

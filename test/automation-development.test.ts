@@ -49,7 +49,7 @@ test('failed draft replay records only bounded failure state and never enables a
   const failed = assets.get(draft.id)!
   assert.equal(failed.testStatus, 'failed')
   assert.equal(failed.testMessage?.includes('secret'), false)
-  assert.throws(() => assets.setStatus(draft.id, 'active'), /pass testing/)
+  assert.throws(() => assets.setStatus(draft.id, 'active', { expectedRevision: draft.revision }), /pass testing/)
 })
 
 test('model development accumulates a scoped UserScript without exposing source in search', () => {

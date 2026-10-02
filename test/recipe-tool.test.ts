@@ -161,7 +161,7 @@ test('automation.run and automation.develop test return the structured run and t
   assert.equal(passedResult.validationStatus, 'passed')
   assert.equal(passedResult.result.title, 'T', 'page state is under result')
 
-  assets.setStatus(draft.id, 'active')
+  assets.setStatus(draft.id, 'active', { expectedRevision: draft.revision })
   const run = await runAction('automation.run', { id: draft.id, url: 'https://example.com/', inputs: {} }, ctxFor(serviceOver(), { assets, development }), ENV)
   assert.equal(run.ok, true)
   assert.equal((run.result as any).assetId, draft.id)

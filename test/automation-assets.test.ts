@@ -49,10 +49,10 @@ test('candidate summary creates a draft that must pass testing before activation
   const candidate = store.recordRecipe('https://example.com/search', recipe, 'session-a', true)!
   const draft = store.summarizeCandidate(candidate.id)
   assert.equal(draft.status, 'draft')
-  assert.throws(() => store.setStatus(draft.id, 'active'), /pass testing/)
+  assert.throws(() => store.setStatus(draft.id, 'active', { expectedRevision: draft.revision }), /pass testing/)
   assert.equal(store.validate(draft.id).testStatus, 'untested')
   store.noteTestResult(draft.id, true, 'https://example.com/search')
-  assert.equal(store.setStatus(draft.id, 'active').status, 'active')
+  assert.equal(store.setStatus(draft.id, 'active', { expectedRevision: draft.revision }).status, 'active')
   assert.equal(store.validate(draft.id).testStatus, 'passed')
   assert.doesNotThrow(() => store.assertTarget(store.get(draft.id)!, 'https://sub.example.com/result'))
   assert.throws(() => store.assertTarget(store.get(draft.id)!, 'https://other.example/result'), /not allowed/)
@@ -74,7 +74,7 @@ test('retrieval returns only active summaries and respects top-k', () => {
   for (const name of ['Search articles', 'Search issues']) {
     const draft = store.saveDraft({ kind: 'recipe', name, description: 'search example', domains: ['example.com'], recipe })
     store.noteTestResult(draft.id, true, 'https://example.com/')
-    store.setStatus(draft.id, 'active')
+    store.setStatus(draft.id, 'active', { expectedRevision: draft.revision })
   }
   const results = store.search('search', 'example.com')
   assert.equal(results.length, 1)

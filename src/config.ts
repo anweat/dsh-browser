@@ -141,6 +141,7 @@ export const Config = z.object({
     catalogTokenBudget: z.number().default(800),
     modelDevelopmentEnabled: z.boolean().default(true),
     maxModelDraftWritesPerSession: z.number().default(3),
+    maxTestCredentials: z.number().default(5),
   }).volatile(),
   autoInstall: z.boolean().default(false).volatile(),
   snapshotDir: z.string().volatile(),

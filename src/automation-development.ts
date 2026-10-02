@@ -49,6 +49,20 @@ export class AutomationDevelopmentService {
     return { draft, conversion }
   }
 
+  /**
+   * Copy an asset (typically an active one that stopped working) into a new draft that records its source.
+   * Counts as one draft write for the session. The source keeps running until the copy replaces it on activation.
+   */
+  fork(id: string, sessionId: string): AutomationAsset {
+    this.assertEnabled()
+    const writes = this.writesBySession.get(sessionId) ?? 0
+    if (writes >= this.policy.maxModelDraftWritesPerSession) throw new Error('model draft write limit reached for this session')
+    const draft = this.store.fork(id)
+    this.writesBySession.set(sessionId, writes + 1)
+    if (this.writesBySession.size > 200) this.writesBySession.delete(this.writesBySession.keys().next().value ?? '')
+    return draft
+  }
+
   private assertEnabled(): void {
     if (!this.policy.modelDevelopmentEnabled) throw new Error('model automation development is disabled')
   }
