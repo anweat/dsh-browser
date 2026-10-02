@@ -4,8 +4,8 @@
  * the report and every Playwright call, step by step, `.first()` included.
  *
  * Two differences are intended and asserted separately below: a side-effecting step whose element never
- * resolved is now `failed`/`effects: none` (B2 said outcome_unknown), and extract/screenshot values live
- * only in `outputs` (completedSteps point at them).
+ * resolved, or resolved but never became actionable, is now `failed`/`effects: none` (B2 said outcome_unknown),
+ * and extract/screenshot values live only in `outputs` (completedSteps point at them).
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -93,9 +93,9 @@ const cases: Case[] = [
     behavior: () => ({ '#a': { click: () => { throw new Error('page.click: Target page, context or browser has been closed') } } }),
   },
   {
-    name: 'an element that resolved but is disabled stays outcome_unknown',
+    name: 'an element that resolved and was being acted on when the timeout hit stays outcome_unknown',
     steps: [{ type: 'click', selector: '#a' }],
-    behavior: () => ({ '#a': { click: () => { throw Object.assign(new Error('locator.click: Timeout 15000ms exceeded.\nCall log:\n  - locator resolved to <button>\n  - element is not enabled'), { name: 'TimeoutError' }) } } }),
+    behavior: () => ({ '#a': { click: () => { throw Object.assign(new Error('locator.click: Timeout 15000ms exceeded.\nCall log:\n  - locator resolved to <button>\n  - performing click action\n  - element intercepts pointer events'), { name: 'TimeoutError' }) } } }),
   },
   {
     name: 'a stored asset with an unknown extract mode still runs as links (legacy)',
@@ -143,4 +143,18 @@ test('v1 compat, intended difference: a side-effecting step whose element never 
   assert.equal(now.effects, 'none')
   assert.equal(now.failedStep?.errorCode, 'LOCATOR_NOT_FOUND')
   assert.equal(old.failedStep?.errorCode, now.failedStep?.errorCode, 'the cause itself is unchanged')
+})
+
+test('v1 compat, intended difference: an element that resolved but never became actionable (disabled, hidden, unstable) is failed/NOT_ACTIONABLE with effects none (B3: outcome_unknown)', async () => {
+  for (const reason of ['element is not enabled', 'element is not visible', 'element is not stable']) {
+    const behavior = () => ({ '#pay': { click: () => { throw Object.assign(new Error(`locator.click: Timeout 15000ms exceeded.\nCall log:\n  - waiting for locator('#pay')\n    - locator resolved to <button id="pay">\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - ${reason}\n  - retrying click action`), { name: 'TimeoutError' }) } } })
+    const steps: BrowserRecipeStep[] = [{ type: 'click', selector: '#pay' }]
+    const old = await runReference(fakePage(behavior()).page, steps, shot)
+    const now = await runRecipe(fakePage(behavior()).page, steps, shot)
+    assert.equal(old.executionStatus, 'outcome_unknown', reason)
+    assert.equal(now.executionStatus, 'failed', reason)
+    assert.equal(now.effects, 'none', reason)
+    assert.equal(now.failedStep?.errorCode, 'NOT_ACTIONABLE', reason)
+    assert.equal(old.failedStep?.errorCode, now.failedStep?.errorCode, 'the cause is unchanged')
+  }
 })

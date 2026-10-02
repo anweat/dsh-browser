@@ -4,7 +4,7 @@
  * @module dsh-browser/automation
  */
 
-import { RecipeAssertionError, RecipeValidationError, abortedByDeadline, isTimeoutError, mapError, neverReachedElement } from './actions/errors.ts'
+import { RecipeAssertionError, RecipeValidationError, abortedByDeadline, isTimeoutError, mapError, neverReachedElement, blockedBeforeAction } from './actions/errors.ts'
 import type { ErrorCode } from './actions/types.ts'
 import type { LocatorAmbiguity } from './locator.ts'
 import {
@@ -350,14 +350,14 @@ export async function runRecipe(
       const effectful = EFFECT_ACTIONS.has(step.type)
       if (step.type === 'assert' && body.code === 'VALIDATION_FAILED') validationFailed = true
       // The element was never found (or the locator was ambiguous / the step malformed): the action did not start, so nothing happened.
-      const neverStarted = body.code === 'LOCATOR_AMBIGUOUS' || body.code === 'INVALID_RECIPE' || neverReachedElement(error)
+      const neverStarted = body.code === 'LOCATOR_AMBIGUOUS' || body.code === 'INVALID_RECIPE' || neverReachedElement(error) || blockedBeforeAction(error)
       // Otherwise the action may have partly happened.
       if (effectful && !neverStarted) effectsUnknown = true
       const failedStep: RecipeFailedStep = { index: index + 1, action: step.type, errorCode: body.code, message: body.message, ...body.candidates ? { candidates: body.candidates } : {} }
       const summary = 'Step ' + (index + 1) + ' (' + step.type + ') failed with ' + body.code + '; ' + completedSteps.length + ' earlier steps ran and are not rolled back.'
       if (body.code === 'CANCELLED') return finish('cancelled', failedStep, summary)
       if (effectful && isTimeoutError(error) && !neverStarted) return finish('outcome_unknown', failedStep, summary + ' The side-effecting step timed out, so its outcome is unknown.')
-      return finish('failed', failedStep, summary + (effectful && neverStarted ? ' The step did not start (no element was acted on), so it had no effect.' : ''))
+      return finish('failed', failedStep, summary + (effectful && neverStarted ? ' The step did not start (no element was acted on, or it never became actionable), so it had no effect.' : ''))
     }
     if (EFFECT_ACTIONS.has(step.type)) effectsObserved = true
     if (step.type === 'assert') verified += 1

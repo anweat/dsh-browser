@@ -145,7 +145,7 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     assert.equal(envelope.error.code, 'LOCATOR_NOT_FOUND')
   })
 
-  it('a click on an element that never appeared fails with effects none; a click that started and then hung stays outcome_unknown; an empty existing container extracts as completed', async () => {
+  it('a click on an element that never appeared fails with effects none; a click on a disabled element is NOT_ACTIONABLE with effects none; an empty existing container extracts as completed', async () => {
     server.resetHits()
     const never = await harness.action(S1, 'automation.run_recipe', {
       url: url('search.html'),
@@ -158,18 +158,18 @@ describe('dsh-browser real-browser e2e', { skip: detection.ok ? false : detectio
     assert.equal(never.result.failedStep.errorCode, 'LOCATOR_NOT_FOUND')
     assert.match(never.result.failedStep.message, /Timeout 400ms exceeded/, 'the Playwright text is kept')
 
-    // The element exists but is disabled: the action began (actionability checks) and then timed out.
+    // The element exists but is disabled: Playwright waited for it to become enabled and never performed the click, so nothing happened.
     const blocked = await harness.action(S1, 'automation.run_recipe', {
       url: url('strict.html'),
       steps: [{ type: 'click', selector: '#disabled-pay', timeoutMs: 400 }],
     })
     assert.equal(blocked.ok, false)
-    assert.equal(blocked.executionStatus, 'outcome_unknown')
-    assert.equal(blocked.error.code, 'OUTCOME_UNKNOWN')
-    assert.equal(blocked.result.effects, 'unknown')
+    assert.equal(blocked.executionStatus, 'failed')
+    assert.equal(blocked.error.code, 'NOT_ACTIONABLE')
+    assert.equal(blocked.result.effects, 'none')
     assert.equal(blocked.result.failedStep.errorCode, 'NOT_ACTIONABLE')
     await new Promise(resolve => setTimeout(resolve, 200))
-    assert.deepEqual(server.hits(), {}, 'neither click reached the backend')
+    assert.deepEqual(server.hits(), {}, 'no click reached the backend (the server count stays 0)')
 
     const empty = await harness.action(S1, 'automation.run_recipe', {
       url: url('search.html'),

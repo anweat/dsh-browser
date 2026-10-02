@@ -94,6 +94,23 @@ export function neverReachedElement(error: unknown): boolean {
   return /waiting for (locator|selector|getBy|frameLocator)/i.test(message) && !ACTION_STARTED_LOG.test(message)
 }
 
+/** Call-log lines that prove Playwright was still waiting for the element to become actionable. */
+const WAITING_ON_ELEMENT_LOG = /element is not (visible|enabled|stable|editable)|intercepts pointer events/i
+/** Call-log lines that appear only once the action itself is being carried out (or its checks passed for a fill). */
+const ACTION_PERFORMED_LOG = /performing .* action|action done|element is visible, enabled and editable/i
+
+/**
+ * True when a timeout proves the action never ran although the element was found: the call log shows
+ * Playwright waiting for it to become visible, enabled, stable or editable (or for an overlay to move)
+ * and never reaches the line that says the action is being performed. Needs a call log; without one
+ * (or with a performed marker) the outcome stays unknown.
+ */
+export function blockedBeforeAction(error: unknown): boolean {
+  if (!isTimeoutError(error)) return false
+  const message = messageOf(error)
+  return /Call log:/i.test(message) && WAITING_ON_ELEMENT_LOG.test(message) && !ACTION_PERFORMED_LOG.test(message)
+}
+
 /** Map any thrown value to a structured error body. */
 export function mapError(error: unknown, action: string, opts: { signal?: AbortSignal } = {}): ActionErrorBody {
   if (error instanceof ActionArgError) return { code: 'INVALID_ARGS', message: error.message, ...error.hint ? { hint: error.hint } : {} }

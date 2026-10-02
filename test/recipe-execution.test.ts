@@ -199,10 +199,11 @@ test('a side-effecting step that timed out AFTER it found the element keeps outc
   assert.equal(bare.executionStatus, 'outcome_unknown')
   assert.equal(bare.failedStep?.errorCode, 'DEADLINE')
   assert.equal(bare.effects, 'unknown')
-  // Resolved but blocked (disabled, covered): the element was reached, so it is not "never found" either.
+  // Resolved but blocked (disabled, hidden, unstable): not "never found", but the call log never reaches "performing", so nothing happened.
   const blocked = Object.assign(new Error('locator.click: Timeout 15000ms exceeded.\nCall log:\n  - waiting for locator(\'#pay\')\n  - locator resolved to <button disabled>\n  - element is not enabled'), { name: 'TimeoutError' })
   const notActionable = await runRecipe(fakePage({ '#pay': { click: () => { throw blocked } } }).page, [{ type: 'click', selector: '#pay' }], shot)
-  assert.equal(notActionable.executionStatus, 'outcome_unknown')
+  assert.equal(notActionable.executionStatus, 'failed')
+  assert.equal(notActionable.effects, 'none')
   assert.equal(notActionable.failedStep?.errorCode, 'NOT_ACTIONABLE')
 
   const read = await runRecipe(fakePage({ '#late': { waitFor: () => { throw timeout('waitFor') } } }).page, [{ type: 'wait', condition: 'selector', value: '#late' }], shot)
@@ -220,7 +221,17 @@ test('other failures map to the shared error codes and mark effects on side-effe
   const blocked = Object.assign(new Error('locator.click: Timeout 15000ms exceeded.\nCall log:\n  - locator resolved to <button>\n  - element is not enabled'), { name: 'TimeoutError' })
   const notActionable = await runRecipe(fakePage({ '#a': { click: () => { throw blocked } } }).page, [{ type: 'click', selector: '#a' }], shot)
   assert.equal(notActionable.failedStep?.errorCode, 'NOT_ACTIONABLE')
-  assert.equal(notActionable.executionStatus, 'outcome_unknown')
+  assert.equal(notActionable.executionStatus, 'failed', 'blocked before the action ran: nothing happened')
+  assert.equal(notActionable.effects, 'none')
+
+  // Once the action was being performed, a timeout proves nothing: still unknown.
+  const performed = Object.assign(new Error('locator.click: Timeout 15000ms exceeded.\nCall log:\n  - locator resolved to <button>\n  - performing click action\n  - element intercepts pointer events'), { name: 'TimeoutError' })
+  const unknown = await runRecipe(fakePage({ '#a': { click: () => { throw performed } } }).page, [{ type: 'click', selector: '#a' }], shot)
+  assert.equal(unknown.executionStatus, 'outcome_unknown')
+  assert.equal(unknown.effects, 'unknown')
+  // A blocked-looking message without a call log is not trusted either.
+  const bare = Object.assign(new Error('Timeout 15000ms exceeded. element is not enabled'), { name: 'TimeoutError' })
+  assert.equal((await runRecipe(fakePage({ '#a': { click: () => { throw bare } } }).page, [{ type: 'click', selector: '#a' }], shot)).executionStatus, 'outcome_unknown')
 
   const readClosed = await runRecipe(fakePage({ 'body': { innerText: () => { throw new Error('Target closed') } } }).page, [{ type: 'extract' }], shot)
   assert.equal(readClosed.failedStep?.errorCode, 'TARGET_CLOSED')
