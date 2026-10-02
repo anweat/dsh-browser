@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Session B Page</title></head>
+<body>
+  <h1 id="who">This is page B</h1>
+  <button id="bump" type="button">Bump</button>
+  <p id="bumps">Bumps: 0</p>
+  <script>
+    var bumps = 0
+    document.getElementById('bump').addEventListener('click', function () {
+      bumps += 1
+      document.getElementById('bumps').textContent = 'Bumps: ' + bumps
+    })
+  </script>
+</body>
+</html>

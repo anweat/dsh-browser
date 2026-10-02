@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Search</title></head>
+<body>
+  <h1>Search fixture</h1>
+  <input id="q" type="text" aria-label="Query">
+  <button id="go" type="button">Search</button>
+  <p id="status">Idle</p>
+  <ul id="results"></ul>
+  <script>
+    var items = ['apple', 'apricot', 'banana', 'blueberry', 'cherry']
+    document.getElementById('go').addEventListener('click', function () {
+      var q = document.getElementById('q').value.toLowerCase()
+      var hits = items.filter(function (item) { return q && item.indexOf(q) === 0 })
+      document.getElementById('status').textContent = hits.length + ' results for ' + q
+      document.getElementById('results').innerHTML = hits.map(function (item) { return '<li class="hit">' + item + '</li>' }).join('')
+    })
+  </script>
+</body>
+</html>
