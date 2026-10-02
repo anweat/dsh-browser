@@ -18,6 +18,7 @@ import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
 import { browserPolicyDecision } from './approval-policy.ts'
 import { resolveBrowserCall } from './actions/surface.ts'
+import { registerSkillWhenAvailable } from './skill.ts'
 import { AutomationAssetStore } from './automation-assets.ts'
 import { registerAutomationAssetRpc } from './automation-assets-rpc.ts'
 
@@ -103,7 +104,12 @@ export function apply(ctx: Context, config: Config): void {
   ctx.provide('browser', service)
   ctx.effect(() => () => void service.close())
 
-  registerTools(ctx, resolved, service, assets)
+  // Optional: the `dsh-browser` skill is registered only when the Host has a
+  // skill registry. It must not be a declared `inject` (Cordis 4.0.4 would
+  // hang the plugin without it); this opens a scoped, optional dependency.
+  const skill = registerSkillWhenAvailable(ctx)
+
+  registerTools(ctx, resolved, service, assets, { skillAvailable: skill.isAvailable })
   registerAutomationAssetRpc(ctx, assets, service)
 
   if (resolved.verbose) {
