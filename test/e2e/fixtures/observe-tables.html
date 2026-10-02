@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Observe Tables</title></head>
+<body>
+  <h1>Observe tables fixture</h1>
+
+  <table id="orders">
+    <caption>Open orders</caption>
+    <thead><tr><th>Order</th><th>Customer</th><th>Total</th></tr></thead>
+    <tbody>
+      <tr><td>1001</td><td>Ada</td><td>12.50</td></tr>
+      <tr><td>1002</td><td>Grace</td><td>8.00</td></tr>
+      <tr><td>1003</td><td>Linus</td><td>41.25</td></tr>
+    </tbody>
+  </table>
+
+  <!-- A legal empty result: the headers are there, the body has no rows. -->
+  <table id="refunds">
+    <caption>Refunds</caption>
+    <thead><tr><th>Order</th><th>Reason</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- One page of a paginated list. -->
+  <section id="history-panel">
+    <table id="history">
+      <caption>History</caption>
+      <thead><tr><th>Event</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td>Created</td><td>Mon</td></tr>
+        <tr><td>Paid</td><td>Tue</td></tr>
+      </tbody>
+    </table>
+    <nav aria-label="Pagination"><button type="button" disabled>Previous</button> <span>Page 1 of 9</span> <button type="button">Next</button></nav>
+  </section>
+
+  <!-- A virtualized grid: 1000 rows exist, 6 are rendered. -->
+  <div id="grid" role="grid" aria-label="Events" aria-rowcount="1001">
+    <div role="row" aria-rowindex="1"><span role="columnheader">Id</span><span role="columnheader">Name</span></div>
+    <div role="row" aria-rowindex="501"><span role="gridcell">500</span><span role="gridcell">Row 500</span></div>
+    <div role="row" aria-rowindex="502"><span role="gridcell">501</span><span role="gridcell">Row 501</span></div>
+    <div role="row" aria-rowindex="503"><span role="gridcell">502</span><span role="gridcell">Row 502</span></div>
+  </div>
+
+  <ul>
+    <li><a href="/index.html">Home</a></li>
+    <li><a href="/form.html" target="_blank">Form page</a></li>
+    <li><a href="/search.html?q=1">Docs</a></li>
+    <li><a href="/search.html?q=2">Docs</a></li>
+    <li><a href="/catalog.html" id="catalog-link"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></a></li>
+  </ul>
+</body>
+</html>

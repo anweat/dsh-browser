@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Frame Leaf</title></head>
+<body>
+  <label for="leaf-code">Leaf code</label>
+  <input id="leaf-code" type="text">
+  <button id="leaf-go" type="button" data-hit="leaf-go">Leaf go</button>
+  <script>document.getElementById('leaf-go').addEventListener('click', function () { fetch('/hit?who=leaf-go') })</script>
+</body>
+</html>

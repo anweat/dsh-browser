@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Observe Form</title></head>
+<body>
+  <h1>Observe form fixture</h1>
+  <p id="status">Booting</p>
+  <form id="signup" novalidate></form>
+  <div id="extras"></div>
+  <script>
+    // Every control below is created by script after load, so a static HTML reading would find none of them.
+    function el(tag, attrs, parent, text) {
+      var node = document.createElement(tag)
+      Object.keys(attrs || {}).forEach(function (key) {
+        if (key === 'value' || key === 'checked' || key === 'disabled' || key === 'readOnly' || key === 'required' || key === 'multiple') node[key] = attrs[key]
+        else node.setAttribute(key, attrs[key])
+      })
+      if (text !== undefined) node.textContent = text
+      if (parent) parent.appendChild(node)
+      return node
+    }
+    function field(form, labelText, tag, attrs) {
+      var row = el('div', {}, form)
+      var id = attrs.id
+      el('label', { for: id }, row, labelText)
+      return el(tag, attrs, row)
+    }
+    window.addEventListener('load', function () {
+      setTimeout(function () {
+        var form = document.getElementById('signup')
+        field(form, 'Full name', 'input', { id: 'fullname', name: 'fullname', type: 'text', required: true, minlength: '3', maxlength: '40', pattern: '[A-Za-z ]+', value: '' })
+        field(form, 'Email', 'input', { id: 'email', name: 'email', type: 'email', value: 'ada@example.com' })
+        field(form, 'Age', 'input', { id: 'age', name: 'age', type: 'number', min: '18', max: '99', step: '1', value: '150' })
+        field(form, 'Rating', 'input', { id: 'rating', name: 'rating', type: 'range', min: '0', max: '10', step: '0.5', value: '4' })
+        field(form, 'Coupon', 'input', { id: 'coupon', name: 'coupon', type: 'text', disabled: true, value: 'SAVE10' })
+        field(form, 'Member id', 'input', { id: 'member', name: 'member', type: 'text', readOnly: true, value: 'M-1042' })
+        field(form, 'Bio', 'textarea', { id: 'bio', name: 'bio', maxlength: '200', value: 'Hello there' })
+        field(form, 'Password', 'input', { id: 'password', name: 'password', type: 'password', value: 'hunter2-secret' })
+        field(form, 'Reference', 'input', { id: 'reference', name: 'reference', type: 'text', value: 'a8F3kd92LzQw0Xv7Bn41Tt65' })
+        el('input', { id: 'csrf', name: 'csrf_token', type: 'hidden', value: 'csrf-9f8e7d6c5b4a' }, form)
+        var country = field(form, 'Country', 'select', { id: 'country', name: 'country', required: true })
+        el('option', { value: '' }, country, 'Choose…')
+        el('option', { value: 'NL' }, country, 'Netherlands')
+        el('option', { value: 'DE', selected: 'selected' }, country, 'Germany')
+        var closed = el('option', { value: 'XX', disabled: 'disabled' }, country, 'Closed market')
+        field(form, 'Languages', 'select', { id: 'langs', name: 'langs', multiple: true })
+        ;['en', 'nl', 'de'].forEach(function (code, index) {
+          var option = el('option', { value: code }, document.getElementById('langs'), code.toUpperCase())
+          if (index === 1) option.selected = true
+        })
+        field(form, 'Empty list', 'select', { id: 'nothing', name: 'nothing' })
+        var group = el('fieldset', {}, form)
+        el('legend', {}, group, 'Plan')
+        ;[['free', 'Free'], ['pro', 'Pro'], ['team', 'Team']].forEach(function (pair) {
+          var label = el('label', {}, group)
+          var radio = el('input', { type: 'radio', name: 'plan', value: pair[0] }, label)
+          if (pair[0] === 'pro') radio.checked = true
+          if (pair[0] === 'team') radio.disabled = true
+          label.appendChild(document.createTextNode(' ' + pair[1]))
+        })
+        var terms = field(form, 'Accept terms', 'input', { id: 'terms', name: 'terms', type: 'checkbox', required: true })
+        var news = field(form, 'Newsletter', 'input', { id: 'news', name: 'news', type: 'checkbox' })
+        news.checked = true
+        var mixed = field(form, 'Partial', 'input', { id: 'partial', name: 'partial', type: 'checkbox' })
+        mixed.indeterminate = true
+        field(form, 'Attachment', 'input', { id: 'attach', name: 'attach', type: 'file', accept: '.pdf,.png', multiple: true })
+        field(form, 'Hidden note', 'input', { id: 'sneaky', name: 'sneaky', type: 'text', style: 'display:none', value: 'not shown' })
+        el('button', { id: 'submit', type: 'submit', 'data-hit': 'signup' }, form, 'Create account')
+        el('button', { id: 'reset', type: 'reset' }, form, 'Reset form')
+
+        var extras = document.getElementById('extras')
+        el('div', { role: 'button', tabindex: '0', id: 'menu-toggle', 'aria-expanded': 'false', 'aria-label': 'Open menu' }, extras, 'Menu')
+        el('div', { role: 'checkbox', tabindex: '0', id: 'dark-mode', 'aria-checked': 'true', 'aria-label': 'Dark mode' }, extras, 'Dark mode')
+        el('div', { role: 'switch', tabindex: '0', id: 'beta', 'aria-checked': 'false', 'aria-disabled': 'true', 'aria-label': 'Beta features' }, extras, 'Beta')
+        var details = el('details', {}, extras)
+        el('summary', { id: 'more' }, details, 'More options')
+        el('p', {}, details, 'Hidden until opened')
+        el('div', { id: 'notes', contenteditable: 'true', 'aria-label': 'Notes' }, extras, 'Draft notes')
+        // Two controls that no attribute tells apart: a locator for either one is ambiguous.
+        el('button', { type: 'button' }, extras, 'Remove')
+        el('button', { type: 'button' }, extras, 'Remove')
+        document.getElementById('status').textContent = 'Ready'
+      }, 150)
+    })
+    document.addEventListener('submit', function (event) { event.preventDefault(); fetch('/hit?who=signup') })
+    document.addEventListener('click', function (event) {
+      if (event.target.id === 'menu-toggle') event.target.setAttribute('aria-expanded', 'true')
+    })
+  </script>
+</body>
+</html>

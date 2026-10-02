@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Observe Frames</title></head>
+<body>
+  <h1>Observe frames fixture</h1>
+  <button id="outer" type="button" data-hit="outer">Outer action</button>
+  <p id="outer-state">Outer idle</p>
+
+  <iframe id="same" name="same" title="Same origin" src="/observe-frame-inner.html" width="400" height="260"></iframe>
+  <iframe id="foreign" title="Other origin" width="300" height="120"></iframe>
+
+  <my-card id="card"></my-card>
+
+  <script>
+    document.getElementById('outer').addEventListener('click', function () { fetch('/hit?who=outer'); document.getElementById('outer-state').textContent = 'Outer clicked' })
+    // Same host name on 127.0.0.1 is one origin; "localhost" is another, so this frame is cross-origin.
+    document.getElementById('foreign').src = location.protocol + '//localhost:' + location.port + '/observe-frame-leaf.html'
+
+    // An open shadow root with its own controls.
+    var host = document.getElementById('card')
+    var root = host.attachShadow({ mode: 'open' })
+    root.innerHTML = '<label>Card holder <input id="holder" type="text" placeholder="Name on card"></label>' +
+      '<button id="card-pay" type="button">Pay with card</button><p id="card-state">Card idle</p>' +
+      '<div id="nested-host"></div>'
+    root.getElementById('card-pay').addEventListener('click', function () { fetch('/hit?who=card-pay'); root.getElementById('card-state').textContent = 'Card paid by ' + root.getElementById('holder').value })
+    var inner = root.getElementById('nested-host').attachShadow({ mode: 'open' })
+    inner.innerHTML = '<button id="deep" type="button">Deep button</button>'
+    inner.getElementById('deep').addEventListener('click', function () { fetch('/hit?who=deep') })
+  </script>
+</body>
+</html>
