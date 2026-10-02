@@ -110,6 +110,12 @@ export interface SubActionSet {
   items: Record<string, SubActionDef>
 }
 
+/** An extra detail page of an action, read with `browser_index({action:"<action>.<topic>"})`. Keeps the action's own detail short. */
+export interface ActionTopic {
+  summary: string
+  text: string
+}
+
 export interface ActionDef {
   /** `group.action`. */
   name: string
@@ -131,6 +137,8 @@ export interface ActionDef {
   concurrencySafe: boolean
   /** Operations behind one `action` argument, each with its own flags, detail view, and approval. */
   subActions?: SubActionSet
+  /** Detail pages for parts of the result (observe.read: one per section), listed in the action detail. */
+  topics?: Record<string, ActionTopic>
   /** Per-call budget; exceeded budgets return DEADLINE. */
   timeoutMs: number
   /**

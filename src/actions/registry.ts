@@ -62,6 +62,15 @@ export function findSubAction(name: unknown): { action: ActionDef; sub: string }
   return action?.subActions && Object.hasOwn(action.subActions.items, sub) ? { action, sub } : undefined
 }
 
+/** `observe.read.controls` resolves to the action and its detail topic; undefined for anything else. */
+export function findTopic(name: unknown): { action: ActionDef; topic: string } | undefined {
+  if (typeof name !== 'string') return undefined
+  const cut = name.lastIndexOf('.')
+  const action = cut > 0 ? findAction(name.slice(0, cut)) : undefined
+  const topic = name.slice(cut + 1)
+  return action?.topics && Object.hasOwn(action.topics, topic) ? { action, topic } : undefined
+}
+
 export function isActionGroup(value: unknown): value is ActionGroup {
   return typeof value === 'string' && (ACTION_GROUPS as readonly string[]).includes(value)
 }

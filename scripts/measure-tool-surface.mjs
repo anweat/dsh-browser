@@ -104,7 +104,7 @@ async function disclosure(automationMode) {
       let best
       const { ACTIONS } = await import(pathToFileURL(path.join(root, 'src/actions/registry.ts')).href)
       for (const action of ACTIONS) {
-        const names = [action.name, ...Object.keys(action.subActions?.items ?? {}).map(sub => `${action.name}.${sub}`)]
+        const names = [action.name, ...Object.keys(action.subActions?.items ?? {}).map(sub => `${action.name}.${sub}`), ...Object.keys(action.topics ?? {}).map(topic => `${action.name}.${topic}`)]
         for (const name of names) {
           const entry = { name, ...measure(await render({ action: name })) }
           if (!best || entry.chars > best.chars) best = entry
@@ -118,6 +118,11 @@ async function disclosure(automationMode) {
       for (const action of ACTIONS.filter(entry => entry.subActions)) {
         details[action.name] = measure(await render({ action: action.name }))
         for (const sub of Object.keys(action.subActions.items)) details[`${action.name}.${sub}`] = measure(await render({ action: `${action.name}.${sub}` }))
+      }
+      // Detail pages of an action (observe.read: one per section), and the action's own page next to them.
+      for (const action of ACTIONS.filter(entry => entry.topics)) {
+        details[action.name] = measure(await render({ action: action.name }))
+        for (const topic of Object.keys(action.topics)) details[`${action.name}.${topic}`] = measure(await render({ action: `${action.name}.${topic}` }))
       }
       return details
     })(),

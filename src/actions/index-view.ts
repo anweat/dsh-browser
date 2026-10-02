@@ -7,7 +7,7 @@
  * @module dsh-browser/actions/index-view
  */
 
-import { ACTIONS, GROUP_SUMMARIES, actionsInGroup, findAction, findSubAction, isActionGroup, traitsFor } from './registry.ts'
+import { ACTIONS, GROUP_SUMMARIES, actionsInGroup, findAction, findSubAction, findTopic, isActionGroup, traitsFor } from './registry.ts'
 import { ACTION_GROUPS, type ActionDef, type ApprovalClass, type ParamSchema, type SubActionDef } from './types.ts'
 import { compactParams, describeParams } from './schema.ts'
 import { actionUnavailableReason, type AutomationMode, type ExposureOptions } from '../freedom.ts'
@@ -194,6 +194,8 @@ export function renderAction(name: string, env: IndexEnvironment): string {
   if (!action) {
     const nested = findSubAction(name)
     if (nested) return renderSubAction(nested.action, nested.sub, env)
+    const topic = findTopic(name)
+    if (topic) return `${name} - ${topic.action.topics![topic.topic]!.summary}\n${topic.action.topics![topic.topic]!.text}`
     if (isActionGroup(name)) return renderGroup(name, env)
     const hits = searchActions(name, env).slice(0, 5)
     return `Unknown action "${name}".${hits.length ? ' Similar: ' + hits.map(hit => hit.name).join(', ') + '.' : ''} browser_index() lists the groups.`
@@ -208,9 +210,17 @@ export function renderAction(name: string, env: IndexEnvironment): string {
     'args:',
     ...describeParams(action.params),
     ...exampleLine(action),
+    ...topicLines(action),
     errorsLine(action, action.mutating),
   ]
   return lines.join('\n')
+}
+
+/** The extra detail pages of an action, one line each. */
+function topicLines(action: ActionDef): string[] {
+  const topics = Object.entries(action.topics ?? {})
+  if (!topics.length) return []
+  return [`more detail: ${topics.map(([key, topic]) => `browser_index({action:"${action.name}.${key}"}) ${topic.summary}`).join(' | ')}`]
 }
 
 function score(action: ActionDef, terms: string[]): number {
