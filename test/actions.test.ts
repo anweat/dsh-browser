@@ -122,7 +122,7 @@ test('INVALID_ARGS carries a compact schema so the model can correct itself', as
   assert.equal(reply.executionStatus, 'failed')
   assert.equal(reply.error?.code, 'INVALID_ARGS')
   assert.match(reply.error!.message, /text: required/)
-  assert.match(reply.error!.schema!, /^act\.fill\(selector\?: string, locator\?: \$locator, text: string, timeoutMs\?: number\)/)
+  assert.match(reply.error!.schema!, /^act\.fill\(selector\?: string, locator\?: \$locator, text: string, timeoutMs\?: number, expectGeneration\?: number\)/)
   assert.match(reply.error!.schema!, /\$locator = \{selector\?: string, role\?: string/)
   assert.ok(compactSchema('act.fill', findAction('act.fill')!.params).length < 600)
   // A cross-field rule the schema cannot state is still INVALID_ARGS.

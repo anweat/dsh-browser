@@ -13,7 +13,7 @@ import type { ResolvedConfig } from '../config.ts'
 import type { BrowserService } from '../browser-service.ts'
 import type { AutomationAssetStore } from '../automation-assets.ts'
 import type { AutomationDevelopmentService } from '../automation-development.ts'
-import type { LocatorAmbiguity } from '../locator.ts'
+import type { LocatorAmbiguity, PageGeneration } from '../locator.ts'
 
 export const ACTION_GROUPS = ['runtime', 'target', 'observe', 'act', 'inspect', 'script', 'automation', 'crawl', 'opencli'] as const
 export type ActionGroup = typeof ACTION_GROUPS[number]
@@ -163,7 +163,7 @@ export class ActionUnavailableError extends Error {
 
 export const ERROR_CODES = [
   'INVALID_ARGS', 'UNKNOWN_ACTION', 'CAPABILITY_UNAVAILABLE', 'POLICY_DENIED',
-  'LOCATOR_NOT_FOUND', 'LOCATOR_AMBIGUOUS', 'NOT_ACTIONABLE', 'TARGET_CLOSED',
+  'LOCATOR_NOT_FOUND', 'LOCATOR_AMBIGUOUS', 'NOT_ACTIONABLE', 'TARGET_CLOSED', 'TARGET_STALE',
   'DEADLINE', 'CANCELLED', 'NOT_FOUND', 'ACTION_FAILED',
   // Recipe execution (B2): the failure says what already happened, not only that something failed.
   'VALIDATION_FAILED', 'OUTCOME_UNKNOWN', 'INVALID_RECIPE',
@@ -182,6 +182,8 @@ export interface ActionErrorBody {
   schema?: string
   /** The first matches of an ambiguous locator (LOCATOR_AMBIGUOUS): role, name, text snippet, visibility. */
   candidates?: LocatorAmbiguity
+  /** The page's current target id and generation (TARGET_STALE): what the next call should expect after observing again. */
+  current?: PageGeneration
 }
 
 /**

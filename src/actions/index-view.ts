@@ -130,7 +130,7 @@ function pick(params: ParamSchema, names: readonly string[]): ParamSchema {
 
 function errorsLine(action: ActionDef, mutating: boolean): string {
   const codes = action.errors ?? []
-  return `errors: INVALID_ARGS, TARGET_CLOSED, DEADLINE, CANCELLED${action.group === 'act' ? ', LOCATOR_NOT_FOUND, NOT_ACTIONABLE' : ''}${codes.length ? ', ' + codes.join(', ') : ''}${mutating ? ' (a DEADLINE on this action means the outcome is unknown: verify before retrying)' : ''}`
+  return `errors: INVALID_ARGS, TARGET_CLOSED, DEADLINE, CANCELLED${action.group === 'act' ? ', LOCATOR_NOT_FOUND, NOT_ACTIONABLE' : ''}${action.params.expectGeneration ? ', TARGET_STALE' : ''}${codes.length ? ', ' + codes.join(', ') : ''}${mutating ? ' (a DEADLINE on this action means the outcome is unknown: verify before retrying)' : ''}`
 }
 
 /** The parameters of one operation as the detail prints them: its own required marks and descriptions. */

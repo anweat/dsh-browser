@@ -62,6 +62,20 @@ export class LocatorAmbiguousError extends Error {
   }
 }
 
+/** Where a page stands now: what a stale caller needs to re-bind to it. */
+export interface PageGeneration {
+  targetId: string
+  generation: number
+}
+
+/** Raised, before anything is done, when `expectGeneration` is not the page's current generation. */
+export class TargetStaleError extends Error {
+  constructor(message: string, readonly current: PageGeneration) {
+    super(message)
+    this.name = 'TargetStaleError'
+  }
+}
+
 const MODES = ['selector', 'css', 'role', 'text', 'label', 'testId'] as const
 const KNOWN_KEYS = new Set<string>([...MODES, 'name', 'exact', 'frame', 'framePath', 'index', 'indexReason', 'explicitFirst'])
 const MAX_FRAME_PATH = 5

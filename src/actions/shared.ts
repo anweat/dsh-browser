@@ -15,6 +15,11 @@ export function targetOf(args: { selector?: unknown; locator?: unknown }, requir
   throw new ActionArgError('provide exactly one of selector or locator', 'Pass either selector (CSS string) or locator (object), not both.')
 }
 
+/** The `expectGeneration` guard of an act.* call, ready to spread into the service options. */
+export function expectOf(args: { expectGeneration?: unknown }): { expectGeneration?: number } {
+  return typeof args.expectGeneration === 'number' ? { expectGeneration: args.expectGeneration } : {}
+}
+
 /**
  * Serialize a value for the model with a hard size cap. Values under the cap
  * are returned as-is (so they stay structured); larger ones are replaced by a

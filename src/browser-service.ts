@@ -32,7 +32,7 @@ import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, 
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
-import { resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
+import { TargetStaleError, resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
 
 /**
  * How many sessions may hold a browser context+page at once. Past this, the
@@ -80,6 +80,14 @@ export interface InteractiveState {
   url: string
   title: string
   text: string
+  /** The session page this state describes (`t1`, `t2`, ...). Absent only when the page is already gone. */
+  targetId?: string
+  /**
+   * The page's generation when this state was read. It changes whenever the page's main frame navigates
+   * (see {@link SessionState.generationClock}); pass it back as `expectGeneration` to refuse acting on a page
+   * that moved on since it was observed.
+   */
+  generation?: number
   screenshotPath?: string
   /** The page the action ran on closed itself (a popup's own close button): url/title/text describe the page the session fell back to, or are empty. */
   closedPage?: true
@@ -329,9 +337,17 @@ interface SessionState {
   /** The ACTIVE page: the one every action targets. Always one of `pages` while set. */
   page?: any
   /** Every open page of this session's context (the page it opened plus popups), in the order they appeared. */
-  pages: { id: string; page: any }[]
+  pages: SessionPage[]
   /** Counter behind the `t1`, `t2`, ... target ids of this session. */
   nextTarget: number
+  /**
+   * Source of page generations. A page takes the next value when it is tracked and again on every main-frame
+   * navigation (cross-document, reload, history back/forward, `location` assignment, `pushState`/`replaceState`,
+   * hash changes), so values only grow and never repeat inside a session, not even across pages: an
+   * `expectGeneration` from one page can never match another page by coincidence. Subframe navigation and
+   * DOM re-rendering do not change it.
+   */
+  generationClock: number
   profile?: ResolvedAuthProfile
   rulePack?: ResolvedRulePack
   captureConsole: boolean
@@ -342,10 +358,18 @@ interface SessionState {
   lastUsed: number
 }
 
+/** One tracked page of a session. */
+interface SessionPage {
+  id: string
+  page: any
+  generation: number
+}
+
 function newSessionState(): SessionState {
   return {
     pages: [],
     nextTarget: 1,
+    generationClock: 0,
     captureConsole: false,
     captureNetwork: false,
     capturedConsole: [],
@@ -394,6 +418,8 @@ export class BrowserService {
   private launching?: Promise<any>
   /** Per-session interactive state. Replaces the former global activePage. */
   private readonly sessions = new Map<string, SessionState>()
+  /** The tracked entry (target id, generation) of every page the service created. */
+  private readonly pageEntries = new WeakMap<object, SessionPage>()
   private clock = 0
   private readonly authProfiles: AuthProfileStore
   private readonly usageGovernor: UsageGovernor
@@ -988,7 +1014,14 @@ export class BrowserService {
    */
   private trackPage(state: SessionState, page: any): void {
     if (state.pages.some(entry => entry.page === page)) return
-    state.pages.push({ id: 't' + state.nextTarget++, page })
+    const entry: SessionPage = { id: 't' + state.nextTarget++, page, generation: ++state.generationClock }
+    state.pages.push(entry)
+    this.pageEntries.set(page, entry)
+    // Any committed navigation of the MAIN frame outdates what was observed: Playwright emits framenavigated for
+    // cross-document loads, reloads and history moves and for same-document ones (pushState, hash). Subframes do not count.
+    page.on('framenavigated', (frame: unknown) => {
+      if (frame === page.mainFrame?.()) entry.generation = ++state.generationClock
+    })
     const gone = () => {
       state.pages = state.pages.filter(entry => entry.page !== page)
       // A page that was not the active one just leaves the list.
@@ -1102,12 +1135,33 @@ export class BrowserService {
     return file
   }
 
+  /** `{targetId, generation}` of a tracked page (empty for a page the service does not track). */
+  private stamp(page: any): { targetId?: string; generation?: number } {
+    const entry = this.pageEntries.get(page)
+    return entry ? { targetId: entry.id, generation: entry.generation } : {}
+  }
+
+  /**
+   * Refuse to act when the page's generation is not the one the caller observed. Nothing has been done yet
+   * at this point, so the caller only needs to observe again.
+   */
+  private assertGeneration(page: any, expected: number | undefined): void {
+    if (expected === undefined) return
+    const entry = this.pageEntries.get(page)
+    if (!entry || entry.generation === expected) return
+    throw new TargetStaleError(
+      `The page ${entry.id} is at generation ${entry.generation}, not ${expected}: it navigated since it was observed, so nothing was done.`,
+      { targetId: entry.id, generation: entry.generation },
+    )
+  }
+
   private async readState(page: any, includeScreenshot: boolean): Promise<InteractiveState> {
     const data = await evaluateExtractor(page, [])
     const state: InteractiveState = {
       url: page.url(),
       title: String(data.title ?? ''),
       text: capText(String(data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(), 100_000),
+      ...this.stamp(page),
     }
     if (includeScreenshot) state.screenshotPath = await this.captureScreenshot(page)
     return state
@@ -1125,8 +1179,9 @@ export class BrowserService {
     return this.readState(page, true)
   }
 
-  async click(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async click(target: BrowserTarget, opts: { expectGeneration?: number; timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     await this.onTarget(page, target, locator => locator.click({ timeout: boundedTimeout(opts.timeoutMs, 'act.click timeoutMs') }))
     // The click may have closed the page it hit (a popup's own close button). That is a success, not TARGET_CLOSED.
     await page.waitForTimeout(opts.waitMs ?? 500).catch((error: unknown) => { if (!page.isClosed()) throw error })
@@ -1138,25 +1193,28 @@ export class BrowserService {
     return this.readState(page, true)
   }
 
-  async type(target: BrowserTarget, text: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async type(target: BrowserTarget, text: string, opts: { expectGeneration?: number; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     await this.onTarget(page, target, locator => locator.fill(text, { timeout: boundedTimeout(opts.timeoutMs, 'act.fill timeoutMs') }))
     return this.readState(page, false)
   }
 
   /** Type key by key (pressSequentially), so per-key handlers fire; unlike `type`, which replaces the whole value. */
-  async typeKeys(target: BrowserTarget, text: string, opts: { delayMs?: number; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async typeKeys(target: BrowserTarget, text: string, opts: { expectGeneration?: number; delayMs?: number; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const value = boundedString(text, 'act.type text', 10_000)
     const delay = opts.delayMs ?? 0
     if (!Number.isFinite(delay) || delay < 0 || delay > 1_000) throw new Error('act.type delayMs must be between 0 and 1,000')
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     const timeout = boundedTimeout(opts.timeoutMs, 'act.type timeoutMs')
     await this.onTarget(page, target, locator => locator.pressSequentially(value, { delay, timeout }))
     return this.readState(page, false)
   }
 
-  async clear(target: BrowserTarget, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async clear(target: BrowserTarget, opts: { expectGeneration?: number; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     const timeout = boundedTimeout(opts.timeoutMs, 'act.clear timeoutMs')
     await this.onTarget(page, target, locator => locator.clear({ timeout }))
     return this.readState(page, false)
@@ -1178,31 +1236,35 @@ export class BrowserService {
     return this.readState(page, false)
   }
 
-  async press(target: BrowserTarget | undefined, key: string, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async press(target: BrowserTarget | undefined, key: string, opts: { expectGeneration?: number; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     const value = boundedString(key, 'act.press key', 100)
     if (target !== undefined) await this.onTarget(page, target, locator => locator.press(value, { timeout: boundedTimeout(opts.timeoutMs, 'act.press timeoutMs') }))
     else await page.keyboard.press(value)
     return this.readState(page, false)
   }
 
-  async select(target: BrowserTarget, values: readonly string[], opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async select(target: BrowserTarget, values: readonly string[], opts: { expectGeneration?: number; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     if (values.length < 1 || values.length > 20) throw new Error('act.select requires 1 to 20 values')
     values.forEach(value => boundedString(value, 'act.select value', 2_000))
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     await this.onTarget(page, target, locator => locator.selectOption([...values], { timeout: boundedTimeout(opts.timeoutMs, 'act.select timeoutMs') }))
     return this.readState(page, false)
   }
 
-  async check(target: BrowserTarget, checked = true, opts: { timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async check(target: BrowserTarget, checked = true, opts: { expectGeneration?: number; timeoutMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     const timeout = boundedTimeout(opts.timeoutMs, 'act.check timeoutMs')
     await this.onTarget(page, target, locator => checked ? locator.check({ timeout }) : locator.uncheck({ timeout }))
     return this.readState(page, false)
   }
 
-  async hover(target: BrowserTarget, opts: { timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async hover(target: BrowserTarget, opts: { expectGeneration?: number; timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     const timeoutMs = boundedTimeout(opts.timeoutMs, 'act.hover timeoutMs')
     const waitMs = Math.min(Math.max(opts.waitMs ?? 300, 0), timeoutMs)
     await this.onTarget(page, target, locator => locator.hover({ timeout: timeoutMs }))
@@ -1210,7 +1272,7 @@ export class BrowserService {
     return this.readState(page, true)
   }
 
-  async setFiles(target: BrowserTarget, files: readonly string[], opts: { timeoutMs?: number; session?: string } = {}): Promise<FileUploadResult> {
+  async setFiles(target: BrowserTarget, files: readonly string[], opts: { expectGeneration?: number; timeoutMs?: number; session?: string } = {}): Promise<FileUploadResult> {
     if (files.length === 0 || files.length > 20) throw new Error('act.upload requires 1 to 20 files')
     const resolved = files.map(file => {
       if (!path.isAbsolute(file)) throw new Error('act.upload requires absolute file paths: ' + file)
@@ -1221,6 +1283,7 @@ export class BrowserService {
     const totalBytes = resolved.reduce((total, file) => total + fs.statSync(file).size, 0)
     if (totalBytes > 512 * 1024 * 1024) throw new Error('act.upload total upload size exceeds 512 MiB')
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     await this.onTarget(page, target, locator => locator.setInputFiles(resolved, { timeout: boundedTimeout(opts.timeoutMs, 'act.upload timeoutMs') }))
     return { ...await this.readState(page, true), files: resolved.map(file => path.basename(file)) }
   }
@@ -1277,15 +1340,15 @@ export class BrowserService {
    * (or a later one) opened in the same context. Pure query: it never creates
    * a bucket and never changes the active page.
    */
-  async listTargets(opts: { session?: string } = {}): Promise<{ targets: { id: string; url: string; title: string; active: boolean }[] }> {
+  async listTargets(opts: { session?: string } = {}): Promise<{ targets: { id: string; url: string; title: string; active: boolean; generation: number }[] }> {
     const state = this.peek(opts.session)
     if (!state || !this.browserConnected()) return { targets: [] }
-    const targets: { id: string; url: string; title: string; active: boolean }[] = []
+    const targets: { id: string; url: string; title: string; active: boolean; generation: number }[] = []
     for (const entry of [...state.pages]) {
       if (entry.page.isClosed()) continue
       let title = ''
       try { title = String(await entry.page.title()).slice(0, 200) } catch { /* a page that is mid-navigation has no title yet */ }
-      targets.push({ id: entry.id, url: entry.page.url(), title, active: entry.page === state.page })
+      targets.push({ id: entry.id, url: entry.page.url(), title, active: entry.page === state.page, generation: entry.generation })
     }
     return { targets }
   }
@@ -1301,8 +1364,9 @@ export class BrowserService {
     return { id, ...await this.readState(entry.page, false) }
   }
 
-  async scroll(deltaY: number, opts: { waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
+  async scroll(deltaY: number, opts: { expectGeneration?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    this.assertGeneration(page, opts.expectGeneration)
     await page.mouse?.wheel(0, deltaY || 2000).catch(() => {})
     await page.waitForTimeout(opts.waitMs ?? 500)
     return this.readState(page, false)

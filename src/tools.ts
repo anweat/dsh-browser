@@ -54,6 +54,10 @@ const ENVELOPE_SCHEMA = {
         message: { type: 'string' as const, required: true as const },
         hint: { type: 'string' as const },
         schema: { type: 'string' as const },
+        current: {
+          type: 'object' as const, additionalProperties: false,
+          properties: { targetId: { type: 'string' as const, required: true as const }, generation: { type: 'number' as const, required: true as const } },
+        },
         candidates: {
           type: 'object' as const, additionalProperties: false,
           properties: {

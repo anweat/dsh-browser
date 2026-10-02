@@ -6,13 +6,14 @@
  */
 
 import { ActionArgError, ActionUnavailableError, type ActionErrorBody, type ErrorCode } from './types.ts'
-import { LocatorAmbiguousError } from '../locator.ts'
+import { LocatorAmbiguousError, TargetStaleError } from '../locator.ts'
 
 const HINTS: Partial<Record<ErrorCode, string>> = {
   LOCATOR_NOT_FOUND: 'No element matched. Re-read the page (observe.read), check the locator, and wait for dynamic content (act.wait) before retrying.',
   LOCATOR_AMBIGUOUS: 'More than one element matched and nothing was done. Pick the intended element from candidates: narrow the locator (role+name, exact, label, testId, frame), or give index with indexReason.',
   NOT_ACTIONABLE: 'The element exists but cannot take this action now (hidden, disabled, covered, or still moving). Wait for it or dismiss the overlay.',
   TARGET_CLOSED: 'The page is gone or none is open. Call target.open first.',
+  TARGET_STALE: 'The page navigated, reloaded, or changed history since you observed it, and nothing was done. Call observe.read again, check the page is still the one you meant, then retry with the new generation (current.generation).',
   DEADLINE: 'The action ran out of time. Re-read the page to see whether it took effect before retrying.',
   CANCELLED: 'The call was cancelled before it finished.',
   CAPABILITY_UNAVAILABLE: 'This capability is not available in the current setup (see browser_index() for runtime state; runtime.install installs Chromium).',
@@ -120,6 +121,7 @@ export function mapError(error: unknown, action: string, opts: { signal?: AbortS
   const result = (code: ErrorCode, hint = HINTS[code]): ActionErrorBody => ({ code, message, ...hint ? { hint } : {} })
 
   if (error instanceof LocatorAmbiguousError) return { ...result('LOCATOR_AMBIGUOUS'), candidates: error.ambiguity }
+  if (error instanceof TargetStaleError) return { ...result('TARGET_STALE'), current: error.current }
   if (error instanceof RecipeValidationError) return result('INVALID_RECIPE')
   if (error instanceof RecipeAssertionError) return result('VALIDATION_FAILED')
   if (abortedByDeadline(opts.signal)) return result('DEADLINE')

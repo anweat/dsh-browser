@@ -139,6 +139,11 @@ export const TARGET_PARAMS: ParamSchema = {
   locator: { ref: 'locator' },
 }
 
+/** Optional guard of the act.* actions that change or press into the page. */
+export const EXPECT_PARAMS: ParamSchema = {
+  expectGeneration: { type: 'number', description: 'generation from the last observe.read/act result; if the page navigated since, fails TARGET_STALE and does nothing.' },
+}
+
 function resolve(node: ParamNode): ParamNode {
   if (!node.ref) return node
   const shared = SHARED_SCHEMAS[node.ref]

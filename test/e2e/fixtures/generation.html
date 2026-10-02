@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Generation</title></head>
+<body>
+  <h1>Generation fixture</h1>
+  <button id="push" type="button">Push state</button>
+  <button id="replace" type="button">Replace state</button>
+  <button id="hash" type="button">Change hash</button>
+  <button id="assign" type="button">Assign location</button>
+  <button id="rerender" type="button">Re-render</button>
+  <button id="subframe" type="button">Navigate frame</button>
+  <button id="submit" type="button" data-hit="submit">Submit order</button>
+  <div id="area"><p id="stamp">render 0</p></div>
+  <iframe id="child" name="child" src="/popup-child.html" title="child"></iframe>
+  <script>
+    var renders = 0
+    document.getElementById('push').addEventListener('click', function () { history.pushState({}, '', '/generation.html?pushed=1') })
+    document.getElementById('replace').addEventListener('click', function () { history.replaceState({}, '', '/generation.html?replaced=1') })
+    document.getElementById('hash').addEventListener('click', function () { location.hash = '#section' })
+    document.getElementById('assign').addEventListener('click', function () { location.assign('/index.html') })
+    document.getElementById('rerender').addEventListener('click', function () {
+      renders += 1
+      document.getElementById('area').innerHTML = '<p id="stamp">render ' + renders + '</p>'
+    })
+    document.getElementById('subframe').addEventListener('click', function () { document.getElementById('child').src = '/index.html' })
+    document.getElementById('submit').addEventListener('click', function () { fetch('/hit?who=submit') })
+  </script>
+</body>
+</html>
