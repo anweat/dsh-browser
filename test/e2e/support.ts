@@ -10,6 +10,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { AutomationAssetStore, resolveAutomationAssetPolicy } from '../../src/automation-assets.ts'
 import { BrowserService } from '../../src/browser-service.ts'
 import { resolveConfig } from '../../src/config.ts'
 import { loadBrowserRuntime } from '../../src/deps.ts'
@@ -98,6 +99,8 @@ export async function startFixtureServer(): Promise<{ base: string; close: () =>
 
 export interface Harness {
   service: BrowserService
+  /** The asset store behind automation.develop / automation.run (always present in the harness). */
+  assets: AutomationAssetStore
   /** Call a registered model tool exactly as the agent loop would, as one session. */
   call: (session: string | undefined, name: string, args?: Record<string, unknown>, signal?: AbortSignal) => Promise<any>
   /** `browser_call({ action, args })` as one session; returns the whole result envelope. Pass `signal` to cancel it like the Host would. */
@@ -128,10 +131,12 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     ...overrides,
   } as never)
   const service = new BrowserService(config)
+  const assets = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory: path.join(dir, 'automations'), persistenceMode: 'manual' }))
   const tools = new Map<string, any>()
-  registerTools({ tools: { register: (tool: any) => tools.set(tool.name, tool) } } as never, config, service)
+  registerTools({ tools: { register: (tool: any) => tools.set(tool.name, tool) } } as never, config, service, assets)
   return {
     service,
+    assets,
     dir,
     toolNames: () => [...tools.keys()],
     async call(session, name, args = {}, signal) {

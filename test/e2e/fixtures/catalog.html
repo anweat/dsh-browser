@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Catalog</title></head>
+<body>
+  <h1>Catalog fixture</h1>
+  <label for="limit">Limit</label>
+  <input id="limit" type="text">
+  <label for="sort">Sort</label>
+  <select id="sort"><option value="new">new</option><option value="top">top</option></select>
+  <button id="apply" type="button">Apply</button>
+  <p id="summary">Not applied</p>
+  <ul id="rows"></ul>
+  <script>
+    document.getElementById('apply').addEventListener('click', function () {
+      var limit = document.getElementById('limit').value
+      var sort = document.getElementById('sort').value
+      document.getElementById('summary').textContent = 'Sorted by ' + sort + ', limit ' + limit
+      var rows = []
+      for (var i = 1; i <= Number(limit || 0); i++) rows.push('<li>' + sort + ' ' + i + '</li>')
+      document.getElementById('rows').innerHTML = rows.join('')
+    })
+  </script>
+</body>
+</html>
