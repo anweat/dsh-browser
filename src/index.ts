@@ -11,7 +11,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import fs from 'node:fs'
 import path from 'node:path'
 import type {} from '@deepseek-ai/dsh-tools'
-import type {} from '@deepseek-ai/dsh-settings'
 import { Config, resolveConfig, type ResolvedConfig } from './config.ts'
 import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
@@ -24,9 +23,13 @@ import { AutomationAssetStore } from './automation-assets.ts'
 import { registerAutomationAssetRpc } from './automation-assets-rpc.ts'
 
 export const name = 'dsh-browser'
-// `settings` is declared, not read: the plugin starts only where the Host mounts the Settings service that
-// serves and persists this plugin's configuration page. `apply` takes its config from the Loader entry.
-export const inject = ['tools', 'settings']
+// Only `tools` is required: `apply` registers the model-facing tools there. `settings` is deliberately NOT declared:
+// Cordis 4.0.4 treats every declared inject as required, so a Host composition without the Settings service
+// (sdk-minimal, a profile with that row switched off) would leave the plugin pending forever. Nothing here reads
+// `ctx.settings`; `apply` takes its config from the Loader entry. Without the Settings service the plugin runs with
+// its Config defaults and the settings card is simply not served (the client mounts it only while the Host serves
+// the `browser` namespace, see `src/client/index.ts`).
+export const inject = ['tools']
 
 /**
  * The object cordis actually receives.
@@ -39,7 +42,7 @@ export const inject = ['tools', 'settings']
  * reports the omission. Exporting the assembled object as `default` is what
  * makes `Config` visible to the settings service.
  */
-const plugin = { name: 'dsh-browser', inject: ['tools', 'settings'] as const, apply, Config }
+const plugin = { name: 'dsh-browser', inject, apply, Config }
 export default plugin
 
 export { Config }

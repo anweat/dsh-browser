@@ -83,7 +83,6 @@ test('the real Host hook looks the draft up: a recipe draft is not asked in auto
   const decide = async (mode: string, id: string, action = 'test') => {
     const root = new Context()
     root.provide('tools', { register() { return () => {} } })
-    root.provide('settings', {})
     const fiber = root.plugin(plugin as never, { snapshotDir, automationMode: mode, automationAssets: { directory, persistenceMode: 'manual' } } as never)
     await new Promise(resolve => setTimeout(resolve, 40))
     try {

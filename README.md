@@ -43,6 +43,10 @@
 可编辑字段都是 `.volatile()`：保存后新值写入运行中的引用，但浏览器进程、工具暴露与审批规则在启动时一次读取，
 所以保存后仍需重启 profile 才生效（只有提示文本覆盖里的目录、错误提示等按调用实时读取，见「自定义提示文本」）。
 
+插件只声明 `inject: ['tools']`，**不依赖宿主的 `settings` 服务**：Cordis 4.0.4 把声明了的 `inject` 一律当作必需，若声明 `settings`，
+在没有该服务的组合（如 sdk-minimal，或关了 settings 行的 profile）里插件会一直挂起。插件的 Host 半边从不读取 `ctx.settings`，
+配置来自 Loader 条目；没有 Settings 服务时按 `Config` 默认值运行，设置卡片只是不显示（客户端只在宿主提供 `browser` 命名空间时才挂载它）。
+
 ## 安装
 
 ```bash
