@@ -11,8 +11,23 @@
 | 插件发布通道 | DSH 基线 | 兼容承诺 |
 |---|---|---|
 | `0.1.12` 及更早的维护版本 | `dsh-v0.1.1-rc.2` 至 `dsh-v0.1.2-rc.1` | 旧基线；不与新插件混装 |
-| `0.1.15` | `dsh-v0.1.7-rc.2` | 精确锁定此宿主版本；组合安装、真实 Web profile 与设置持久化已验证 |
+| `0.1.15` | `dsh-v0.1.7-rc.2` | 精确锁定该宿主版本；组合安装、真实 Web profile 与设置持久化已验证 |
+| `0.1.17` | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | peer 收口为「实测过的两条线」（上界 `<0.2.1-0`）；在 `0.2.0-rc.2` 上完成 typecheck、构建、52 项测试与真实挂载验证；补充浏览器缓存路径配置说明，并新增 peer 双解析模式检查 |
 
+`0.1.17` 把 DSH 运行时依赖由精确锁定改为范围声明（`^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.1-0`），
+使同一份包可装在 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代宿主上（两代之间的 `defineTool`、
+凭据引用、配置表单与客户端槽位契约在本插件用到的范围内保持兼容）。
+范围只声明**实测过的两条线**，既不写成 `>=0.1.7-rc.2 <0.3.0`，也不写成一路放行到 0.3.0 的 `^0.2.0-rc.1`：
+
+- 宿主的组装期校验用的是 `semver.satisfies(host, range, { includePrerelease: true })`，所以「单范围能不能过宿主」不是关键。
+  真正决定装机成败的是 npm/pnpm 的**默认** semver：预发布版本只有在某个比较符自带同号（同 major.minor.patch）预发布时才被判为满足。
+  于是 `>=0.1.7-rc.2 <0.2.1-0` 这种写法过得了宿主校验，却会让 `dsh plugin add` 报 ERESOLVE（上界 tuple 是 0.2.1，接不住 0.2.0-rc.2）；
+  而 `>=0.2.0-rc.1` 这个比较符是**承重**的，必须保留。
+- `0.1.5 → 0.1.7` 曾一次性打断所有按 `0.1.5-alpha.1` 构建的插件。所以 `^0.2.0-rc.1`（等于说整个 0.2.x 都兼容）
+  是对没测过版本的承诺；收口到 `<0.2.1-0` 后，若 0.2.1 真出现破坏，会在**组装期**直接报
+  `is incompatible with dsh 0.2.1` 并点名，而不是拖到用户机器上变成运行期怪错。
+- 范围只表示「测过哪些」，不等于承诺不破坏；真正的防线是每换一个 DSH 版本重跑一遍这套验证。
+  `pnpm run test:peers`（已并入 `pnpm verify`）用两种解析模式逐个断言受管 peer，并自带 `--selftest` 已知行为自校验。
 `0.1.15` 使用 DSH 新客户端分包：状态存储来自
 `dsh-client-store`，设置契约来自 `dsh-client-ui-settings`，客户端 Context
 来自 Cordis。npm 上 `0.1.15-alpha.2` 仍声明旧版 DSH peer，不能与本版混用。
@@ -29,24 +44,24 @@
 ## 安装
 
 ```bash
-dsh plugin --profile web add @anweat/dsh-browser@0.1.15
+dsh plugin --profile web add @anweat/dsh-browser@0.1.17
 # 或本地目录 / tarball：
 dsh plugin --profile web add ./dsh-browser
 # 重启（web profile 关闭了 HMR）：
 dsh --profile web
 ```
 
-> 本版精确适配 `dsh-v0.1.7-rc.2`，不承诺兼容其他 DSH 版本。
+> 本版支持 `dsh-v0.1.7-rc.2` 至 `dsh-v0.2.0-rc.2`；范围之外的宿主版本未经验证。
 > 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
 ## 从旧版本升级
 
-Web Search Pro 与浏览器插件应同步升级；面向 `dsh-v0.1.7-rc.2` 不要混用仍声明旧 peer 的 Browser `0.1.15-alpha.2`。
+Web Search Pro 与浏览器插件应同步升级；面向 `dsh-v0.1.7-rc.2` 不要混用仍声明旧 peer 的 Browser `0.1.15-alpha.2`；两者都升到 `0.1.17` 即可。
 
 ```bash
-dsh plugin --profile web add @anweat/dsh-browser@0.1.15 dsh-web-search-pro@0.1.15
+dsh plugin --profile web add @anweat/dsh-browser@0.1.17 dsh-web-search-pro@0.1.17
 ```
 
 升级后完整停止并重启 Web profile，再调用 `browser_status`、`browser_opencli_status` 和 `web_backend_status`；仅刷新网页不会重新加载插件服务或 Web Search Pro 配置面板。尤其不要只升级 Web Search Pro：新的工具目录、Patchright 运行时和调用缓冲都来自浏览器插件。
@@ -91,6 +106,21 @@ DSH 会话示例：
 | **playwright 驱动**（JS 包） | `playwright` npm 依赖 | 插件本地 node_modules 优先，缺省回退全局 npm |
 | **patchright 驱动**（可选） | 与 Playwright 同版本的 Chromium 兼容驱动 | 插件内置；配置 `browserRuntime: patchright` 才启用 |
 | **opencli**（纯 Node CLI） | `@jackwener/opencli` npm 依赖 | 同上，本地优先 / 全局复用 |
+
+### 把共享浏览器缓存放到别的盘（可选）
+
+共享缓存默认落在 `%LOCALAPPDATA%\ms-playwright`（Windows 上即系统盘，约 400MB）。
+若要把内核放在别的盘、或直接复用一份已有的内核，在 loader 条目上显式给出可执行文件路径：
+
+```yaml
+- id: browser
+  config:
+    executablePath: 'E:/caches/ms-playwright/chromium-1234/chrome-win64/chrome.exe'
+```
+
+`executablePath` 必须指向真实的内核可执行文件（不是目录）；设置后 `browser_status` 会显示该路径，
+`browser_install` 不再需要执行。`browserRuntime: patchright` 时同样适用。
+注意该字段在插件挂载时解析：改完需要重新加载 profile（重启 Web profile），仅刷新网页不生效。
 
 ## 服务：`browser`
 
