@@ -1,0 +1,42 @@
+{
+  "baseline": "5f23444",
+  "host": "0.2.0-rc.2",
+  "plugin": "0.2.0",
+  "fixtureCases": 9,
+  "comprehensive": "8/8",
+  "verifyTests": 327,
+  "realChromiumE2e": 64,
+  "skipped": 0,
+  "evidenceAssertions": 25,
+  "budget": {
+    "startBalance": 44.75,
+    "endBalance": 44.54,
+    "observedBalanceDelta": 0.21,
+    "requestedLimitCny": 10,
+    "note": "Account-wide balance delta, displayed at cent precision; includes Web/UI sessions and may include other concurrent account usage."
+  },
+  "sessions": 14,
+  "usage": {
+    "inputTokens": 123969,
+    "cacheReadTokens": 1436672,
+    "outputTokens": 23087
+  },
+  "issues": [
+    {
+      "id": "V01",
+      "status": "fixed",
+      "description": "Journal extraction guidance omitted content-section requirement"
+    },
+    {
+      "id": "V02",
+      "status": "workspace-doc-fixed",
+      "description": "Test prompt prohibited skill while expecting it to load"
+    },
+    {
+      "id": "V03",
+      "status": "retained",
+      "description": "Invalid action arguments still trigger approval before validation"
+    }
+  ],
+  "evidenceDirectory": "/Users/anweat/codeproject/dsh-dev/research/experiments/browser-validation-2026-10-04"
+}
