@@ -27,11 +27,15 @@ import { expandParams } from './actions/schema.ts'
 import { renderIndex, type IndexEnvironment } from './actions/index-view.ts'
 import { runAction, type RunEnvironment } from './actions/run.ts'
 import { COMPLIANCE_NOTICE } from './actions/shared.ts'
+import { CALL_PARAMETERS, INDEX_PARAMETERS, callDescription, indexDescription } from './tool-defs.ts'
+import type { ResolvedPrompts } from './prompts.ts'
 import type { ActionContext, ActionDef, ActionEnvelope } from './actions/types.ts'
 
 export interface ToolRuntime {
   /** Whether the `dsh-browser` skill is currently registered; read at call time. */
   skillAvailable?: () => boolean
+  /** Bring the skill registration in line with the current `prompts.skill` (called at the start of each index/call). */
+  refreshSkill?: () => void
 }
 
 function sessionId(exec: unknown): string {
@@ -94,6 +98,9 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
   const development = assets ? new AutomationDevelopmentService(assets, config.automationAssets) : undefined
   const runEnv: RunEnvironment = { mode: config.automationMode, options: config.automationAssets, enabled: config.enabled }
   const register = (tool: any): void => { ctx.tools.register(tool) }
+  // Read at call time wherever the surface allows it, so a config edit applies to the next call.
+  // Tool descriptions are the exception: the host fixes them when the tool is registered.
+  const promptsNow = (): ResolvedPrompts | undefined => config.prompts?.current()
 
   const actionContext = (exec: any): ActionContext => ({
     service, config, ...assets ? { assets } : {}, ...development ? { development } : {},
@@ -105,18 +112,14 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   if (config.toolSurface === 'flat') {
     const exposed = new Set(configuredBrowserActions(config.automationMode, config.automationAssets, config.enabled))
-    for (const action of ACTIONS.filter(entry => exposed.has(entry.name))) register(flatTool(action, actionContext, runEnv))
+    for (const action of ACTIONS.filter(entry => exposed.has(entry.name))) register(flatTool(action, actionContext, runEnv, promptsNow()))
     return
   }
 
   register(defineTool({
     name: INDEX_TOOL,
-    description: 'Browser capability index. No args: groups and environment state. {group}: that group\'s actions. {action}: one action\'s full schema. {query}: keyword search.',
-    parameters: {
-      group: { type: 'string', description: 'Group name, e.g. act.' },
-      action: { type: 'string', description: 'Action name, e.g. act.click.' },
-      query: { type: 'string', description: 'Keywords.' },
-    },
+    description: indexDescription(promptsNow()?.tools.browser_index),
+    parameters: { ...INDEX_PARAMETERS },
     output: {
       schema: { type: 'object', additionalProperties: false, properties: { level: { type: 'string', required: true }, text: { type: 'string', required: true } } },
       render: (_args, value) => [{ type: 'text', text: (value as { text: string }).text }],
@@ -124,9 +127,12 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
     timeoutMs: 15_000,
     isConcurrencySafe: () => true,
     async execute(args: { group?: string; action?: string; query?: string }) {
+      runtime.refreshSkill?.()
+      const prompts = promptsNow()
       const env: IndexEnvironment = {
         mode: config.automationMode, options: config.automationAssets, enabled: config.enabled,
         skillAvailable: runtime.skillAvailable?.() ?? false,
+        ...prompts ? { prompts } : {},
       }
       if (!args.group && !args.action && !args.query) {
         try {
@@ -140,26 +146,26 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
 
   register(defineTool({
     name: CALL_TOOL,
-    description: 'Run one browser action; browser_index shows the names. Args are validated server-side: INVALID_ARGS replies include the schema. Reply: {ok, action, executionStatus, result | error{code,message,hint}}. ' + COMPLIANCE_NOTICE,
-    parameters: {
-      action: { type: 'string', required: true, description: 'Action name, e.g. target.open.' },
-      args: { type: 'object', additionalProperties: true, description: 'Arguments for the action.' },
-    },
+    description: callDescription(promptsNow()?.tools.browser_call),
+    parameters: { ...CALL_PARAMETERS },
     output: { schema: ENVELOPE_SCHEMA, render: renderEnvelope as never },
     timeoutMs: 600_000,
     // Calls are serialized per agent step: interactions share one page, and the Host classifier cannot read the action.
     isConcurrencySafe: () => false,
     async execute(args: { action: string; args?: Record<string, unknown> }, exec: unknown) {
+      runtime.refreshSkill?.()
       return runAction(args.action, args.args, actionContext(exec), runEnv) as Promise<ActionEnvelope> as never
     },
   }))
 }
 
 /** One flat tool for one action: the same registry entry, projected as a native tool. */
-function flatTool(action: ActionDef, actionContext: (exec: any) => ActionContext, runEnv: RunEnvironment): unknown {
+function flatTool(action: ActionDef, actionContext: (exec: any) => ActionContext, runEnv: RunEnvironment, prompts?: ResolvedPrompts): unknown {
+  const summary = prompts?.actions[action.name]?.summary ?? action.summary
+  const notes = prompts?.actions[action.name]?.notes ?? action.notes
   return defineTool({
     name: flatToolName(action),
-    description: action.summary + (action.notes ? ' ' + action.notes : '') + (action.group === 'runtime' || action.group === 'inspect' ? '' : ' ' + COMPLIANCE_NOTICE),
+    description: summary + (notes ? ' ' + notes : '') + (action.group === 'runtime' || action.group === 'inspect' ? '' : ' ' + COMPLIANCE_NOTICE),
     parameters: expandParams(action.params) as never,
     output: { schema: ENVELOPE_SCHEMA, render: renderEnvelope as never },
     timeoutMs: action.timeoutMs + 5_000,

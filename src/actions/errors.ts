@@ -8,7 +8,8 @@
 import { ActionArgError, ActionUnavailableError, type ActionErrorBody, type ErrorCode } from './types.ts'
 import { LocatorAmbiguousError, TargetStaleError } from '../locator.ts'
 
-const HINTS: Partial<Record<ErrorCode, string>> = {
+/** The built-in hint of every error code that has one fixed text. These are what `prompts.errorHints` can replace. */
+export const DEFAULT_ERROR_HINTS: Readonly<Partial<Record<ErrorCode, string>>> = {
   LOCATOR_NOT_FOUND: 'No element matched. Re-read the page (observe.read), check the locator, and wait for dynamic content (act.wait) before retrying.',
   LOCATOR_AMBIGUOUS: 'More than one element matched and nothing was done. Pick the intended element from candidates: narrow the locator (role+name, exact, label, testId, frame), or give index with indexReason.',
   NOT_ACTIONABLE: 'The element exists but cannot take this action now (hidden, disabled, covered, or still moving). Wait for it or dismiss the overlay.',
@@ -25,8 +26,31 @@ const HINTS: Partial<Record<ErrorCode, string>> = {
   INVALID_RECIPE: 'The recipe itself is malformed (see the message). Fix the step and send it again; nothing ran.',
 }
 
+type HintSource = () => Readonly<Partial<Record<string, string>>>
+
+/**
+ * Deployment overrides of the hint per error code (`prompts.errorHints`).
+ *
+ * `mapError` and `hintFor` are called from places that hold no configuration (recipe execution, asset replay),
+ * so the overrides are ambient: the plugin installs a source on apply and removes it when its fiber goes away.
+ * The source is read on every call, which is what makes a config change take effect without a restart.
+ * The most recently installed source wins; with none installed the built-in texts apply.
+ */
+const hintSources: HintSource[] = []
+
+/** Install a live source of hint overrides. @returns the function that removes it. */
+export function installErrorHints(source: HintSource): () => void {
+  hintSources.push(source)
+  return () => {
+    const index = hintSources.lastIndexOf(source)
+    if (index >= 0) hintSources.splice(index, 1)
+  }
+}
+
+/** The hint for a code: the configured override, else the built-in text (undefined when the code has none). */
 export function hintFor(code: ErrorCode): string | undefined {
-  return HINTS[code]
+  const source = hintSources[hintSources.length - 1]
+  return source?.()[code] ?? DEFAULT_ERROR_HINTS[code]
 }
 
 /** Thrown by a recipe `assert` step whose condition did not become true in time. */
@@ -115,10 +139,10 @@ export function blockedBeforeAction(error: unknown): boolean {
 /** Map any thrown value to a structured error body. */
 export function mapError(error: unknown, action: string, opts: { signal?: AbortSignal } = {}): ActionErrorBody {
   if (error instanceof ActionArgError) return { code: 'INVALID_ARGS', message: error.message, ...error.hint ? { hint: error.hint } : {} }
-  if (error instanceof ActionUnavailableError) return { code: 'CAPABILITY_UNAVAILABLE', message: error.message, hint: error.hint ?? HINTS.CAPABILITY_UNAVAILABLE! }
+  if (error instanceof ActionUnavailableError) return { code: 'CAPABILITY_UNAVAILABLE', message: error.message, hint: error.hint ?? hintFor('CAPABILITY_UNAVAILABLE')! }
   const message = messageOf(error)
   const name = error instanceof Error ? error.name : ''
-  const result = (code: ErrorCode, hint = HINTS[code]): ActionErrorBody => ({ code, message, ...hint ? { hint } : {} })
+  const result = (code: ErrorCode, hint = hintFor(code)): ActionErrorBody => ({ code, message, ...hint ? { hint } : {} })
 
   if (error instanceof LocatorAmbiguousError) return { ...result('LOCATOR_AMBIGUOUS'), candidates: error.ambiguity }
   if (error instanceof TargetStaleError) return { ...result('TARGET_STALE'), current: error.current }

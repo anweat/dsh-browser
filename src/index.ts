@@ -19,6 +19,7 @@ import { registerTools } from './tools.ts'
 import { browserPolicyDecision } from './approval-policy.ts'
 import { resolveBrowserCall } from './actions/surface.ts'
 import { registerSkillWhenAvailable } from './skill.ts'
+import { installErrorHints } from './actions/errors.ts'
 import { AutomationAssetStore } from './automation-assets.ts'
 import { registerAutomationAssetRpc } from './automation-assets-rpc.ts'
 
@@ -109,9 +110,13 @@ export function apply(ctx: Context, config: Config): void {
   // Optional: the `dsh-browser` skill is registered only when the Host has a
   // skill registry. It must not be a declared `inject` (Cordis 4.0.4 would
   // hang the plugin without it); this opens a scoped, optional dependency.
-  const skill = registerSkillWhenAvailable(ctx)
+  // `prompts.skill` is read live: the skill is registered, withdrawn or invalidated when it changes.
+  const skill = registerSkillWhenAvailable(ctx, undefined, resolved.prompts)
 
-  registerTools(ctx, resolved, service, assets, { skillAvailable: skill.isAvailable })
+  // `prompts.errorHints` replace the by-code hints wherever an error is built; read per call.
+  ctx.effect(() => installErrorHints(() => resolved.prompts.current().errorHints))
+
+  registerTools(ctx, resolved, service, assets, { skillAvailable: skill.isAvailable, refreshSkill: skill.refresh })
   registerAutomationAssetRpc(ctx, assets, service)
 
   if (resolved.verbose) {

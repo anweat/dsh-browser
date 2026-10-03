@@ -8,9 +8,10 @@
  */
 
 import { ACTIONS, GROUP_SUMMARIES, actionsInGroup, findAction, findSubAction, findTopic, isActionGroup, traitsFor } from './registry.ts'
-import { ACTION_GROUPS, type ActionDef, type ApprovalClass, type ParamSchema, type SubActionDef } from './types.ts'
+import { ACTION_GROUPS, type ActionDef, type ActionGroup, type ApprovalClass, type ParamSchema, type SubActionDef } from './types.ts'
 import { compactParams, describeParams } from './schema.ts'
 import { actionUnavailableReason, type AutomationMode, type ExposureOptions } from '../freedom.ts'
+import type { ResolvedPrompts } from '../prompts.ts'
 
 export interface IndexEnvironment {
   mode: AutomationMode
@@ -20,7 +21,18 @@ export interface IndexEnvironment {
   skillAvailable: boolean
   /** Runtime facts worth surfacing at the root (undefined when unknown). */
   runtime?: { chromiumInstalled?: boolean; opencliInstalled?: boolean; opencliEnabled?: boolean }
+  /** Deployment overrides of the text (`prompts` configuration); absent means the built-in text everywhere. */
+  prompts?: ResolvedPrompts
 }
+
+// The text of a catalog entry: the configured override, else the one in the registry.
+const groupSummary = (group: string, env: IndexEnvironment): string => env.prompts?.groups[group as ActionGroup] ?? GROUP_SUMMARIES[group as ActionGroup]
+const summaryOf = (action: ActionDef, env: IndexEnvironment): string => env.prompts?.actions[action.name]?.summary ?? action.summary
+const notesOf = (action: ActionDef, env: IndexEnvironment): string | undefined => env.prompts?.actions[action.name]?.notes ?? action.notes
+const subSummary = (action: ActionDef, sub: string, env: IndexEnvironment): string => env.prompts?.actions[`${action.name}.${sub}`]?.summary ?? action.subActions!.items[sub]!.summary
+const subNotes = (action: ActionDef, sub: string, env: IndexEnvironment): string | undefined => env.prompts?.actions[`${action.name}.${sub}`]?.notes ?? action.subActions!.items[sub]!.notes
+const topicSummary = (action: ActionDef, topic: string, env: IndexEnvironment): string => env.prompts?.actions[`${action.name}.${topic}`]?.summary ?? action.topics![topic]!.summary
+const topicText = (action: ActionDef, topic: string, env: IndexEnvironment): string => env.prompts?.actions[`${action.name}.${topic}`]?.notes ?? action.topics![topic]!.text
 
 /** The fallback guide shown at the root when no skill service is present (kept under ~300 tokens). */
 export const COMPACT_GUIDE = [
@@ -48,10 +60,10 @@ function approvalNote(action: ActionDef, mode: AutomationMode): string {
   return asks[action.approval](mode)
 }
 
-function line(action: ActionDef, mode: AutomationMode): string {
-  const note = approvalNote(action, mode)
+function line(action: ActionDef, env: IndexEnvironment): string {
+  const note = approvalNote(action, env.mode)
   const params = compactParams(action.params)
-  const head = `${action.name} - ${action.summary}`
+  const head = `${action.name} - ${summaryOf(action, env)}`
   const tail = ` | ${params || 'no args'}${note ? ` | ${note}` : ''}`
   const text = head + tail
   return text.length > MAX_LINE * 2 ? text.slice(0, MAX_LINE * 2 - 1) + '…' : text
@@ -94,19 +106,20 @@ export function renderRoot(env: IndexEnvironment): string {
   for (const group of ACTION_GROUPS) {
     const count = usable.filter(action => action.group === group).length
     if (count === 0) continue
-    lines.push(`  ${group} (${count}) ${GROUP_SUMMARIES[group]}`)
+    lines.push(`  ${group} (${count}) ${groupSummary(group, env)}`)
   }
   lines.push('Reuse first: browser_call({action:"automation.search",args:{query}}) then {action:"automation.run",args:{id,url,inputs?}}.')
   const note = blockedLine(blocked)
   if (note) lines.push(note.length > 400 ? `Unavailable: ${blocked.length} actions (${[...new Set(blocked.map(entry => entry.reason))].join('; ')}); browser_index({group}) shows what is usable.` : note)
-  lines.push(env.skillAvailable ? 'Load skill "dsh-browser" for workflow and locator guidance.' : COMPACT_GUIDE)
+  lines.push(env.skillAvailable ? 'Load skill "dsh-browser" for workflow and locator guidance.' : env.prompts?.rootGuide ?? COMPACT_GUIDE)
+  if (env.prompts?.rootNote) lines.push(env.prompts.rootNote)
   return lines.join('\n')
 }
 
 export function renderGroup(group: string, env: IndexEnvironment): string {
   if (!isActionGroup(group)) return `Unknown group "${group}". Groups: ${ACTION_GROUPS.join(', ')}.`
   const { usable, blocked } = split(actionsInGroup(group), env)
-  const lines = [`${group} - ${GROUP_SUMMARIES[group]}`, ...usable.map(action => line(action, env.mode))]
+  const lines = [`${group} - ${groupSummary(group, env)}`, ...usable.map(action => line(action, env))]
   const note = blockedLine(blocked)
   if (note) lines.push(note)
   return lines.join('\n')
@@ -153,15 +166,15 @@ function renderActionWithSubs(action: ActionDef, env: IndexEnvironment): string 
   const note = approvalNote(action, env.mode)
   const own = (sub: SubActionDef): string => sub.params.filter(name => !set.common.includes(name)).join(', ')
   const lines = [
-    `${action.name} - ${action.summary}`,
+    `${action.name} - ${summaryOf(action, env)}`,
     `group ${action.group} | changes state (get and validate only read) | ${reason ? `UNAVAILABLE: ${reason}` : note ? `approval: ${note}` : 'no approval needed'}`,
-    ...action.notes ? [action.notes] : [],
+    ...notesOf(action, env) ? [notesOf(action, env)!] : [],
     'common args:',
     ...Object.entries(pick(action.params, set.common)).map(([key, node]) => `  ${key}${node.required ? '' : '?'}: ${node.enum ? node.enum.map(value => JSON.stringify(value)).join('|') : node.type ?? 'any'}${node.description ? ' - ' + node.description : ''}`),
     `sub-actions (full schema of one: browser_index({action:"${action.name}.<sub>"})):`,
     ...Object.entries(set.items).map(([key, sub]) => {
       const flags = env.mode === 'read-only' && !traitsFor(action, { [set.key]: key }).readOnly ? ' [not in read-only]' : ''
-      return `  ${key} - ${sub.summary} | ${own(sub) || 'id only'}${flags}`
+      return `  ${key} - ${subSummary(action, key, env)} | ${own(sub) || 'id only'}${flags}`
     }),
     errorsLine(action, action.mutating),
   ]
@@ -177,9 +190,9 @@ function renderSubAction(action: ActionDef, subName: string, env: IndexEnvironme
   const reason = actionUnavailableReason(action, env.mode, env.options, env.enabled, { [set.key]: subName })
   const note = subApprovalNote(action, subName, env.mode)
   const lines = [
-    `${name} - ${sub.summary}`,
+    `${name} - ${subSummary(action, subName, env)}`,
     `call: browser_call({action:"${action.name}",args:{${set.key}:"${subName}",...}}) | ${traits.mutating ? 'changes state' : 'read/observe'} | ${reason ? `UNAVAILABLE: ${reason}` : note ? `approval: ${note}` : 'no approval needed'}`,
-    ...sub.notes ? [sub.notes] : [],
+    ...subNotes(action, subName, env) ? [subNotes(action, subName, env)!] : [],
     'args:',
     `  ${set.key}: "${subName}" - selects this operation`,
     ...describeParams(subParams(action, sub, set.key)).filter(line => line !== '  (no arguments)'),
@@ -195,7 +208,7 @@ export function renderAction(name: string, env: IndexEnvironment): string {
     const nested = findSubAction(name)
     if (nested) return renderSubAction(nested.action, nested.sub, env)
     const topic = findTopic(name)
-    if (topic) return `${name} - ${topic.action.topics![topic.topic]!.summary}\n${topic.action.topics![topic.topic]!.text}`
+    if (topic) return `${name} - ${topicSummary(topic.action, topic.topic, env)}\n${topicText(topic.action, topic.topic, env)}`
     if (isActionGroup(name)) return renderGroup(name, env)
     const hits = searchActions(name, env).slice(0, 5)
     return `Unknown action "${name}".${hits.length ? ' Similar: ' + hits.map(hit => hit.name).join(', ') + '.' : ''} browser_index() lists the groups.`
@@ -204,28 +217,28 @@ export function renderAction(name: string, env: IndexEnvironment): string {
   const reason = actionUnavailableReason(action, env.mode, env.options, env.enabled)
   const note = approvalNote(action, env.mode)
   const lines = [
-    `${action.name} - ${action.summary}`,
+    `${action.name} - ${summaryOf(action, env)}`,
     `group ${action.group} | ${action.mutating ? 'changes state' : 'read/observe'} | ${reason ? `UNAVAILABLE: ${reason}` : note ? `approval: ${note}` : 'no approval needed'}`,
-    ...action.notes ? [action.notes] : [],
+    ...notesOf(action, env) ? [notesOf(action, env)!] : [],
     'args:',
     ...describeParams(action.params),
     ...exampleLine(action),
-    ...topicLines(action),
+    ...topicLines(action, env),
     errorsLine(action, action.mutating),
   ]
   return lines.join('\n')
 }
 
 /** The extra detail pages of an action, one line each. */
-function topicLines(action: ActionDef): string[] {
-  const topics = Object.entries(action.topics ?? {})
+function topicLines(action: ActionDef, env: IndexEnvironment): string[] {
+  const topics = Object.keys(action.topics ?? {})
   if (!topics.length) return []
-  return [`more detail: ${topics.map(([key, topic]) => `browser_index({action:"${action.name}.${key}"}) ${topic.summary}`).join(' | ')}`]
+  return [`more detail: ${topics.map(key => `browser_index({action:"${action.name}.${key}"}) ${topicSummary(action, key, env)}`).join(' | ')}`]
 }
 
-function score(action: ActionDef, terms: string[]): number {
+function score(action: ActionDef, terms: string[], env: IndexEnvironment): number {
   const name = action.name.toLowerCase()
-  const summary = (action.summary + ' ' + Object.entries(action.subActions?.items ?? {}).map(([key, sub]) => key + ' ' + sub.summary).join(' ')).toLowerCase()
+  const summary = (summaryOf(action, env) + ' ' + Object.keys(action.subActions?.items ?? {}).map(key => key + ' ' + subSummary(action, key, env)).join(' ')).toLowerCase()
   const params = Object.keys(action.params).join(' ').toLowerCase()
   let total = 0
   for (const term of terms) {
@@ -242,14 +255,14 @@ export function searchActions(query: string, env: IndexEnvironment): ActionDef[]
   const terms = query.toLowerCase().split(/[^a-z0-9_.]+/).filter(Boolean)
   if (!terms.length) return []
   const { usable } = split(ACTIONS, env)
-  return usable.map(action => ({ action, score: score(action, terms) })).filter(entry => entry.score > 0)
+  return usable.map(action => ({ action, score: score(action, terms, env) })).filter(entry => entry.score > 0)
     .sort((a, b) => b.score - a.score || a.action.name.localeCompare(b.action.name)).slice(0, 8).map(entry => entry.action)
 }
 
 export function renderSearch(query: string, env: IndexEnvironment): string {
   const hits = searchActions(query, env)
   if (!hits.length) return `No usable action matches "${query}". browser_index() lists the groups.`
-  return [`${hits.length} match${hits.length === 1 ? '' : 'es'} for "${query}":`, ...hits.map(action => line(action, env.mode))].join('\n')
+  return [`${hits.length} match${hits.length === 1 ? '' : 'es'} for "${query}":`, ...hits.map(action => line(action, env))].join('\n')
 }
 
 /** Resolve a `browser_index` call to text. `action` wins over `group`, which wins over `query`. */
