@@ -47,8 +47,14 @@ export interface PromptsCardState {
  * unmarked fields, and the Host would refuse a write to one.
  */
 export declare const FIELD_SPECS: readonly SettingsFieldSpec[];
-/** The JSON-shaped section fields the card renders as code editors. */
+/** The JSON-shaped section fields: objects (policies, prompts) and the launch-argument array. */
 export declare const JSON_FIELD_SPECS: readonly SettingsFieldSpec[];
+/**
+ * Public config fields the card has no form for, on purpose: nested records (named login states, rule packs with
+ * hash-pinned scripts) that are safer to edit in the profile config file. The card names each one and says so, instead
+ * of leaving it out without a word. `rulePacks` is not `.volatile()` in the Host schema, so no form could write it.
+ */
+export declare const CONFIG_FILE_ONLY_FIELDS: readonly ["authProfiles", "rulePacks"];
 /** Section fields rendered as JSON code editors rather than single inputs. */
 export declare const JSON_FIELDS: ReadonlySet<string>;
 /** Every field the card renders, in display order. */

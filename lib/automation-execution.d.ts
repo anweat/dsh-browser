@@ -2,6 +2,7 @@
 import type { RecipeRunResult } from './automation.ts';
 import { type AutomationAsset, type AutomationAssetStore, type EvidenceLevel } from './automation-assets.ts';
 import type { BrowserService } from './browser-service.ts';
+import { INPUT_SET_MAX, INPUT_SET_MIN } from './activation-rules.ts';
 export interface AutomationExecutionOptions {
     signal?: AbortSignal;
     authProfile?: string;
@@ -35,9 +36,7 @@ export interface AutomationExecutionResult {
 }
 export declare function automationInputs(asset: AutomationAsset, raw: unknown): Record<string, string>;
 export declare function executeAutomationAsset(service: BrowserService, store: AutomationAssetStore, id: string, url: string, rawInputs: unknown, requiredStatus: 'active' | 'draft', options?: AutomationExecutionOptions): Promise<AutomationExecutionResult>;
-/** How many input sets one test takes. */
-export declare const INPUT_SET_MIN = 2;
-export declare const INPUT_SET_MAX = 5;
+export { INPUT_SET_MIN, INPUT_SET_MAX };
 export declare const PARAMETERIZATION_SUSPECT = "PARAMETERIZATION_SUSPECT";
 export interface InputSetResult {
     index: number;

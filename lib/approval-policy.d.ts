@@ -20,6 +20,18 @@ export type BrowserPolicyDecision = {
     kind: 'ask';
     reason: string;
 };
+/** An asset as the approval prompt names it: enough to recognise it without the full UUID. */
+export interface AssetRef {
+    id: string;
+    name: string;
+    revision: number;
+}
+/**
+ * `"Host check: docs search" r1 (5fdc912d)`: the name (control characters and line breaks flattened, cut to 60 characters,
+ * quoted so it reads as data), the revision, and the first 8 characters of the id. The name is whatever a model saved, so
+ * it is never trusted to be one line.
+ */
+export declare function assetLabel(asset: AssetRef): string;
 /**
  * The one rule for replaying recipe steps: read-only steps run directly; mutating steps are denied in
  * read-only, asked in standard, and free in autonomous and unrestricted. `automation.run_recipe` applies
@@ -33,5 +45,6 @@ export declare function recipeStepsDecision(name: string, steps: readonly AnyRec
  * @param mode - the configured automationMode.
  * @param assetKind - for `automation.run` and `automation.develop` test, the kind of the asset about to run.
  * @param draftSteps - for `automation.develop` test of a recipe, the steps the draft would replay.
+ * @param asset - for the same two, the asset itself, so the approval prompt names it instead of showing a bare id.
  */
-export declare function browserPolicyDecision(name: string, args: unknown, mode?: AutomationMode, assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[]): BrowserPolicyDecision;
+export declare function browserPolicyDecision(name: string, args: unknown, mode?: AutomationMode, assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[], asset?: AssetRef): BrowserPolicyDecision;

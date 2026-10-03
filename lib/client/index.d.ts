@@ -24,6 +24,8 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
     resetPromptExtras: () => void;
     usePromptsStatus: <R>(selector: (snapshot: PromptsStatusState) => R) => R;
     refreshPromptsStatus: () => void;
+    exportPromptDefaults: () => Promise<void>;
+    hidePromptDefaults: () => void;
     useAutomationAssets: <R>(selector: (snapshot: AutomationAssetsState) => R) => R;
     refreshAutomationAssets: () => void;
     selectAutomationAsset: (id?: string) => void;
@@ -40,6 +42,7 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
     requestNewAutomationAsset: (kind: AutomationAsset['kind']) => void;
     requestRefreshAutomationAssets: () => void;
     requestForkAutomationAsset: (id: string) => void;
+    requestConvertAutomationAsset: (id: string) => void;
     confirmLeaveAutomationAsset: () => void;
     cancelLeaveAutomationAsset: () => void;
     saveEditedAutomationAsset: () => Promise<unknown>;

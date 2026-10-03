@@ -45,12 +45,28 @@ export declare const PROMPT_TOOL_NAMES: readonly ["browser_index", "browser_call
 export type PromptToolName = typeof PROMPT_TOOL_NAMES[number];
 export declare function indexDescription(override?: string): string;
 export declare function callDescription(override?: string): string;
-/** What the host sends to the model for the two indexed tools (name + description + parameters). */
-export declare function indexedToolDefinitions(overrides?: {
-    browser_index?: string;
-    browser_call?: string;
-}): {
+/** One tool as the host sends it to the model. */
+export interface ModelFacingTool {
     name: string;
     description: string;
     parameters: unknown;
-}[];
+}
+/**
+ * What the host sends to the model for the two indexed tools (name + description + parameters).
+ * The parameters are the JSON Schema form (`type`/`properties`/`required`), which is what is registered and what the
+ * model is billed for, not the shorthand map the tools are declared with.
+ */
+export declare function indexedToolDefinitions(overrides?: {
+    browser_index?: string;
+    browser_call?: string;
+}): ModelFacingTool[];
+/** Characters per token of the surface estimate. */
+export declare const CHARS_PER_TOKEN = 3.5;
+/** Estimated tokens of a character count. The one rounding rule for the settings card, `runtime.status` and the measure script. */
+export declare function estimateTokens(chars: number): number;
+/** Serialized size of tools as the host sends them: the one input of every L0 estimate. */
+export declare function modelFacingChars(tools: readonly {
+    name: string;
+    description?: unknown;
+    parameters?: unknown;
+}[]): number;

@@ -13,11 +13,12 @@
  * @module dsh-browser/prompts
  */
 import { type ActionGroup } from './actions/types.ts';
+import { CHARS_PER_TOKEN } from './tool-defs.ts';
 import { PROMPT_LIMITS } from './prompt-limits.ts';
 import type { AutomationMode, ExposureOptions } from './freedom.ts';
 export { PROMPT_LIMITS };
 /** Context budgets from the tool-system design (estimated tokens = characters / 3.5, as `measure:tools` counts). */
-export declare const CHARS_PER_TOKEN = 3.5;
+export { CHARS_PER_TOKEN };
 export declare const L0_BUDGET_TOKENS = 1500;
 export declare const LAYER_BUDGET_TOKENS = 1000;
 export type PromptDiagnosticCode = 'invalid-type' | 'too-long' | 'unknown-key' | 'unknown-group' | 'unknown-action' | 'unknown-error-code' | 'not-overridable' | 'relative-body-file' | 'body-file' | 'budget-l0' | 'budget-layer';
@@ -84,6 +85,11 @@ export declare const NO_PROMPTS_SOURCE: PromptsSource;
  * starting point for editing: delete what stays default, reword the rest.
  */
 export declare function defaultPrompts(): Record<string, unknown>;
+/**
+ * The text `prompts:dump` prints and the settings card's "Export default text" shows: {@link defaultPrompts} as JSON,
+ * two-space indented unless `compact`. One function, so the script and the card cannot drift apart.
+ */
+export declare function promptsDumpText(compact?: boolean): string;
 export interface PromptBudget {
     /** Estimated tokens of the two L0 tools (name + description + parameters, as the host sends them). */
     l0Tokens: number;

@@ -27,6 +27,9 @@ export type PendingLeave = {
 } | {
     kind: 'fork';
     id: string;
+} | {
+    kind: 'convert';
+    id: string;
 };
 export interface EditorState {
     /** The textarea content. */
@@ -36,6 +39,11 @@ export interface EditorState {
     testUrl: string;
     testInputs: string;
     notice?: AssetNotice;
+    /** Set right after a v1 recipe was converted: what the conversion changed and what the author still has to do. */
+    converted?: {
+        sourceName: string;
+        notes: string[];
+    };
     /** Set while unsaved edits stand between the person and what they asked for. */
     confirm?: PendingLeave;
 }
@@ -56,6 +64,12 @@ export declare class AssetCallError extends Error {
     get code(): string | undefined;
 }
 export declare function noticeFor(error: unknown): AssetNotice;
+/**
+ * The "new recipe" template: schema v2 (typed inputs, locators, a result to extract and a postcondition that checks it),
+ * so what a person starts from is what the plugin writes today. Every value is a placeholder to replace; the template
+ * itself passes the save validation, which test/automation-assets-client.test.ts holds it to.
+ */
+export declare const NEW_RECIPE: Partial<AutomationAsset>;
 export declare class AutomationAssetsController {
     private readonly rpc;
     private readonly store;
@@ -80,6 +94,7 @@ export declare class AutomationAssetsController {
         requestNewAutomationAsset: (assetKind: AutomationAsset["kind"]) => void;
         requestRefreshAutomationAssets: () => void;
         requestForkAutomationAsset: (id: string) => void;
+        requestConvertAutomationAsset: (id: string) => void;
         confirmLeaveAutomationAsset: () => void;
         cancelLeaveAutomationAsset: () => void;
         saveEditedAutomationAsset: () => Promise<AutomationAsset | undefined>;

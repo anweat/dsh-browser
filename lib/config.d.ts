@@ -73,7 +73,7 @@ export interface Config {
     automationAssets?: AutomationAssetPolicyInput;
     /**
      * Deployment overrides of the model-facing text (tool descriptions, root guide, catalog summaries and notes,
-     * error hints, the skill). Every field is optional; see `prompts:dump` for the full structure with defaults.
+     * error hints, the skill). Every field is optional; the settings card button Export default text (or `prompts:dump`) shows the full structure with defaults.
      */
     prompts?: PromptsInput;
     /** Lazily run `playwright install chromium` when the browser is missing. */

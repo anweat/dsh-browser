@@ -6,6 +6,10 @@ export interface PromptsStatusState {
     failed: boolean;
     /** What the running plugin reports: the overrides in force, the diagnostics, and the L0 estimate. */
     status?: PromptsStatus;
+    /** The JSON of every default prompt text, once "Export default text" has loaded it (the same text `prompts:dump` prints). */
+    defaults?: string;
+    /** Set when loading the defaults failed. */
+    defaultsFailed?: boolean;
 }
 /** Reads the plugin's own account of its prompt overrides, for the "prompt text" section. */
 export declare class PromptsStatusController {
@@ -18,9 +22,13 @@ export declare class PromptsStatusController {
             promptsStatus: SnapshotStore<PromptsStatusState>;
         };
         refreshPromptsStatus: () => void;
+        exportPromptDefaults: () => Promise<void>;
+        hidePromptDefaults: () => void;
     };
     snapshot(): PromptsStatusState;
     dispose(): void;
+    /** Load the default prompt texts as JSON, for the read-only box under the section. */
+    exportDefaults(): Promise<void>;
     refresh(): Promise<void>;
     private publish;
 }

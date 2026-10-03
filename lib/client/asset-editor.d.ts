@@ -30,3 +30,26 @@ export interface CredentialView {
     vouches: boolean;
 }
 export declare function credentialView(asset: AutomationAsset | undefined): CredentialView;
+/** What the "test inputs JSON" box holds: one object (one run on the session page) or 2 to 5 objects (each run in a fresh context). */
+export type TestInputs = {
+    kind: 'single';
+    inputs: Record<string, unknown>;
+} | {
+    kind: 'sets';
+    sets: Record<string, unknown>[];
+} | {
+    kind: 'error';
+    message: string;
+};
+export declare function parseTestInputs(text: string): TestInputs;
+/** One input set of the latest test, as the panel lists it. */
+export interface InputSetLine {
+    set: number;
+    passed: boolean;
+    status: string;
+    inputsDigest: string;
+    outputsDigest: string;
+}
+export declare function inputSetLines(credential: TestCredential | undefined): InputSetLine[];
+/** Pairs of sets (1-based) that got the same output from different inputs: what `PARAMETERIZATION_SUSPECT` is about. */
+export declare function identicalOutputPairs(credential: TestCredential | undefined): number[][];

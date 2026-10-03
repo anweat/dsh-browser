@@ -73,6 +73,11 @@ export interface AutomationAssetPolicyInput {
     maxModelDraftWritesPerSession?: number;
     /** How many test credentials each asset keeps (the most recent ones). Default 5. */
     maxTestCredentials?: number;
+    /**
+     * How many input sets the passing test of an asset that declares inputs must have covered before it can be activated
+     * (1 to 5, default 2). Assets without inputs are not affected.
+     */
+    minInputSetsForActivation?: number;
 }
 export interface AutomationAssetPolicy {
     enabled: boolean;
@@ -93,6 +98,7 @@ export interface AutomationAssetPolicy {
     modelDevelopmentEnabled: boolean;
     maxModelDraftWritesPerSession: number;
     maxTestCredentials: number;
+    minInputSetsForActivation: number;
 }
 export interface AutomationCandidate {
     id: string;
@@ -210,7 +216,7 @@ export declare function computeContentHash(asset: HashedContent): string;
 /** A digest of the inputs a test ran with. The values themselves are never stored. */
 export declare function digestInputs(inputs: unknown): string;
 /** Why an activation request was refused; the message says what to do. */
-export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached' | 'incomplete-draft';
+export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached' | 'incomplete-draft' | 'insufficient-input-sets';
 export declare class ActivationRefusedError extends Error {
     readonly reason: ActivationRefusal;
     constructor(reason: ActivationRefusal, message: string);
