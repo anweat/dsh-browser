@@ -80,7 +80,7 @@ A test or run counts as passed only when it completed and nothing failed validat
 ```
 
 - `type`: `string`, `number` (a number or numeric text; stored canonically), or `enum` (must be one of `enumValues`). `required` defaults to true; an omitted optional input becomes an empty string. Wrong or missing inputs fail with `INVALID_ARGS` before anything runs.
-- `outputSchema` names and types the outputs: each entry needs an `extract` with the same `as`. `number` parses the text (thousands commas allowed), `json` parses JSON (use it with `links`); a value that does not convert fails validation.
+- `outputSchema` names and types the outputs: each entry needs an `extract` with the same `as`. `number` parses the text (thousands commas allowed), `json` parses JSON (use it with `links`); a value that does not convert fails validation. `"dedupe":true` (string or json) removes repeated lines or elements, keeping the first of each, before the postconditions are checked.
 - `requiredCapabilities` is recorded for later; it is not enforced.
 - `automation.search` shows a v2 asset's `inputSchema`, so you can call `automation.run` without opening the recipe.
 
@@ -94,7 +94,7 @@ A test or run counts as passed only when it completed and nothing failed validat
 
 ## Saving a draft
 
-Save (`automation.develop`, `save`) replaces the whole draft, so send every field each time; `browser_index({action:"automation.develop.save"})` has its schema. Then `{"action":"validate","id":...}` and `{"action":"test","id":...,"url":...,"inputs":{...}}`. Test with realistic inputs, and at least two different inputs when the recipe takes any, checking that the outputs differ. Activation is the user's decision. Do not put page content, cookies or passwords into an asset.
+Save (`automation.develop`, `save`) replaces the whole draft, so send every field each time; `browser_index({action:"automation.develop.save"})` has its schema. Then `{"action":"validate","id":...}` and `{"action":"test","id":...,"url":...,"inputs":{...}}`. Test with realistic inputs, and when the recipe takes any, with `inputSets` (2 to 5 different inputs, each in a fresh context; `references/develop.md`), checking that the outputs differ. A draft explored with `browser_call` is built with `draft_from_journal` instead of by hand (`references/develop.md`). Activation is the user's decision. Do not put page content, cookies or passwords into an asset.
 
 **Revisions.** Every save makes a new `revision` (with a `contentHash` over the steps and schema fields) and clears the test result. A test is recorded as a credential for the revision and content it ran on, with only a digest of the inputs; the test reply carries `revision` and `contentHash`. After any edit, test again. The user can activate only a revision whose latest test passed on exactly that content.
 

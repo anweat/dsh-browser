@@ -27,7 +27,7 @@ export const COMPACT_GUIDE = [
   'Guide: (1) automation.search first; if an active asset fits, automation.run it instead of exploring.',
   '(2) Else target.open -> observe.read -> act.* using locators (role+name, label, text) -> observe.read to verify.',
   '(3) act.* change pages. If a submit-like action times out (outcome_unknown), check the result before retrying.',
-  '(4) Errors carry code+hint; INVALID_ARGS includes the schema; LOCATOR_AMBIGUOUS lists candidates (nothing was done). (5) Repeatable success: automation.develop (save + test a draft, schemaVersion 2); activation is the user\'s.',
+  '(4) Errors carry code+hint; INVALID_ARGS includes the schema; LOCATOR_AMBIGUOUS lists candidates (nothing was done). (5) Repeatable success: automation.develop draft_from_journal (uses the seq of your calls), then test with inputSets; activation is the user\'s.',
 ].join('\n')
 
 const MAX_LINE = 170

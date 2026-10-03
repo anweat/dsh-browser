@@ -212,8 +212,8 @@ test('skill guidance for automation.develop matches its sub-actions, error codes
   const recipes = read('references/recipes.md')
   const develop = findAction('automation.develop')!
   // Every sub-action the registry has is something the guidance may name; every one it names exists.
-  for (const [, operation] of (skill + recipes).matchAll(/"action":"(get|save|validate|test|convert|fork)"/g)) assert.ok(operation! in develop.subActions!.items, operation)
-  for (const operation of ['fork', 'convert', 'test', 'save']) assert.match(skill + recipes, new RegExp(`"action":"${operation}"`), `${operation} is demonstrated`)
+  for (const [, operation] of (skill + recipes).matchAll(/"action":"(get|save|validate|test|convert|fork|draft_from_journal)"/g)) assert.ok(operation! in develop.subActions!.items, operation)
+  for (const operation of ['fork', 'convert', 'test', 'save', 'draft_from_journal']) assert.match(skill + recipes, new RegExp(`"action":"${operation}"`), `${operation} is demonstrated`)
   assert.match(skill, /automation\.develop\.save/, 'the split detail form is shown')
   assert.match(skill, /VALIDATION_MISSING/)
   assert.match(recipes, /VALIDATION_MISSING/)
@@ -263,4 +263,41 @@ test('skill guidance for observe.read and page generations matches the registry,
     assert.ok(renderIndex({ action: `observe.read.${topic}` }, env).text.length <= 3_500, `${topic} topic fits the layer budget`)
   }
   assert.ok(renderIndex({ action: 'observe.read' }, env).text.length <= 3_500, 'the observe.read detail fits the layer budget')
+})
+
+test('skill guidance for the journal path matches the registry, the report fields, the warning codes and the size budgets', () => {
+  const skill = read('SKILL.md')
+  const guide = read('references/develop.md')
+  const develop = findAction('automation.develop')!
+  const env = { mode: 'unrestricted' as const, options: { modelDevelopmentEnabled: true }, enabled: true, skillAvailable: true }
+  // The body keeps a margin below its limit, and the new path is the one the skill recommends.
+  assert.ok(readSkill().body.length <= 7_000)
+  assert.match(skill, /draft_from_journal/)
+  assert.match(skill, /inputSets/)
+  assert.match(skill, /references\/develop\.md/)
+  assert.ok('draft_from_journal' in develop.subActions!.items)
+  // inputSets belongs to test, and every parameter the guide names for draft_from_journal is one the sub-action takes.
+  assert.ok(develop.subActions!.items.test!.params.includes('inputSets'))
+  const sub = develop.subActions!.items.draft_from_journal!
+  for (const name of ['fromSeq', 'toSeq', 'exclude', 'parameters', 'extract', 'postconditions', 'domains', 'id', 'name']) {
+    assert.ok(sub.params.includes(name) || name === 'name', name)
+    assert.match(guide, new RegExp('`' + name + '`'), `${name} is documented in references/develop.md`)
+  }
+  // Every field of the reply the code produces is described, and every warning code the builder can emit is explained.
+  for (const field of ['steps', 'complete', 'sourceMap', 'observationPoints', 'excluded', 'unmapped', 'inputSchema', 'pendingDisambiguation', 'parameterCandidates', 'extractCandidates', 'suggestedPostconditions', 'suggestedTestUrl', 'domains', 'warnings']) {
+    assert.match(guide, new RegExp('`' + field + '`'), `${field} is not described`)
+  }
+  const source = fs.readFileSync(new URL('../src/automation-journal.ts', import.meta.url), 'utf8')
+  const codes = new Set([...source.matchAll(/'([A-Z]{3,}(?:_[A-Z]{2,})+)'/g)].map(match => match[1]!))
+  assert.ok(codes.size >= 10, `only ${codes.size} warning codes found in the builder`)
+  for (const code of codes) assert.ok(guide.includes(code), `${code} is not explained in references/develop.md`)
+  assert.match(guide + read('references/recipes.md'), /PARAMETERIZATION_SUSPECT/)
+  assert.match(read('references/recipes.md'), /dedupe/)
+  // The layers the model reads stay within budget.
+  for (const name of ['automation.develop', 'automation.develop.draft_from_journal', 'automation.develop.test', 'automation.develop.save']) {
+    assert.ok(renderIndex({ action: name }, env).text.length <= 3_500, name)
+  }
+  // The retained-text rule the guide states is the one the journal applies.
+  assert.match(guide, /200 characters/)
+  assert.match(guide, /last 200 calls/)
 })
