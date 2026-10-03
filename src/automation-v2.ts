@@ -54,6 +54,11 @@ export interface OutputSpec {
   name: string
   type: typeof OUTPUT_TYPES[number]
   description?: string
+  /**
+   * Post-process the value: drop repeats, keep first occurrences in order. A `json` array is deduplicated by
+   * element, a `string` by line (blank lines dropped). It does not fail on duplicates; it removes them.
+   */
+  dedupe?: true
 }
 
 export type Postcondition =
@@ -313,13 +318,15 @@ export function normalizeOutputSchema(raw: unknown, steps: readonly BrowserRecip
   return raw.map((entry, index) => {
     const label = `outputSchema[${index}]`
     if (!isRecord(entry)) throw new Error(label + ' must be an object')
-    for (const key of Object.keys(entry)) if (!['name', 'type', 'description'].includes(key)) throw new Error(`${label} has an unsupported field "${key}"`)
+    for (const key of Object.keys(entry)) if (!['name', 'type', 'description', 'dedupe'].includes(key)) throw new Error(`${label} has an unsupported field "${key}"`)
     if (typeof entry.name !== 'string' || !NAME.test(entry.name)) throw new Error(`${label}.name must be a name of letters, digits, _ or - starting with a letter (max 40)`)
     if (seen.has(entry.name)) throw new Error(`${label}.name "${entry.name}" is declared twice`)
     seen.add(entry.name)
     if (!(OUTPUT_TYPES as readonly unknown[]).includes(entry.type)) throw new Error(`${label}.type must be one of ${OUTPUT_TYPES.join(', ')}`)
     if (!produced.has(entry.name)) throw new Error(`${label}.name "${entry.name}" is not produced: add an extract step with as: "${entry.name}"`)
-    return { name: entry.name, type: entry.type as OutputSpec['type'], ...entry.description !== undefined ? { description: text(entry.description, label + '.description', 200) } : {} }
+    if (entry.dedupe !== undefined && entry.dedupe !== true) throw new Error(`${label}.dedupe must be true when present`)
+    if (entry.dedupe === true && entry.type === 'number') throw new Error(`${label}.dedupe applies to string and json outputs, not number`)
+    return { name: entry.name, type: entry.type as OutputSpec['type'], ...entry.description !== undefined ? { description: text(entry.description, label + '.description', 200) } : {}, ...entry.dedupe === true ? { dedupe: true as const } : {} }
   })
 }
 
@@ -534,6 +541,19 @@ export function coerceOutput(spec: OutputSpec, value: unknown): { ok: true; valu
     return raw.trim() !== '' && Number.isFinite(parsed) ? { ok: true, value: parsed } : { ok: false, problem: `output "${spec.name}" is not a number: ${JSON.stringify(raw.slice(0, 80))}` }
   }
   try { return { ok: true, value: JSON.parse(raw) as unknown } } catch { return { ok: false, problem: `output "${spec.name}" is not valid JSON: ${JSON.stringify(raw.slice(0, 80))}` } }
+}
+
+/** Drop repeats, keeping the first of each in order: array elements by value, text by line. Other values are returned unchanged. */
+export function dedupeValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const seen = new Set<string>()
+    return value.filter(entry => { const key = JSON.stringify(entry); if (seen.has(key)) return false; seen.add(key); return true })
+  }
+  if (typeof value === 'string') {
+    const seen = new Set<string>()
+    return value.split('\n').map(line => line.trim()).filter(line => { if (!line || seen.has(line)) return false; seen.add(line); return true }).join('\n')
+  }
+  return value
 }
 
 function isEmptyValue(value: unknown): boolean {

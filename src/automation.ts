@@ -8,7 +8,7 @@ import { RecipeAssertionError, RecipeValidationError, abortedByDeadline, isTimeo
 import type { ErrorCode } from './actions/types.ts'
 import type { LocatorAmbiguity } from './locator.ts'
 import {
-  assertGotoAllowed, coerceOutput, evaluatePostconditions, runStepV2, validateRecipeV2,
+  assertGotoAllowed, coerceOutput, dedupeValue, evaluatePostconditions, runStepV2, validateRecipeV2,
   type BrowserRecipeStepV2, type RecipeV2Options,
 } from './automation-v2.ts'
 
@@ -377,7 +377,7 @@ export async function runRecipe(
       const output = outputs.find(entry => entry.name === spec.name)
       if (!output) continue
       const converted = coerceOutput(spec, output.value)
-      if (converted.ok) output.value = converted.value
+      if (converted.ok) output.value = spec.dedupe ? dedupeValue(converted.value) : converted.value
       else problems.push(converted.problem)
     }
     const checked = await evaluatePostconditions(page, postconditions, outputs, signal)

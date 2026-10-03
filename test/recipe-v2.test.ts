@@ -272,3 +272,23 @@ test('placeholders are found and replaced in every string of a step, but never i
   assert.deepEqual(materializeDeep(step, { field: 'Search', query: 'dsh' }), { type: 'fill', locator: { role: 'textbox', name: 'Search', index: 0, indexReason: 'the {{field}} box' }, value: 'dsh' })
   assert.throws(() => materializeDeep(step, { field: 'x' }), /missing automation input: query/)
 })
+
+test('outputSchema dedupe removes repeats after extraction: text by line, a json array by element; it never fails on duplicates', async () => {
+  const { page } = fakePage({ '#list': { innerText: () => 'apple\napple\n\nbanana\napple\ncherry' }, '#links': { evaluateAll: () => [{ text: 'a', url: 'u1' }, { text: 'a', url: 'u1' }, { text: 'b', url: 'u2' }] } })
+  const run = await v2([
+    { type: 'extract', locator: { css: '#list' }, as: 'names' },
+    { type: 'extract', locator: { css: '#links' }, mode: 'links', as: 'links' },
+  ], page, { outputSchema: [{ name: 'names', type: 'string', dedupe: true }, { name: 'links', type: 'json', dedupe: true }], postconditions: [{ output: 'names', nonEmpty: true }] })
+  assert.equal(run.executionStatus, 'completed')
+  assert.equal(run.validationStatus, 'passed')
+  assert.equal(run.outputs[0]!.value, 'apple\nbanana\ncherry')
+  assert.deepEqual(run.outputs[1]!.value, [{ text: 'a', url: 'u1' }, { text: 'b', url: 'u2' }])
+  // Without the flag the page's own repeats stay visible.
+  const { page: again } = fakePage({ '#list': { innerText: () => 'x\nx' } })
+  const plain = await v2([{ type: 'extract', locator: { css: '#list' }, as: 'names' }], again, { outputSchema: [{ name: 'names', type: 'string' }] })
+  assert.equal(plain.outputs[0]!.value, 'x\nx')
+  const steps = [{ type: 'extract', locator: { css: '#list' }, as: 'names' }] as BrowserRecipeStepV2[]
+  assert.deepEqual(normalizeOutputSchema([{ name: 'names', type: 'string', dedupe: true }], steps), [{ name: 'names', type: 'string', dedupe: true }])
+  assert.throws(() => normalizeOutputSchema([{ name: 'names', type: 'number', dedupe: true }], steps), /not number/)
+  assert.throws(() => normalizeOutputSchema([{ name: 'names', type: 'string', dedupe: false }], steps), /dedupe must be true/)
+})

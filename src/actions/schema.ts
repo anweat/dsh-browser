@@ -120,6 +120,7 @@ const OUTPUT_SPEC_SCHEMA: ParamNode = {
   properties: {
     name: { type: 'string', required: true },
     type: { type: 'string', required: true, enum: ['string', 'number', 'json'] },
+    dedupe: { type: 'boolean', description: 'true: remove repeats after extraction (string: by line, json array: by element), first kept.' },
   },
 }
 
