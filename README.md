@@ -13,13 +13,13 @@
 | `0.1.12` 及更早的维护版本 | `dsh-v0.1.1-rc.2` 至 `dsh-v0.1.2-rc.1` | 旧基线；不与新插件混装 |
 | `0.1.15` | `dsh-v0.1.7-rc.2` | 精确锁定该宿主版本；组合安装、真实 Web profile 与设置持久化已验证 |
 | `0.1.17` | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | peer 收口为「实测过的两条线」（上界 `<0.2.1-0`）；在 `0.2.0-rc.2` 上完成 typecheck、构建、52 项测试与真实挂载验证；补充浏览器缓存路径配置说明，并新增 peer 双解析模式检查 |
-| `0.2.0-rc.1`（npm `next`） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 325 项测试、64 项真实浏览器 e2e 与真实 Web profile 验证 |
-| 下一个版本（`0.2.0-rc.1` 之后） | `dsh-v0.2.0-rc.2` | **只支持 `dsh-v0.2.0-rc.2` 这一条线**（peer `>=0.2.0-rc.2 <0.2.1-0`）：去掉为更旧宿主保留的兼容分支（`settings.register` 的 live scope 回退等），不改工具、动作、schema、文本与审批规则。使用 `dsh-v0.1.7-rc.2`（或 `0.2.0-rc.1`）宿主请继续使用 `0.1.17` |
+| `0.2.0-rc.1`（预发布，历史记录） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 325 项测试、64 项真实浏览器 e2e 与真实 Web profile 验证 |
+| `0.2.0` | `dsh-v0.2.0-rc.2` | 第一个面向 DSH 桌面版 0.2.0 线的正式版，也是后续开发的基底。**只支持 `dsh-v0.2.0-rc.2` 这一条线**（peer `>=0.2.0-rc.2 <0.2.1-0`）：去掉为更旧宿主保留的兼容分支（`settings.register` 的 live scope 回退等），并去掉对 `settings` 服务的必需依赖（只声明 `inject: ['tools']`，没有 Settings 服务的组合里也能启动）；不改工具、动作、schema、文本与审批规则。在 `0.2.0-rc.2` 上完成 327 项测试、64 项真实浏览器 e2e 与 peer 双解析模式检查。旧宿主（0.1.7 线，`dsh-v0.1.7-rc.2`）继续使用 `0.1.17` |
 
 `0.1.17` 把 DSH 运行时依赖由精确锁定改为范围声明（`^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.1-0`），
 使同一份包可装在 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代宿主上。`0.2.0-rc.1` 起的新功能（动作体系、skill、recipe v2、
-资产版本、提示文本配置等）只在 `0.2.0-rc.2` 上验证过，没有在 `0.1.7-rc.2` 上跑过，所以下一个版本起把范围收成**只覆盖
-`0.2.0-rc.2` 这条线**：`>=0.2.0-rc.2 <0.2.1-0`。`0.1.17` 的范围不变，旧宿主继续用它。
+资产版本、提示文本配置等）只在 `0.2.0-rc.2` 上验证过，没有在 `0.1.7-rc.2` 上跑过，所以 `0.2.0` 把范围收成**只覆盖
+`0.2.0-rc.2` 这条线**：`>=0.2.0-rc.2 <0.2.1-0`，正式版 `0.2.0` 起即采用这个范围。`0.1.17` 的范围不变，旧宿主继续用它。
 
 这个写法同时满足两种解析，缺一不可：
 
@@ -50,31 +50,25 @@
 ## 安装
 
 ```bash
-# 稳定版（旧的 browser_* 工具体系，面向 dsh-v0.1.7-rc.2 / 0.2.0-rc.x 宿主）：
+# 默认安装（新的 browser_index / browser_call 工具体系，面向 dsh-v0.2.0-rc.2 宿主）：
+dsh plugin --profile web add @anweat/dsh-browser@0.2.0
+# 宿主仍是 0.1.7 线（dsh-v0.1.7-rc.2）时，固定安装 0.1.17（旧的 browser_* 工具体系）：
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17
-# 预发布版（新的 browser_index / browser_call 工具体系，面向 dsh-v0.2.0-rc.2 宿主）：
-dsh plugin --profile web add @anweat/dsh-browser@next
 # 或本地目录 / tarball：
 dsh plugin --profile web add ./dsh-browser
 # 重启（web profile 关闭了 HMR）：
 dsh --profile web
 ```
 
-> 下一个版本起只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`）；范围之外的宿主版本未经验证，
-> 旧宿主（`dsh-v0.1.7-rc.2`、`0.2.0-rc.1`）请继续使用 `0.1.17`。
+> `0.2.0` 只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`）；范围之外的宿主版本未经验证，
+> 旧宿主（`dsh-v0.1.7-rc.2` 线）请固定使用 `0.1.17`。预发布通道 `@next` 不再用于安装，`0.2.0-rc.1` 仅作历史记录。
 > 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
 ## 从旧版本升级
 
-### 升级到只支持 0.2.0-rc.2 的版本
-
-- 先确认宿主是 `dsh-v0.2.0-rc.2`。宿主更旧时，`dsh plugin add` 会因 peer 不满足而拒绝，或在组装期点名报 `incompatible`；这类宿主继续使用 `0.1.17`。
-- 工具、动作、参数 schema、文本与审批规则都没有变化，已保存的资产、配置与提示文本覆盖照常使用。
-- 设置的保存与重启生效路径不变：在设置卡片保存后重启 profile 生效。
-
-### 升级到 0.2.0-rc.1
+### 升级到 0.2.0
 
 - 旧的 `browser_open`、`browser_click` 等工具名不再注册。模型通过 `browser_index` 查看动作目录，再用 `browser_call` 执行，例如 `{"action":"act.click","args":{...}}`。需要一次性看到全部动作时，把 `toolSurface` 设为 `flat`。
 - 其他插件或自定义提示词里如果写了旧工具名，需要同步修改。Web Search Pro 请使用提示词已更新的版本。
@@ -82,6 +76,11 @@ dsh --profile web
 - 激活资产现在要求当前版本有通过的测试记录。旧资产加载时会自动补一条“旧版”记录。
 - **声明了输入的资产，激活门槛提高了。**新增策略项 `automationAssets.minInputSetsForActivation`（默认 2，范围 1–5）：带 `inputSchema` 或 `inputNames` 的资产，当前版本的通过凭据必须覆盖至少这么多组不同输入（`automation.develop` 的 `test` 传 `inputSets`；设置面板的“测试输入 JSON”填 2 到 5 个对象的数组），否则激活被拒绝，错误里写明原因。只用一组输入测试通过的 recipe 可能把那组输入写死，换一组就失败。没有输入的资产不受影响；升级前已通过测试的旧资产带“旧版”凭据，视为满足，不会因升级而无法激活。要恢复旧行为，把它设为 `1`。
 - `BrowserService` 上供其他插件调用的方法（`render`、`snapshot`、`searchResults`、`opencli`、`close`）签名不变。
+- **依赖范围收窄到 DSH 0.2.0 线。**peer 范围为 `>=0.2.0-rc.2 <0.2.1-0`（插件自身不再覆盖 `0.1.7-rc.2` 与 `0.2.0-rc.1`）。
+- 先确认宿主是 `dsh-v0.2.0-rc.2`。宿主更旧时，`dsh plugin add` 会因 peer 不满足而拒绝，或在组装期点名报 `incompatible`；这类宿主继续使用 `0.1.17`。
+- 工具、动作、参数 schema、文本与审批规则都没有变化，已保存的资产、配置与提示文本覆盖照常使用。
+- 设置的保存与重启生效路径不变：在设置卡片保存后重启 profile 生效。
+- 不再要求宿主提供 `settings` 服务：插件只声明 `inject: ['tools']`；有 Settings 服务时设置卡片照常显示，没有时按配置默认值运行。
 
 ### 升级到 0.1.17
 
