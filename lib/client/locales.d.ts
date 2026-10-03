@@ -121,7 +121,7 @@ export declare const zh: {
     readonly promptsCopy: "复制";
     readonly promptsHideDefaults: "收起";
     readonly promptsDefaultsHint: "一份 JSON，结构与上面的覆盖项完全一致。复制后删掉保持默认的部分，改写其余部分，再放进配置；原样放回不会改变任何输出。";
-    readonly promptsDefaultsFailed: "暂时读不到默认文本（保存后插件会重启，稍后再试）。";
+    readonly promptsDefaultsFailed: "暂时读不到默认文本，请稍后再试。";
     readonly promptsExtrasReset: "恢复默认";
     readonly promptsReset: "恢复默认";
     readonly promptsExtrasInvalid: "JSON 无效，或键名、类型、长度超出限制。";
@@ -134,7 +134,7 @@ export declare const zh: {
     readonly promptsNoOverrides: "没有覆盖，全部使用内置默认值。";
     readonly promptsDiagnostics: "诊断";
     readonly promptsNoDiagnostics: "无诊断。";
-    readonly promptsStatusUnavailable: "暂时读不到插件状态（保存后插件会重启，稍后刷新）。";
+    readonly promptsStatusUnavailable: "暂时读不到插件状态，请稍后刷新。";
     readonly promptsRefresh: "刷新";
     readonly promptsLoading: "读取中…";
     readonly promptsLargest: "最大的目录层";
