@@ -233,7 +233,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 - `validationStatus` 为 `passed` 当且仅当所有 `assert` 和 postconditions 都成立。**没有任何 assert 或 postcondition 的 v2 资产可以保存为草稿，但测试不会记为 passed**，`testMessage` 会说明原因。
 - `automation.develop` 的 `convert` 把 v1 recipe 资产转成**新的** v2 草稿：CSS selector 变成 `{css, explicitFirst: true}`（仍取第一个匹配），全部列入 `pendingDisambiguation`，草稿记录 `sourceAssetId` / `sourceRevision`，原资产（含 active）不会被修改；未知的 extract mode 或 wait condition 会拒绝转换并说明哪一步。
 
-**审批按动作判断**：Host 的审批理由写明动作和关键参数（例如 `act.click role="button" name="Submit"`），`browser_index` 直接放行，`browser_call` 解析出动作后适用与下表相同的规则，不可用的动作在 `browser_call` 中再拒绝一次。Host 里按工具名设置的“总是允许”不会跳过插件策略。
+**审批按动作判断**：Host 的审批理由写明动作和关键参数（例如 `act.click role="button" name="Submit"`），`browser_index` 直接放行，`browser_call` 解析出动作后适用与下表相同的规则，不可用的动作在 `browser_call` 中再拒绝一次。Host 里按工具名设置的“总是允许”不会跳过插件策略。运行或回放资产（`automation.run`、`automation.develop` 的 `test`）时，审批理由写资产名称、版本和短 id，例如 `automation.run "Host check: docs search" r1 (5fdc912d)`；名称去掉换行并截断到 60 个字符。
 
 旧的 30 个 `browser_*` 工具名已不再注册（`flat` 形态中 `browser_<group>_<action>` 与个别旧名相同，但它们现在就是注册表里的动作，返回统一信封）。
 
@@ -446,7 +446,13 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
         verbose: false
 ```
 
-这些字段同时进入 Host settings 命名空间和专用可视化卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`，可调整工具自由度、Playwright/Patchright、OpenCLI、`usagePolicy`、自动化资产策略与限域登录态；同一卡片包含候选提示、脚本列表、JSON 编辑器、测试、激活和归档操作。保存运行时配置后需要重启 profile；资产 CRUD 通过 loopback-only Host RPC 即时落盘。若没有看到卡片，先确认浏览器插件已同步升级并完整重启，而不是只刷新 Web Search Pro 页面。
+这些字段同时进入 Host settings 命名空间和专用可视化卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`，可调整工具自由度、Playwright/Patchright、OpenCLI、`usagePolicy`、自动化资产策略与限域登录态；同一卡片包含候选提示、脚本列表、JSON 编辑器、测试、激活和归档操作。
+
+- **卡片覆盖全部公开配置字段**：`maxSessions`（会话上限）和 `args`（Chromium 启动参数，JSON 字符串数组）在“浏览器运行时”分区；`authProfiles`、`rulePacks` 结构较复杂，卡片里不提供表单，只列出名称并注明“在配置文件中编辑”。“调用缓冲 JSON”和“自动化资产策略 JSON”的提示由代码生成，列出全部可用键名。
+- **测试输入 JSON** 填一个对象是在当前页面运行一次；填 2 到 5 个对象组成的数组是逐组在全新上下文中回放（等价于 `inputSets`）。卡片逐组显示结果和 `PARAMETERIZATION_SUSPECT` 警告；声明了输入的资产在通过凭据覆盖的输入组数不足 `minInputSetsForActivation` 时，“激活”按钮旁给出说明并保持禁用。
+- **新建 recipe** 从 v2 模板开始（带 `schemaVersion: 2`、locator 步骤、`inputSchema` 和 `postconditions` 占位），模板本身可以直接保存。v1 recipe 有“转换为 v2”按钮：生成新草稿并选中，显示仍取第一个匹配的步骤数（`pendingDisambiguation`），原资产不变；有未保存修改时会先确认。
+- “提示文本”分区的“导出默认文本”按钮在只读文本框里显示全部默认值（与 `pnpm prompts:dump` 相同的 JSON），复制后按需改写。
+- 估算的常驻 L0 token 数与 `node scripts/measure-tool-surface.mjs` 使用同一个估算函数和同一份工具定义，两处数字一致。保存运行时配置后需要重启 profile；资产 CRUD 通过 loopback-only Host RPC 即时落盘。若没有看到卡片，先确认浏览器插件已同步升级并完整重启，而不是只刷新 Web Search Pro 页面。
 
 ### Patchright 可选内核
 
