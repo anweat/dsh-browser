@@ -33,6 +33,7 @@ import { configuredBrowserActions, configuredBrowserTools, type AutomationMode }
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
 import { TargetStaleError, resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
+import { SENSITIVE_NAME, SessionJournal } from './journal.ts'
 import { describeScan, fitObservation, normalizeObserve, scanPage, scopeBase, type ObserveRegion, type ObserveSection } from './observe.ts'
 
 /**
@@ -425,6 +426,8 @@ export class BrowserService {
   private readonly authProfiles: AuthProfileStore
   private readonly usageGovernor: UsageGovernor
   private opencliCatalogCache?: OpencliCatalogItem[]
+  /** Per-session exploration journals (see src/journal.ts). Released with the session, never written to disk. */
+  private readonly journals = new Map<string, SessionJournal>()
   /** How many sessions may hold a context+page at once before LRU eviction. */
   private readonly sessionLimit: number
 
@@ -436,6 +439,53 @@ export class BrowserService {
 
   available(): boolean {
     return this.config.enabled
+  }
+
+  /**
+   * This session's exploration journal, created on first use. It outlives `target.close` (the session is
+   * still the same) and is released when the session is evicted or the service closes. A session that never
+   * records anything costs nothing: journals are only created by the action dispatcher.
+   */
+  journalFor(session: string): SessionJournal {
+    let journal = this.journals.get(session)
+    if (!journal) {
+      journal = new SessionJournal()
+      this.journals.set(session, journal)
+      // Bounded like the sessions themselves: a journal whose session is long gone cannot pile up.
+      while (this.journals.size > this.sessionLimit * 4) this.journals.delete(this.journals.keys().next().value!)
+    }
+    return journal
+  }
+
+  /** The active page of a session as `{targetId, generation, url}`, without opening or creating anything. */
+  pageStamp(session: string): { targetId?: string; generation?: number; url?: string } | undefined {
+    const page = this.sessions.get(session)?.page
+    if (!page || page.isClosed?.()) return undefined
+    let url: string | undefined
+    try { url = page.url() } catch { /* mid-navigation */ }
+    return { ...this.stamp(page), ...url ? { url } : {} }
+  }
+
+  /**
+   * Whether the control a fill/type would hit is a secret field (password, one-time code, name that says so).
+   * Best effort and quick: any trouble (no page, several matches, a slow page) answers false, and the journal
+   * still treats secret-looking values and secret-looking locators as sensitive.
+   */
+  async inputSensitivity(target: BrowserTarget, opts: { session?: string } = {}): Promise<boolean> {
+    const page = this.sessions.get(opts.session ?? SHARED_SESSION)?.page
+    if (!page || page.isClosed?.()) return false
+    try {
+      return await resolveLocator(page, target).evaluate((element: any, source: string) => {
+        const hints = [element.getAttribute('name'), element.id, element.getAttribute('autocomplete'), element.getAttribute('aria-label'), element.getAttribute('placeholder'), element.getAttribute('data-testid')]
+        const type = String(element.type ?? '').toLowerCase()
+        const auto = String(element.getAttribute('autocomplete') ?? '').toLowerCase()
+        const named = new RegExp(source, 'i')
+        return type === 'password' || type === 'hidden' || /password|one-time-code|cc-/.test(auto)
+          || hints.some((hint: string | null) => hint && named.test(hint.replace(/([a-z])([A-Z])/g, '$1 $2')))
+      }, SENSITIVE_NAME.source, { timeout: 1_500 }) === true
+    } catch {
+      return false
+    }
   }
 
   /**
@@ -502,6 +552,7 @@ export class BrowserService {
       if (victim === undefined) return
       const state = this.sessions.get(victim)
       this.sessions.delete(victim)
+      this.journals.delete(victim)
       if (state) await this.disposeState(state)
     }
   }
@@ -526,6 +577,7 @@ export class BrowserService {
   /** Drop all per-session state after a browser-level failure. */
   private clearActiveState(): void {
     this.sessions.clear()
+    this.journals.clear()
   }
 
   private handleBrowserDisconnected(browser: any): void {
@@ -1629,6 +1681,7 @@ export class BrowserService {
     // because the browser process itself is going away.
     for (const state of [...this.sessions.values()]) await this.closePage(state)
     this.sessions.clear()
+    this.journals.clear()
     const b = this.browser
     this.browser = undefined
     this.launching = undefined

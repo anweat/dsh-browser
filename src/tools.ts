@@ -45,6 +45,7 @@ const ENVELOPE_SCHEMA = {
   properties: {
     ok: { type: 'boolean' as const, required: true as const },
     action: { type: 'string' as const, required: true as const },
+    seq: { type: 'number' as const },
     executionStatus: { type: 'string' as const, required: true as const, enum: ['completed', 'failed', 'cancelled', 'outcome_unknown'] },
     result: { type: 'object' as const, additionalProperties: true },
     error: {

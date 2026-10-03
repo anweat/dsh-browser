@@ -220,6 +220,8 @@ export function outcomeOf(value: unknown): ActionOutcome | undefined {
 export interface ActionEnvelope {
   ok: boolean
   action: string
+  /** Sequence number in the session's exploration journal (page-touching actions only); `draft_from_journal` refers to it. */
+  seq?: number
   executionStatus: ExecutionStatus
   result?: Record<string, unknown>
   error?: ActionErrorBody
