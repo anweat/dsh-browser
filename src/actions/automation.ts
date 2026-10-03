@@ -5,7 +5,7 @@ import { ActionArgError, ActionUnavailableError, withOutcome } from './types.ts'
 import type { AnyRecipeStep, BrowserRecipeStep } from '../automation.ts'
 import { RecipeValidationError, hintFor } from './errors.ts'
 import { normalizePostconditions, type BrowserRecipeStepV2 } from '../automation-v2.ts'
-import { executeAutomationAsset } from '../automation-execution.ts'
+import { executeAutomationAsset, executeDraftInputSets, type InputSetResult } from '../automation-execution.ts'
 import { capJson, recipeOutcome } from './shared.ts'
 
 /** After the deadline aborts a recipe, how long to wait for its in-flight step to return (a step times out within 30 s). */
@@ -69,7 +69,7 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
       authProfile: { type: 'string' },
       rulePack: { type: 'string' },
     },
-    approval: 'asset-develop', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 30_000, settleMs: RECIPE_SETTLE_MS,
+    approval: 'asset-develop', readOnly: false, mutating: true, concurrencySafe: false, timeoutMs: 120_000, settleMs: RECIPE_SETTLE_MS,
     errors: ['VALIDATION_FAILED', 'VALIDATION_MISSING', 'OUTCOME_UNKNOWN'],
     subActions: {
       key: 'action',
@@ -155,6 +155,36 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
         if (!args.id) throw new Error('automation development validate requires id')
         const asset = development.validate(args.id)
         return developmentResult('validate', { id: asset.id, kind: asset.kind, status: asset.status, testStatus: asset.testStatus, testMessage: asset.testMessage }, asset)
+      }
+      if (args.action === 'test' && args.inputSets !== undefined) {
+        if (!args.id || !args.url) throw new Error('automation development test requires id and url')
+        if (args.inputs !== undefined) throw new ActionArgError('pass either inputs (one run in the session page) or inputSets (2-5 runs, each in a fresh context), not both')
+        const replay = await executeDraftInputSets(ctx.service, assets, args.id, args.url, args.inputSets, {
+          signal: ctx.signal,
+          ...args.authProfile ? { authProfile: args.authProfile } : {},
+          ...args.rulePack ? { rulePack: args.rulePack } : {},
+          session: ctx.session,
+        })
+        const shown = (entry: InputSetResult) => {
+          const { completedSteps: _steps, outputs: _outputs, evidenceLevel: _level, ...run } = entry.execution
+          const capped = capJson(entry.produced, 8_000)
+          return { set: entry.index + 1, passed: entry.passed, ...run, inputsDigest: entry.inputsDigest, outputs: capped.value, ...capped.truncated ? { outputsTruncated: true } : {} }
+        }
+        const failed = replay.sets.find(entry => !entry.passed)
+        const body = {
+          action: 'test', assetId: replay.asset.id, status: replay.asset.status,
+          revision: replay.asset.revision, contentHash: replay.asset.contentHash,
+          testStatus: replay.asset.testStatus, testMessage: replay.asset.testMessage,
+          inputSets: replay.planned, setsRun: replay.sets.length,
+          sets: replay.sets.map(shown),
+          ...replay.suspect ? { warnings: [{ code: 'PARAMETERIZATION_SUSPECT', sets: replay.identicalOutputs.map(pair => pair.map(index => index + 1)), message: 'different inputs produced identical outputs: the input may not really drive the result. The test still passed; check that the placeholder reaches the page.' }] } : {},
+          ...failed ? { failedSet: failed.index + 1 } : {},
+        }
+        if (replay.verifierMissing) {
+          return withOutcome(body, { ok: false, executionStatus: 'completed', error: { code: 'VALIDATION_MISSING', message: replay.verifierMissing.message, hint: hintFor('VALIDATION_MISSING')! } })
+        }
+        if (failed) return withOutcome(body, recipeOutcome(failed.execution))
+        return withOutcome(body, { ok: true, executionStatus: 'completed' })
       }
       if (args.action === 'test') {
         if (!args.id || !args.url) throw new Error('automation development test requires id and url')

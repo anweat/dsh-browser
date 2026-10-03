@@ -52,6 +52,12 @@ export interface TestCredential {
   passed: boolean
   /** Synthesized when data written before B4 was loaded: `testStatus` was `passed` and nothing else is known. */
   legacy?: true
+  /** A test with several input sets (each in a fresh context): one entry per set that ran. Digests only. */
+  inputSets?: { index: number; inputsDigest: string; passed: boolean; executionStatus: RecipeExecutionStatus; validationStatus: RecipeValidationStatus; outputsDigest: string }[]
+  /** How many sets the test was asked to run (more than `inputSets.length` when a failing set stopped it). */
+  plannedSets?: number
+  /** Cautions on a passing test, e.g. `PARAMETERIZATION_SUSPECT`: different inputs gave identical outputs. */
+  warnings?: string[]
 }
 
 export interface AutomationAssetPolicyInput {
@@ -408,6 +414,9 @@ export interface TestDetails {
   inputSchemaHash?: string
   /** The revision and content that were tested; defaults to the asset's current ones. */
   tested?: { revision: number; contentHash: string }
+  inputSets?: NonNullable<TestCredential['inputSets']>
+  plannedSets?: number
+  warnings?: string[]
 }
 
 export class AutomationAssetStore {
@@ -730,6 +739,8 @@ export class AutomationAssetStore {
       executionStatus: details.executionStatus ?? (ok ? 'completed' : 'failed'),
       validationStatus: details.validationStatus ?? (ok && evidenceLevel === 'verified' ? 'passed' : 'not_checked'),
       evidenceLevel: ok ? evidenceLevel : 'legacy-unverified', passed: ok,
+      ...details.inputSets ? { inputSets: details.inputSets, plannedSets: details.plannedSets ?? details.inputSets.length } : {},
+      ...details.warnings?.length ? { warnings: details.warnings } : {},
     }
     asset.testCredentials = [...asset.testCredentials ?? [], credential].slice(-this.policy.maxTestCredentials)
     if (tested.revision === asset.revision && tested.contentHash === currentHash) {
@@ -739,6 +750,7 @@ export class AutomationAssetStore {
       asset.testMessage = !ok ? (failureReason ?? `Runtime replay failed on ${domain}.`)
         : evidenceLevel === 'verified' ? `Runtime replay passed on ${domain}; every assert step held.`
           : `Runtime replay passed on ${domain}; no assert step checked the result (legacy-unverified).`
+      if (ok && details.inputSets) asset.testMessage += ` ${details.inputSets.length} input sets, each in a fresh context.${details.warnings?.length ? ' ' + details.warnings.join(', ') + ': different inputs gave identical outputs.' : ''}`
     }
     asset.updatedAt = nowIso()
     this.write()

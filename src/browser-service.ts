@@ -1576,16 +1576,41 @@ export class BrowserService {
       allowedDomains?: readonly string[]
       /** v2 goto may also stay on the origin the recipe started on (inline recipes; stored assets are limited to their domains). */
       gotoSameOrigin?: boolean
+      /** Run in a brand-new BrowserContext (its own cookies and storage) that is closed afterwards; the session's page is not touched. Needs `url`. */
+      isolated?: boolean
     } = {},
   ): Promise<RecipeServiceResult> {
+    if (opts.isolated) return this.isolatedRecipe(steps, opts)
     const existing = this.peek(opts.session)?.page
     if (!opts.url && (!existing || existing.isClosed())) throw new Error('browser recipe requires url or an active target.open page')
     const page = await this.ensureActivePage(opts.url, opts)
+    return this.runRecipeOn(page, this.state(opts.session), steps, opts)
+  }
+
+  /** A recipe in its own context: nothing of the caller's session (page, cookies, storage, journal) is shared or changed. */
+  private async isolatedRecipe(steps: readonly AnyRecipeStep[], opts: Parameters<BrowserService['recipe']>[1] & object): Promise<RecipeServiceResult> {
+    if (!opts.url) throw new Error('an isolated recipe run requires url')
+    const state = newSessionState()
+    const created = await this.transientContext(opts.url, opts)
+    state.context = created.context
+    state.profile = created.profile
+    state.rulePack = created.rulePack
+    try {
+      state.context.on('page', (opened: any) => { if (state.context) this.trackPage(state, opened) })
+      state.page = await state.context.newPage()
+      this.trackPage(state, state.page)
+      return await this.runRecipeOn(state.page, state, steps, opts)
+    } finally {
+      await this.closePage(state).catch(() => {})
+    }
+  }
+
+  private async runRecipeOn(page: any, state: SessionState, steps: readonly AnyRecipeStep[], opts: Parameters<BrowserService['recipe']>[1] & object): Promise<RecipeServiceResult> {
     if (opts.url) {
       page.setDefaultTimeout(30_000)
       await this.navigate(page, opts.url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, opts.signal)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
-      await applyRuleSteps(page, this.state(opts.session).rulePack)
+      await applyRuleSteps(page, state.rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
     }
     const options: RunRecipeOptions = { legacy: opts.legacyRecipe }
@@ -1602,13 +1627,13 @@ export class BrowserService {
         goto: async (target: string) => {
           await this.navigate(page, target, { waitUntil: 'domcontentloaded', timeout: 30_000 }, opts.signal)
           await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
-          await applyRuleSteps(page, this.state(opts.session).rulePack)
+          await applyRuleSteps(page, state.rulePack)
         },
       } satisfies RunRecipeOptions)
     }
     const run = await runRecipe(page, steps, () => this.captureScreenshot(page), opts.signal, options)
-    const state = await this.readState(page, false).catch((): InteractiveState => ({ url: page.isClosed() ? '' : page.url(), title: '', text: '' }))
-    return { ...state, ...run, steps: run.completedSteps }
+    const result = await this.readState(page, false).catch((): InteractiveState => ({ url: page.isClosed() ? '' : page.url(), title: '', text: '' }))
+    return { ...result, ...run, steps: run.completedSteps }
   }
 
   /**
