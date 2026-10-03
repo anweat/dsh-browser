@@ -170,7 +170,7 @@ export const Config = z.object({
     groups: z.dict(z.object({ summary: z.string().description(`Replaces the group summary. At most ${PROMPT_LIMITS.summary} characters.`) })).description('Keyed by group name (runtime, target, observe, act, inspect, script, automation, crawl, opencli). Unknown names are ignored.'),
     actions: z.dict(z.object({
       summary: z.string().description(`Replaces the one-line summary. At most ${PROMPT_LIMITS.summary} characters.`),
-      notes: z.string().description(`Replaces the extra guidance shown in the action detail. At most ${PROMPT_LIMITS.notes} characters.`),
+      notes: z.string().description(`Replaces the extra guidance shown in the action detail. At most ${PROMPT_LIMITS.notes} characters (${PROMPT_LIMITS.topicText} for a detail topic, where it replaces the whole page text).`),
     })).description('Keyed by group.action, group.action.sub (automation.develop.save) or group.action.topic (observe.read.controls). Unknown keys are ignored.'),
     errorHints: z.dict(z.string()).description(`Keyed by error code; replaces the hint that comes with it. At most ${PROMPT_LIMITS.errorHint} characters each. Only codes with a fixed hint can be replaced; others are ignored.`),
     skill: z.object({

@@ -36,6 +36,7 @@
     "test": "node --test --experimental-transform-types test/*.test.ts",
     "test:e2e": "node --test --experimental-transform-types test/e2e/*.test.ts",
     "measure:tools": "node scripts/measure-tool-surface.mjs",
+    "prompts:dump": "node scripts/dump-prompts.mjs",
     "test:client-bundle": "node scripts/check-client-bundle.mjs",
     "verify": "pnpm run typecheck && pnpm run test:peers && pnpm run build && pnpm test && pnpm run test:client-bundle",
     "prepublishOnly": "pnpm run verify",

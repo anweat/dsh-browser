@@ -26,8 +26,10 @@ import type { AutomationMode, ExposureOptions } from './freedom.ts'
 export const PROMPT_LIMITS = {
   /** A group or action summary: one line of the catalog. */
   summary: 300,
-  /** The extra guidance of an action, sub-action or detail topic. */
+  /** The extra guidance of an action or sub-action. */
   notes: 1000,
+  /** The text of a detail topic (`observe.read.controls`), which is a page of its own. */
+  topicText: 3500,
   /** A tool description (`prompts.tools.<tool>.description`). */
   description: 1500,
   /** The compact guide that replaces the skill pointer at the root. */
@@ -166,7 +168,8 @@ export function resolvePrompts(raw: unknown): ResolvedPrompts {
       if (!entry) continue
       unknownKeys(entry, ['summary', 'notes'], `actions.${name}`)
       const summary = text(entry.summary, `actions.${name}.summary`, PROMPT_LIMITS.summary)
-      const notes = text(entry.notes, `actions.${name}.notes`, PROMPT_LIMITS.notes)
+      const topicOnly = !findAction(name) && !findSubAction(name)
+      const notes = text(entry.notes, `actions.${name}.notes`, topicOnly ? PROMPT_LIMITS.topicText : PROMPT_LIMITS.notes)
       if (summary !== undefined || notes !== undefined) actions[name] = { ...summary !== undefined ? { summary } : {}, ...notes !== undefined ? { notes } : {} }
     }
   }
