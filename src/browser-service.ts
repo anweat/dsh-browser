@@ -397,6 +397,11 @@ const SHARED_SESSION = 'shared'
  * - `agent.id` — the base `Agent` contract documents `readonly id: SessionId`
  *   as "Session-backed Agent identity". Used as a fallback.
  *
+ * On DSH 0.2.0-rc.2 both are present and equal (the agent loop documents `id` as the
+ * "shared agent/session identity"). `ToolExecution.agent` is typed as the base `Agent`,
+ * whose only guaranteed member is `id`, so reading the live face first and the base
+ * contract second is a type-level hedge rather than an old-host adaptation.
+ *
  * A session therefore keeps ONE page across all of its turns, and two
  * concurrent sessions never share one. Calls carrying no agent at all
  * (automation-asset replays, non-agent dispatchers) land in one shared bucket,
