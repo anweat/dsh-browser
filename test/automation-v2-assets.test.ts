@@ -16,7 +16,7 @@ const timeout = (ms: number): Error => Object.assign(new Error(`Timeout ${ms}ms 
 
 function fixture() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-v2-'))
-  return { directory, store: new AutomationAssetStore(resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual' })) }
+  return { directory, store: new AutomationAssetStore(resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual', minInputSetsForActivation: 1 })) }
 }
 
 /** A service whose recipe() is the real runRecipe over a scripted page, recording the options it was given. */

@@ -191,6 +191,24 @@ test('browser panel validates freedom, runtime, and usage buffer before saving',
   controller.dispose()
 })
 
+test('browser panel accepts every automationAssets key, and holds minInputSetsForActivation to 1-5 instead of clamping silently', () => {
+  const { controller, actions } = fixture()
+  const invalid = () => controller.snapshot().jsonFields.automationAssets.invalid
+  actions.edit('automationAssets', '{"maxTestCredentials":8,"minInputSetsForActivation":3}')
+  assert.equal(invalid(), false)
+  for (const bad of ['0', '6', '2.5', '"2"', '-1']) {
+    actions.edit('automationAssets', `{"minInputSetsForActivation":${bad}}`)
+    assert.equal(invalid(), true, `minInputSetsForActivation ${bad} is refused`)
+  }
+  actions.edit('automationAssets', '{"minInputSetsForActivationn":2}')
+  assert.equal(invalid(), true, 'an unknown key is refused')
+  actions.edit('automationAssets', '{"persistenceMode":"manual","activationMode":"manual","enabled":false,"minSuccessRate":0.9}')
+  assert.equal(invalid(), false)
+  actions.edit('automationAssets', '{"persistenceMode":"sometimes"}')
+  assert.equal(invalid(), true)
+  controller.dispose()
+})
+
 test('browser panel edits the tool surface and refuses values the schema does not know', async () => {
   const { scope, controller, actions } = fixture()
   actions.edit('toolSurface', 'deferred')

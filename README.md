@@ -68,6 +68,7 @@ dsh --profile web
 - 其他插件或自定义提示词里如果写了旧工具名，需要同步修改。Web Search Pro 请使用提示词已更新的版本。
 - 已保存的 recipe 和 userscript 资产照常可读、可运行；升级到 v2 用 `automation.develop` 的 `convert`，它只生成新草稿，不改原资产。
 - 激活资产现在要求当前版本有通过的测试记录。旧资产加载时会自动补一条“旧版”记录。
+- **声明了输入的资产，激活门槛提高了。**新增策略项 `automationAssets.minInputSetsForActivation`（默认 2，范围 1–5）：带 `inputSchema` 或 `inputNames` 的资产，当前版本的通过凭据必须覆盖至少这么多组不同输入（`automation.develop` 的 `test` 传 `inputSets`；设置面板的“测试输入 JSON”填 2 到 5 个对象的数组），否则激活被拒绝，错误里写明原因。只用一组输入测试通过的 recipe 可能把那组输入写死，换一组就失败。没有输入的资产不受影响；升级前已通过测试的旧资产带“旧版”凭据，视为满足，不会因升级而无法激活。要恢复旧行为，把它设为 `1`。
 - `BrowserService` 上供其他插件调用的方法（`render`、`snapshot`、`searchResults`、`opencli`、`close`）签名不变。
 
 ### 升级到 0.1.17
@@ -425,6 +426,7 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
           modelDevelopmentEnabled: true
           maxModelDraftWritesPerSession: 3
           maxTestCredentials: 5     # 每个资产保留最近 N 条测试凭据（激活只认绑定当前 revision 与内容哈希的 passed 凭据）
+          minInputSetsForActivation: 2  # 声明了输入的资产，激活要求当前版本的通过凭据至少覆盖 N 组输入（1–5）；无输入的资产不受影响
         maxSessions: 8           # 同时持有 context+page 的 session 上限，超出淘汰最久未使用者
         storageStatePath: ''     # Playwright 登录态 JSON（复用已登录会话）
         authProfiles:

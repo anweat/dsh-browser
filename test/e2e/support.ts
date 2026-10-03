@@ -131,7 +131,7 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     ...overrides,
   } as never)
   const service = new BrowserService(config)
-  const assets = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory: path.join(dir, 'automations'), persistenceMode: 'manual' }))
+  const assets = new AutomationAssetStore(resolveAutomationAssetPolicy({ ...overrides.automationAssets as object | undefined, directory: path.join(dir, 'automations'), persistenceMode: 'manual' }))
   const tools = new Map<string, any>()
   registerTools({ tools: { register: (tool: any) => tools.set(tool.name, tool) } } as never, config, service, assets)
   return {

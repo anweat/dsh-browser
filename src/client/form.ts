@@ -13,6 +13,7 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SettingsFormModel, settingsNumberField, settingsTextField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
+import { ASSET_POLICY_BOOLEAN_KEYS, ASSET_POLICY_ENUMS, ASSET_POLICY_INTEGER_RANGES, ASSET_POLICY_KEYS, ASSET_POLICY_STRING_KEYS, USAGE_POLICY_BOUNDS, type AssetPolicyKey } from '../policy-keys.ts'
 import { PROMPT_TEXT_FIELDS, canonicalPrompts, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
@@ -98,35 +99,26 @@ const jsonField = (field: string, validate?: (value: Record<string, unknown>) =>
   },
 })
 
-const POLICY_BOUNDS: Record<string, readonly [number, number]> = {
-  minDelayMs: [0, 60_000], maxConcurrency: [1, 8], burst: [1, 20], maxPagesPerRun: [1, 100],
-  maxDepth: [0, 5], retryLimit: [0, 5], backoffBaseMs: [1, 60_000], cooldownMs: [100, 300_000],
-}
-
-const ASSET_POLICY_KEYS = new Set([
-  'enabled', 'directory', 'persistenceMode', 'activationMode', 'minSuccessfulRuns', 'minDistinctSessions',
-  'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay',
-  'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget',
-  'modelDevelopmentEnabled', 'maxModelDraftWritesPerSession', 'maxTestCredentials',
-])
+const ASSET_KEYS: ReadonlySet<string> = new Set(ASSET_POLICY_KEYS)
+const NON_NUMERIC_ASSET_KEYS: ReadonlySet<string> = new Set([...ASSET_POLICY_BOOLEAN_KEYS, ...ASSET_POLICY_STRING_KEYS, ...Object.keys(ASSET_POLICY_ENUMS)])
 
 function validAssetPolicy(value: Record<string, unknown>): boolean {
-  if (Object.keys(value).some(key => !ASSET_POLICY_KEYS.has(key))) return false
-  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') return false
-  if (value.directory !== undefined && typeof value.directory !== 'string') return false
-  if (value.modelDevelopmentEnabled !== undefined && typeof value.modelDevelopmentEnabled !== 'boolean') return false
-  if (value.persistenceMode !== undefined && !['off', 'manual', 'suggest', 'auto-draft'].includes(String(value.persistenceMode))) return false
-  if (value.activationMode !== undefined && !['manual', 'auto-tested'].includes(String(value.activationMode))) return false
-  const numeric = ['minSuccessfulRuns', 'minDistinctSessions', 'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay', 'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget', 'maxModelDraftWritesPerSession', 'maxTestCredentials']
+  if (Object.keys(value).some(key => !ASSET_KEYS.has(key))) return false
   return Object.entries(value).every(([key, entry]) => {
-    if (!numeric.includes(key)) return true
-    return typeof entry === 'number' && Number.isFinite(entry) && entry >= 0
+    if (ASSET_POLICY_BOOLEAN_KEYS.includes(key as AssetPolicyKey)) return entry === undefined || typeof entry === 'boolean'
+    if (ASSET_POLICY_STRING_KEYS.includes(key as AssetPolicyKey)) return entry === undefined || typeof entry === 'string'
+    const choices = ASSET_POLICY_ENUMS[key as AssetPolicyKey]
+    if (choices) return entry === undefined || choices.includes(String(entry))
+    if (NON_NUMERIC_ASSET_KEYS.has(key)) return true
+    if (typeof entry !== 'number' || !Number.isFinite(entry) || entry < 0) return false
+    const range = ASSET_POLICY_INTEGER_RANGES[key as AssetPolicyKey]
+    return !range || (Number.isInteger(entry) && entry >= range[0] && entry <= range[1])
   })
 }
 
 function validUsagePolicy(value: Record<string, unknown>): boolean {
-  if (Object.keys(value).some(key => !(key in POLICY_BOUNDS))) return false
-  return Object.entries(POLICY_BOUNDS).every(([key, [min, max]]) => {
+  if (Object.keys(value).some(key => !(key in USAGE_POLICY_BOUNDS))) return false
+  return Object.entries(USAGE_POLICY_BOUNDS).every(([key, [min, max]]) => {
     const entry = value[key]
     return entry === undefined || (typeof entry === 'number' && Number.isInteger(entry) && entry >= min && entry <= max)
   })

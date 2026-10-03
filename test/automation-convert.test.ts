@@ -17,7 +17,7 @@ const shot = async (): Promise<string> => '/tmp/shot.png'
 
 function fixture(extra: Record<string, unknown> = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-convert-'))
-  const policy = resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual', ...extra })
+  const policy = resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual', minInputSetsForActivation: 1, ...extra })
   const store = new AutomationAssetStore(policy)
   return { directory, store, development: new AutomationDevelopmentService(store, policy) }
 }

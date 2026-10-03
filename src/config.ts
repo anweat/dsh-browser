@@ -160,6 +160,7 @@ export const Config = z.object({
     modelDevelopmentEnabled: z.boolean().default(true),
     maxModelDraftWritesPerSession: z.number().default(3),
     maxTestCredentials: z.number().default(5),
+    minInputSetsForActivation: z.number().default(2),
   }).volatile(),
   prompts: z.object({
     tools: z.object({

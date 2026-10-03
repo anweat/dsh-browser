@@ -43,7 +43,7 @@ function ctxFor(service: unknown, extra: Record<string, unknown> = {}) {
 
 function stores() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-v2-tool-'))
-  const policy = resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual' })
+  const policy = resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual', minInputSetsForActivation: 1 })
   const assets = new AutomationAssetStore(policy)
   return { assets, development: new AutomationDevelopmentService(assets, policy) }
 }

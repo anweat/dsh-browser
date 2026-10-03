@@ -20,7 +20,7 @@ describe('asset versions and activation protection in a real browser', { skip: d
   before(async () => {
     assert.ok(detection.ok)
     server = await startFixtureServer()
-    harness = createHarness(detection, { automationAssets: { maxModelDraftWritesPerSession: 30, modelDevelopmentEnabled: true } })
+    harness = createHarness(detection, { automationAssets: { maxModelDraftWritesPerSession: 30, modelDevelopmentEnabled: true, minInputSetsForActivation: 1 } })
   })
 
   after(async () => {
@@ -112,6 +112,21 @@ describe('asset versions and activation protection in a real browser', { skip: d
     assert.equal(harness.assets.get(original)!.status, 'archived')
     assert.equal((await harness.action(S, 'automation.run', { id: original, url: url('search.html'), inputs: { query: 'ba' } })).ok, false, 'the archived source no longer runs')
     assert.equal((await harness.action(S, 'automation.run', { id: repair, url: url('search.html'), inputs: { query: 'ba' } })).ok, true)
+  })
+
+  it('with the default policy an asset that declares inputs is activated only after a test covering two input sets', async () => {
+    assert.ok(detection.ok)
+    const strict = createHarness(detection, { automationAssets: { maxModelDraftWritesPerSession: 30, modelDevelopmentEnabled: true } })
+    try {
+      const id = (await strict.result(S, 'automation.develop', search())).assetId as string
+      const single = await strict.action(S, 'automation.develop', { action: 'test', id, url: url('search.html'), inputs: { query: 'ap' } })
+      assert.equal(single.ok, true, 'one input passes its test')
+      assert.throws(() => strict.assets.setStatus(id, 'active', { expectedRevision: 1 }),
+        (error: unknown) => error instanceof ActivationRefusedError && error.reason === 'insufficient-input-sets' && /at least 2 different input sets/.test(error.message) && /covered 1\b/.test(error.message))
+      const sets = await strict.action(S, 'automation.develop', { action: 'test', id, url: url('search.html'), inputSets: [{ query: 'ap' }, { query: 'ba' }] })
+      assert.equal(sets.ok, true)
+      assert.equal(strict.assets.setStatus(id, 'active', { expectedRevision: 1 }).status, 'active')
+    } finally { await strict.dispose() }
   })
 
   it('a v2 test with nothing to verify is ok:false VALIDATION_MISSING in a real browser too', async () => {

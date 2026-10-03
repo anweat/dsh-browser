@@ -80,6 +80,11 @@ export interface AutomationAssetPolicyInput {
   maxModelDraftWritesPerSession?: number
   /** How many test credentials each asset keeps (the most recent ones). Default 5. */
   maxTestCredentials?: number
+  /**
+   * How many input sets the passing test of an asset that declares inputs must have covered before it can be activated
+   * (1 to 5, default 2). Assets without inputs are not affected.
+   */
+  minInputSetsForActivation?: number
 }
 
 export interface AutomationAssetPolicy {
@@ -101,6 +106,7 @@ export interface AutomationAssetPolicy {
   modelDevelopmentEnabled: boolean
   maxModelDraftWritesPerSession: number
   maxTestCredentials: number
+  minInputSetsForActivation: number
 }
 
 export interface AutomationCandidate {
@@ -253,6 +259,7 @@ export function resolveAutomationAssetPolicy(input: AutomationAssetPolicyInput =
     modelDevelopmentEnabled: input.modelDevelopmentEnabled ?? true,
     maxModelDraftWritesPerSession: boundedInteger(input.maxModelDraftWritesPerSession, 3, 1, 20),
     maxTestCredentials: boundedInteger(input.maxTestCredentials, DEFAULT_TEST_CREDENTIALS, 1, 20),
+    minInputSetsForActivation: boundedInteger(input.minInputSetsForActivation, 2, 1, 5),
   }
 }
 
@@ -297,13 +304,23 @@ export function digestInputs(inputs: unknown): string {
 }
 
 /** Why an activation request was refused; the message says what to do. */
-export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached' | 'incomplete-draft'
+export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached' | 'incomplete-draft' | 'insufficient-input-sets'
 
 export class ActivationRefusedError extends Error {
   constructor(readonly reason: ActivationRefusal, message: string) {
     super(message)
     this.name = 'ActivationRefusedError'
   }
+}
+
+/**
+ * How many different input sets the credential's passing test covered: its passed sets, one for a plain single run,
+ * and enough for any requirement when it is a `legacy` credential synthesized from data written before input sets
+ * existed (so upgrading never strands an already-tested asset).
+ */
+export function inputSetsCovered(credential: TestCredential): number {
+  if (credential.legacy) return Number.POSITIVE_INFINITY
+  return credential.inputSets ? credential.inputSets.filter(entry => entry.passed).length : 1
 }
 
 function safeDomain(url: string): string {
@@ -678,6 +695,13 @@ export class AutomationAssetStore {
     if (!latest.passed || asset.testStatus !== 'passed') throw new ActivationRefusedError('test-failed', `automation asset must pass testing before activation: the latest test of revision ${asset.revision} did not pass`)
     if (latest.contentHash !== computeContentHash(asset)) {
       throw new ActivationRefusedError('content-changed', `automation asset must pass testing before activation: the passed test of revision ${asset.revision} covered different content than the asset has now; save and test it again`)
+    }
+    const declared = Math.max(asset.inputSchema?.length ?? 0, asset.inputNames.length)
+    if (declared > 0) {
+      const covered = inputSetsCovered(latest)
+      if (covered < this.policy.minInputSetsForActivation) {
+        throw new ActivationRefusedError('insufficient-input-sets', `automation asset declares ${declared} input(s), so its passing test must cover at least ${this.policy.minInputSetsForActivation} different input sets (automationAssets.minInputSetsForActivation), but the test of revision ${asset.revision} covered ${covered}. A recipe written against one input can hard-code it. Test again with ${this.policy.minInputSetsForActivation} to 5 different input objects (automation.develop test with inputSets, or a JSON array in the panel's test inputs)`)
+      }
     }
     if (asset.origin?.unmapped) throw new ActivationRefusedError('incomplete-draft', `automation draft is incomplete: ${asset.origin.unmapped} action(s) of the exploration it was built from (journal seq ${asset.origin.fromSeq}-${asset.origin.toSeq}) could not become steps. Finish the recipe yourself and save it, test it, then activate`)
     if (asset.domains.length < 1) throw new ActivationRefusedError('no-domain', 'automation asset must declare at least one domain before activation')

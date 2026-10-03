@@ -37,7 +37,7 @@ Any `unmapped` entry makes the draft `complete: false` (`INCOMPLETE_DRAFT`): it 
 
 `inputSets` takes 2 to 5 input objects, all valid for the `inputSchema` and different from each other (checked before anything runs). Each runs in a new BrowserContext, never in your session page, with its own cookies; the first failing set stops the test. All sets must pass for the credential to be `passed`; it records how many sets ran and a digest of each set's inputs and outputs, never the values. The reply has one entry per set (`outputs`, `validationStatus`, `failedStep`), not repeated steps.
 
-If different inputs gave identical outputs the test still passes but replies `warnings: [PARAMETERIZATION_SUSPECT]` with the set numbers, and the credential carries it: the input probably does not reach the page, or the output ignores it. Fix that before asking the user to activate. Without `inputSets` a test is one run on the session page, as before.
+If different inputs gave identical outputs the test still passes but replies `warnings: [PARAMETERIZATION_SUSPECT]` with the set numbers, and the credential carries it: the input probably does not reach the page, or the output ignores it. Fix that before asking the user to activate. Without `inputSets` a test is one run on the session page, as before. An asset that declares inputs cannot be activated unless its passing test covered at least `automationAssets.minInputSetsForActivation` input sets (default 2): a single-input test cannot show the recipe does not hard-code that input, and activation is refused with `insufficient-input-sets`. Assets without inputs are not affected.
 
 ## The whole path
 

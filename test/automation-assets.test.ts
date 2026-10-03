@@ -8,7 +8,7 @@ import type { BrowserRecipeStep } from '../src/automation.ts'
 
 function fixture(overrides: Parameters<typeof resolveAutomationAssetPolicy>[0] = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-assets-'))
-  const store = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory, ...overrides }))
+  const store = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory, minInputSetsForActivation: 1, ...overrides }))
   return { directory, store }
 }
 

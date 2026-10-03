@@ -335,7 +335,7 @@ test('real Playwright runtime executes built-ins, recipes, and a scoped userscri
     assert.equal(fs.existsSync(regionShot.path), true)
     await assert.rejects(() => service.screenshot({ filename: '../escape.png' }), /plain file name/)
 
-    const assetStore = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory: path.join(snapshotDir, 'automations'), persistenceMode: 'manual' }))
+    const assetStore = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory: path.join(snapshotDir, 'automations'), persistenceMode: 'manual', minInputSetsForActivation: 1 }))
     const draft = assetStore.saveDraft({ kind: 'userscript', name: 'Reusable heading reader', domains: ['127.0.0.1'], inputNames: ['query'], source: VALID_SCRIPT })
     assert.equal(assetStore.validate(draft.id).testStatus, 'untested')
     assert.throws(() => assetStore.setStatus(draft.id, 'active', { expectedRevision: draft.revision }), /pass testing/)
