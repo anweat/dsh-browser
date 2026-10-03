@@ -99,6 +99,19 @@ const jsonField = (field: string, validate?: (value: Record<string, unknown>) =>
   },
 })
 
+/** A JSON array of strings (Chromium launch arguments): written compactly on one line, an empty draft clears it. */
+const stringArrayField = (field: string): SettingsFieldSpec => ({
+  field,
+  format: value => Array.isArray(value) && value.length ? JSON.stringify(value) : '',
+  parse(text) {
+    if (text.trim() === '') return { kind: 'clear' }
+    try {
+      const value = JSON.parse(text) as unknown
+      return Array.isArray(value) && value.every(entry => typeof entry === 'string' && entry.length > 0) ? { kind: 'set', value } : undefined
+    } catch { return undefined }
+  },
+})
+
 const ASSET_KEYS: ReadonlySet<string> = new Set(ASSET_POLICY_KEYS)
 const NON_NUMERIC_ASSET_KEYS: ReadonlySet<string> = new Set([...ASSET_POLICY_BOOLEAN_KEYS, ...ASSET_POLICY_STRING_KEYS, ...Object.keys(ASSET_POLICY_ENUMS)])
 
@@ -147,12 +160,20 @@ export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   booleanField('verbose'),
 ] as const
 
-/** The JSON-shaped section fields the card renders as code editors. */
+/** The JSON-shaped section fields: objects (policies, prompts) and the launch-argument array. */
 export const JSON_FIELD_SPECS: readonly SettingsFieldSpec[] = [
   jsonField('usagePolicy', validUsagePolicy),
   jsonField('automationAssets', validAssetPolicy),
   jsonField('prompts', validPrompts),
+  stringArrayField('args'),
 ] as const
+
+/**
+ * Public config fields the card has no form for, on purpose: nested records (named login states, rule packs with
+ * hash-pinned scripts) that are safer to edit in the profile config file. The card names each one and says so, instead
+ * of leaving it out without a word. `rulePacks` is not `.volatile()` in the Host schema, so no form could write it.
+ */
+export const CONFIG_FILE_ONLY_FIELDS = ['authProfiles', 'rulePacks'] as const
 
 /** Section fields rendered as JSON code editors rather than single inputs. */
 export const JSON_FIELDS: ReadonlySet<string> = new Set(JSON_FIELD_SPECS.map(spec => spec.field))

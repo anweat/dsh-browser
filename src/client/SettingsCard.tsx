@@ -17,8 +17,7 @@ import { useEffect } from 'react'
 import { SettingsForm, SettingsValueField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BrowserSettingsCardProps } from './index.ts'
-import { FIELD_SPECS, JSON_FIELD_SPECS, JSON_FIELDS, type SectionField, type CardFieldState } from './form.ts'
-import type { SettingsFieldSpec } from '@deepseek-ai/dsh-client-ui-primitives'
+import { CONFIG_FILE_ONLY_FIELDS, FIELD_SPECS, JSON_FIELDS, type SectionField } from './form.ts'
 import { PROMPT_TEXT_FIELDS, type PromptTextFieldId } from './prompts-form.ts'
 import { styles as css } from './styles.ts'
 import { credentialView, identicalOutputPairs, inputSetLines, isDirty, shortHash } from './asset-editor.ts'
@@ -47,16 +46,22 @@ function formLabels(t: Translator): SettingsFormLabels {
   }
 }
 
-const SECTION_LAYOUT: readonly { title: LabelKey; hint: LabelKey; fields: readonly SectionField[] }[] = [
+/**
+ * Which fields each section shows, by field name, and which public fields it only names ("edit in the config file").
+ * A public config field missing from here and from the prompt/usage sections would be silently absent from the card;
+ * test/settings-card-render.test.ts renders the card and checks every Config field is a control or a note.
+ */
+const SECTION_LAYOUT: readonly { title: LabelKey; hint: LabelKey; fields: readonly string[]; notes?: readonly string[] }[] = [
   { title: 'freedom', hint: 'freedomHint', fields: ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled'] },
-  { title: 'runtime', hint: 'runtimeHint', fields: ['browserRuntime', 'channel', 'headless', 'autoInstall', 'executablePath', 'cdpPort'] },
-  { title: 'advanced', hint: 'advancedHint', fields: ['storageStatePath', 'defaultAuthProfile', 'snapshotDir', 'verbose'] },
+  { title: 'runtime', hint: 'runtimeHint', fields: ['browserRuntime', 'channel', 'headless', 'autoInstall', 'executablePath', 'cdpPort', 'maxSessions', 'args'] },
+  { title: 'advanced', hint: 'advancedHint', fields: ['storageStatePath', 'defaultAuthProfile', 'snapshotDir', 'verbose'], notes: CONFIG_FILE_ONLY_FIELDS },
 ]
 
-/** The section field a spec names, when it is one of the single-input fields. */
-function sectionField(field: string): SectionField | undefined {
-  return FIELD_SPECS.some(spec => spec.field === field) ? field as SectionField : undefined
-}
+/** The usage section's JSON boxes. */
+const USAGE_FIELDS = ['usagePolicy', 'automationAssets'] as const
+
+/** The single-input fields, where `state.fields` holds their state. */
+const SINGLE_INPUT_FIELDS: ReadonlySet<string> = new Set(FIELD_SPECS.map(spec => spec.field))
 
 export function SettingsCard(props: BrowserSettingsCardProps) {
   const { t } = props
@@ -69,25 +74,29 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
   // Single-input fields live in `state.fields`; the JSON-shaped ones are read
   // from the model directly, because the card renders them as code editors
   // rather than one-line inputs.
-  const numeric = new Set<string>(['cdpPort'])
-  const field = (spec: SettingsFieldSpec) => {
-    const known = sectionField(spec.field)
-    const fieldState = known ? state.fields[known] : state.jsonFields[spec.field]
+  const numeric = new Set<string>(['cdpPort', 'maxSessions'])
+  const field = (name: string) => {
+    const fieldState = SINGLE_INPUT_FIELDS.has(name) ? state.fields[name as SectionField] : state.jsonFields[name]
     return <SettingsValueField
-      key={spec.field}
-      id={`plugin-config-dsh-browser-${spec.field}`}
-      label={t(spec.field as LabelKey)}
-      hint={t(`${spec.field}Hint` as LabelKey)}
+      key={name}
+      id={`plugin-config-dsh-browser-${name}`}
+      label={t(name as LabelKey)}
+      hint={t(`${name}Hint` as LabelKey)}
       overriddenLabel={t('overridden')}
       resetLabel={t('reset')}
-      invalidLabel={t(JSON_FIELDS.has(spec.field) ? 'invalidJson' : 'invalidNumber')}
-      numeric={numeric.has(spec.field)}
+      invalidLabel={t(JSON_FIELDS.has(name) ? 'invalidJson' : 'invalidNumber')}
+      numeric={numeric.has(name)}
       disabled={disabled}
       {...fieldState}
-      onEdit={text => props.edit(spec.field, text)}
-      onReset={() => props.resetField(spec.field)}
+      onEdit={text => props.edit(name, text)}
+      onReset={() => props.resetField(name)}
     />
   }
+  /** A public field with no form: its name, what it is for, and where to edit it. */
+  const configFileNote = (name: string) => <div key={name} className={css.field} data-dsh-browser-config-note={name}>
+    <div className={css.fieldHead}><span className={css.label}>{t(name as LabelKey)}</span></div>
+    <p className={css.hint}>{t(`${name}Hint` as LabelKey)} {t('configFileOnly')}</p>
+  </div>
 
   return <SettingsForm
     labels={formLabels(t)}
@@ -98,14 +107,15 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
     {SECTION_LAYOUT.map(section => <section key={section.title} className={css.section}>
       <div className={css.sectionHead}><h3>{t(section.title)}</h3><p>{t(section.hint)}</p></div>
       <div className={css.grid}>
-        {section.fields.map(name => field(FIELD_SPECS.find(spec => spec.field === name)!))}
+        {section.fields.map(name => field(name))}
+        {section.notes?.map(name => configFileNote(name))}
       </div>
     </section>)}
     <section className={css.section}>
       <div className={css.sectionHead}><h3>{t('usage')}</h3><p>{t('usageHint')}</p></div>
       <div className={css.grid}>
         {/* `prompts` has its own section below: several controls over one staged draft. */}
-        {JSON_FIELD_SPECS.filter(spec => spec.field !== 'prompts').map(spec => field(spec))}
+        {USAGE_FIELDS.map(name => field(name))}
       </div>
       <p className={css.notice} role="note">{t('restart')}</p>
     </section>

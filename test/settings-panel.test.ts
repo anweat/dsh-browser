@@ -114,7 +114,7 @@ test('browser settings panel covers every public browser configuration field', (
     'executablePath', 'snapshotDir', 'verbose', 'cdpPort', 'maxSessions',
   ]
   assert.deepEqual(FIELD_SPECS.map(spec => spec.field).toSorted(), fields.toSorted())
-  assert.deepEqual(JSON_FIELD_SPECS.map(spec => spec.field).toSorted(), ['automationAssets', 'prompts', 'usagePolicy'])
+  assert.deepEqual(JSON_FIELD_SPECS.map(spec => spec.field).toSorted(), ['args', 'automationAssets', 'prompts', 'usagePolicy'])
 
   // Every rendered field must be `.volatile()` in the Host schema: `volatileForm`
   // drops unmarked fields, so a control for one could never be written.
@@ -206,6 +206,32 @@ test('browser panel accepts every automationAssets key, and holds minInputSetsFo
   assert.equal(invalid(), false)
   actions.edit('automationAssets', '{"persistenceMode":"sometimes"}')
   assert.equal(invalid(), true)
+  controller.dispose()
+})
+
+test('browser panel edits maxSessions within 1-64 and the Chromium launch arguments as a JSON array of strings', async () => {
+  const { scope, controller, actions } = fixture()
+  for (const bad of ['0', '65', '2.5', 'many']) {
+    actions.edit('maxSessions', bad)
+    assert.equal(controller.snapshot().fields.maxSessions.invalid, true, `maxSessions ${bad}`)
+  }
+  actions.edit('maxSessions', '12')
+  assert.equal(controller.snapshot().fields.maxSessions.invalid, false)
+  for (const bad of ['{"a":1}', '["--ok", 3]', '["--ok", ""]', '--disable-gpu', '["--ok"']) {
+    actions.edit('args', bad)
+    assert.equal(controller.snapshot().jsonFields.args.invalid, true, `args ${bad}`)
+  }
+  assert.equal(controller.snapshot().invalid, true)
+  actions.edit('args', '["--disable-gpu","--lang=en-US"]')
+  assert.equal(controller.snapshot().jsonFields.args.invalid, false)
+  await actions.save()
+  assert.equal(scope.getSnapshot().user?.maxSessions, 12)
+  assert.deepEqual(scope.getSnapshot().user?.args, ['--disable-gpu', '--lang=en-US'])
+  assert.equal(controller.snapshot().jsonFields.args.text, '["--disable-gpu","--lang=en-US"]', 'the box shows what is stored, on one line')
+  // Emptying the box clears the override.
+  actions.edit('args', '')
+  await actions.save()
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'args'), false)
   controller.dispose()
 })
 
