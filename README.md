@@ -263,7 +263,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 ### dsh-browser skill
 
-插件在 Host 提供 `skills` 服务时注册 `dsh-browser` skill（`assets/skills/dsh-browser/`：SKILL.md 与 `references/`），内容为复用优先、定位策略、按错误码处理失败、沉淀资产和边界。`skills` 不是必需依赖：没有该服务时插件照常工作，`browser_index()` 的根目录附一段不超过 300 token 的精简指南。
+插件在 Host 提供 `skills` 服务时注册 `dsh-browser` skill（`assets/skills/dsh-browser/`：SKILL.md 与 `references/`），内容为复用优先、定位策略、按错误码处理失败、沉淀资产和边界。`skills` 不是必需依赖：没有该服务时插件照常工作，`browser_index()` 的根目录附一段不超过 300 token 的精简指南。skill 与精简指南都可以用 `prompts` 配置覆盖，见“自定义提示文本”。
 
 ## 可复用自动化资产（实验性）
 
@@ -445,6 +445,69 @@ headless: false
 `channel: chrome + headless: false` 是更贴近其推荐的兼容配置；CI/无人值守也可使用 headless，但 `runtime.status.runtimeWarnings` 会如实提示差异。Patchright 会禁用 Playwright console API，因此依赖控制台监听的 Recipe/脚本不应切换到它。不要再叠加自定义 User-Agent、额外请求头或指纹注入器；这类组合更容易形成自相矛盾的指纹。
 
 Camoufox 当前没有硬集成：截至本版，其 JS 包要求 Node 22 且 peer 约束为 `playwright-core <1.61`，与本插件验证的 Playwright/Patchright 1.62.1 不兼容，并需要独立下载 Firefox 内核。后续等版本边界对齐后再作为第三 provider 接入，避免安装后才发生依赖漂移。
+
+## 自定义提示文本
+
+模型读到的提示和建议文本都可以由部署方覆盖：两个常驻工具的描述、`browser_index` 根目录的指南和附言、分组与动作的摘要和说明、错误提示、以及 `dsh-browser` skill。不配置 `prompts` 时所有输出与内置默认逐字节一致。
+
+**键结构**（全部可选；写在 `config.prompts` 下）：
+
+```yaml
+- insert:
+    - id: browser
+      name: '@anweat/dsh-browser'
+      config:
+        prompts:
+          tools:
+            browser_index: { description: '浏览器能力目录。无参数：分组与环境状态。' }
+            browser_call:  { description: '执行一个浏览器动作；动作名见 browser_index。' }   # 合规声明始终自动追加在末尾
+          rootGuide: '先 automation.search；没有合适资产再 target.open -> observe.read -> act.*。'  # 无 skill 时替换精简指南
+          rootNote: '内网站点优先用 opencli.run；不要访问生产后台。'                              # 追加在根目录末尾，有 skill 时也显示
+          groups:
+            act: { summary: '点击、填写、输入（会改变页面）' }
+          actions:
+            act.click: { summary: '点击元素', notes: '提交类按钮点击后先 observe.read 确认结果。' }
+            automation.develop.save: { notes: '保存前先 validate。' }   # 子动作
+            observe.read.controls: { notes: '……' }                       # 详情页（notes 替换整页正文）
+          errorHints:
+            LOCATOR_NOT_FOUND: '没找到元素：先 observe.read 看页面，再换定位方式。'
+          skill:
+            enabled: true                       # false：不注册 skill，根目录改用精简指南
+            description: '浏览器工具使用指南'
+            bodyFile: 'D:/dsh/prompts/skill.md' # 绝对路径，替换 SKILL.md 正文（文件缺失/不可读时回退到内置正文）
+            append: '## 本部署的约定\n……'      # 追加到正文末尾
+```
+
+动作键可以是 `group.action`、子动作（`automation.develop.save`）或详情页（`observe.read.controls`，其 `notes` 即该页正文）。空字符串等于不覆盖。
+
+**导出全部默认文本**：`pnpm prompts:dump`（`node scripts/dump-prompts.mjs`）输出一份 JSON，结构与 `prompts` 完全一致，包含每个可覆盖项的内置文本。复制它，删掉保持默认的部分，改写其余部分，放进配置即可；原样放回不改变任何输出（有测试保证）。
+
+**长度上限**（超限的值整条忽略，不会被截断，并写入诊断）：
+
+| 项 | 上限（字符） |
+|---|---|
+| 分组/动作/子动作/详情页 `summary` | 300 |
+| 动作/子动作 `notes` | 1000（详情页 `notes` 为 3500） |
+| `tools.*.description` | 1500 |
+| `rootGuide` | 1500 |
+| `rootNote` | 800 |
+| `errorHints.<CODE>` | 600 |
+| `skill.description` | 1000 |
+| `skill.append` | 4000 |
+| `skill.bodyFile` 文件内容 | 20000 |
+
+**未知或无效的键**（不存在的分组、动作、错误码，类型不对，`bodyFile` 不是绝对路径等）不会报错，只是被忽略。`errorHints` 只覆盖有固定文案的错误码；`INVALID_ARGS`、`ACTION_FAILED`、`UNKNOWN_ACTION` 的提示依上下文生成，不可覆盖，`DEADLINE` 对会改变状态的动作仍使用“结果未知，先核对再重试”的固定提示。
+
+**诊断**：`browser_call({action:"runtime.status"})` 的结果有 `prompts` 段，列出生效的覆盖项（只有键名和长度，不回显全文）、被忽略的条目及原因、`bodyFile` 回退、L0 与各目录层的估算 token。设置卡片的“提示文本”分区显示同样的信息。
+
+**热更新范围**：
+- 目录（根目录、分组、动作、子动作、详情页、搜索）、错误提示：下一次调用即生效，无需重启。
+- skill：开关、描述、正文文件和追加文本在下一次 `browser_index` / `browser_call` 时检测变化，注册或撤销 provider，或通过 provider 的 `invalidate()` 通知 Host；正文文件内容变化同样会被发现。
+- 两个常驻工具的 `description`，以及 `flat` 表面的各动作工具描述：Host 在注册时固定，**保存后需重启 profile 才生效**。
+
+**预算提醒**：默认 L0（两个常驻工具）约 325 token，预算 1500；`browser_index` 每一层（根、分组、动作、子动作、详情页）预算 1000 token。覆盖后超出预算不会被拒绝，但 `runtime.status` 与设置卡片会给出警告和实际数值。写得越长，每次对话常驻的上下文越多，建议先 `pnpm measure:tools` 看一眼。
+
+**不可配置的内容**：动作名、参数 schema、错误码、审批理由（审批弹窗里的措辞与权限模式挂钩，改写可能误导审批人）、`browser_call` 描述末尾的合规声明、结果里带参数的运行时警告文案（`warnings` 以 `code` 为稳定标识）、参数描述和示例（示例是被测试校验过的可执行调用）。
 
 ## 登录态复用
 

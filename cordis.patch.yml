@@ -8,6 +8,10 @@
 # DSH 0.1.7-rc.2 persists editable config in a separate top-level profile row;
 # placing config inside insert can make settings writes appear successful but
 # disappear on restart. Config schema defaults supply the initial values.
+#
+# Model-facing text (tool descriptions, root guide/note, summaries, error hints, skill) can be
+# overridden under `prompts` in that config row; `pnpm prompts:dump` prints every default in the
+# exact structure. See README "自定义提示文本".
 - insert:
     - id: browser
       name: '@anweat/dsh-browser'
