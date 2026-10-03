@@ -120,15 +120,14 @@ test('the skill provider matches the Host provider contract and serves the packa
 function hostWith(tools: any[]): Context {
   const root = new Context()
   root.provide('tools', { register(tool: any) { tools.push(tool); return () => {} } })
-  root.provide('settings', {})
   return root
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 40))
 
 test('the plugin does not depend on a skill service: it declares none and works without one', async () => {
-  assert.deepEqual(inject, ['tools', 'settings'])
-  assert.deepEqual((plugin as { inject: readonly string[] }).inject, ['tools', 'settings'])
+  assert.deepEqual(inject, ['tools'])
+  assert.deepEqual([...(plugin as { inject: readonly string[] }).inject], ['tools'])
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-noskill-'))
   const tools: any[] = []
   const host = hostWith(tools)

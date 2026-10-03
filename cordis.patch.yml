@@ -3,11 +3,15 @@
 #   dsh plugin --profile <name> add @anweat/dsh-browser
 # then boot the profile (the web profile has HMR disabled, so a restart applies it).
 #
+# Supports DSH 0.2.0-rc.2 only (see the peer ranges in package.json).
+#
 # Login state: prefer named `authProfiles` with explicit `allowedDomains` (see
 # README). `storageStatePath` remains as a legacy global fallback.
-# DSH 0.1.7-rc.2 persists editable config in a separate top-level profile row;
-# placing config inside insert can make settings writes appear successful but
-# disappear on restart. Config schema defaults supply the initial values.
+#
+# The Host's Settings service saves editable config as a separate top-level row of
+# the profile's own patch (`- id: browser` with `config`), and a patch replaces its
+# target row's whole `config`. So this insert row carries no config: the Config schema
+# defaults supply the initial values and the profile row holds the saved settings.
 #
 # Model-facing text (tool descriptions, root guide/note, summaries, error hints, skill) can be
 # overridden under `prompts` in that config row; the settings card's "Export default text" (or `pnpm prompts:dump` in a

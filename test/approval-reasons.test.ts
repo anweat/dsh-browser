@@ -50,7 +50,6 @@ test('the real Host hook looks the asset up and puts its name and revision in th
   const decide = async (args: Record<string, unknown>, action: string) => {
     const root = new Context()
     root.provide('tools', { register() { return () => {} } })
-    root.provide('settings', {})
     const fiber = root.plugin(plugin as never, { snapshotDir, automationMode: 'standard', automationAssets: { directory, persistenceMode: 'manual' } } as never)
     await new Promise(resolve => setTimeout(resolve, 40))
     try {

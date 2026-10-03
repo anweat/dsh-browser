@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import fs from 'node:fs'
+import path from 'node:path'
 import { registerHooks } from 'node:module'
 
 // The primitives package pulls a chain of client-only runtime deps (React
@@ -104,6 +106,12 @@ type ConfigForm<T> = {
 
 test('browser settings card key matches the Host settings namespace', () => {
   assert.equal(SETTINGS_NAMESPACE, 'browser')
+})
+
+test('the settings namespace is the loader entry id of the bundle patch row', () => {
+  // The Host keys the settings page by the entry id; the card binds to the same string.
+  const patch = fs.readFileSync(path.join(import.meta.dirname, '..', 'cordis.patch.yml'), 'utf8')
+  assert.match(patch, new RegExp('id:\\s*' + SETTINGS_NAMESPACE + '\\b'))
 })
 
 test('browser settings panel covers every public browser configuration field', () => {

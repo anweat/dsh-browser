@@ -13,56 +13,62 @@
 | `0.1.12` 及更早的维护版本 | `dsh-v0.1.1-rc.2` 至 `dsh-v0.1.2-rc.1` | 旧基线；不与新插件混装 |
 | `0.1.15` | `dsh-v0.1.7-rc.2` | 精确锁定该宿主版本；组合安装、真实 Web profile 与设置持久化已验证 |
 | `0.1.17` | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | peer 收口为「实测过的两条线」（上界 `<0.2.1-0`）；在 `0.2.0-rc.2` 上完成 typecheck、构建、52 项测试与真实挂载验证；补充浏览器缓存路径配置说明，并新增 peer 双解析模式检查 |
-| `0.2.0-rc.1`（npm `next`） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 325 项测试、64 项真实浏览器 e2e 与真实 Web profile 验证 |
+| `0.2.0-rc.1`（预发布，历史记录） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 325 项测试、64 项真实浏览器 e2e 与真实 Web profile 验证 |
+| `0.2.0` | `dsh-v0.2.0-rc.2` | 第一个面向 DSH 桌面版 0.2.0 线的正式版，也是后续开发的基底。**只支持 `dsh-v0.2.0-rc.2` 这一条线**（peer `>=0.2.0-rc.2 <0.2.1-0`）：去掉为更旧宿主保留的兼容分支（`settings.register` 的 live scope 回退等），并去掉对 `settings` 服务的必需依赖（只声明 `inject: ['tools']`，没有 Settings 服务的组合里也能启动）；不改工具、动作、schema、文本与审批规则。在 `0.2.0-rc.2` 上完成 327 项测试、64 项真实浏览器 e2e 与 peer 双解析模式检查。旧宿主（0.1.7 线，`dsh-v0.1.7-rc.2`）继续使用 `0.1.17` |
 
 `0.1.17` 把 DSH 运行时依赖由精确锁定改为范围声明（`^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.1-0`），
-使同一份包可装在 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代宿主上（两代之间的 `defineTool`、
-凭据引用、配置表单与客户端槽位契约在本插件用到的范围内保持兼容）。
-范围只声明**实测过的两条线**，既不写成 `>=0.1.7-rc.2 <0.3.0`，也不写成一路放行到 0.3.0 的 `^0.2.0-rc.1`：
+使同一份包可装在 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代宿主上。`0.2.0-rc.1` 起的新功能（动作体系、skill、recipe v2、
+资产版本、提示文本配置等）只在 `0.2.0-rc.2` 上验证过，没有在 `0.1.7-rc.2` 上跑过，所以 `0.2.0` 把范围收成**只覆盖
+`0.2.0-rc.2` 这条线**：`>=0.2.0-rc.2 <0.2.1-0`，正式版 `0.2.0` 起即采用这个范围。`0.1.17` 的范围不变，旧宿主继续用它。
+
+这个写法同时满足两种解析，缺一不可：
 
 - 宿主的组装期校验用的是 `semver.satisfies(host, range, { includePrerelease: true })`，所以「单范围能不能过宿主」不是关键。
   真正决定装机成败的是 npm/pnpm 的**默认** semver：预发布版本只有在某个比较符自带同号（同 major.minor.patch）预发布时才被判为满足。
-  于是 `>=0.1.7-rc.2 <0.2.1-0` 这种写法过得了宿主校验，却会让 `dsh plugin add` 报 ERESOLVE（上界 tuple 是 0.2.1，接不住 0.2.0-rc.2）；
-  而 `>=0.2.0-rc.1` 这个比较符是**承重**的，必须保留。
-- `0.1.5 → 0.1.7` 曾一次性打断所有按 `0.1.5-alpha.1` 构建的插件。所以 `^0.2.0-rc.1`（等于说整个 0.2.x 都兼容）
-  是对没测过版本的承诺；收口到 `<0.2.1-0` 后，若 0.2.1 真出现破坏，会在**组装期**直接报
-  `is incompatible with dsh 0.2.1` 并点名，而不是拖到用户机器上变成运行期怪错。
+  于是 `>=0.1.7-rc.2 <0.2.1-0` 这种写法过得了宿主校验，却会让 `dsh plugin add` 报 ERESOLVE（下界 tuple 是 0.1.7，接不住 0.2.0-rc.2）；
+  `>=0.2.0-rc.2` 这个比较符自带 `0.2.0` 的预发布，是**承重**的，必须保留。
+- 上界是 `<0.2.1-0` 而不是 `<0.2.1`：后者放行 `0.2.1-alpha.1` 这类 0.2.1 的预发布。收口后，若 0.2.1 真出现破坏，
+  会在**组装期**直接报 `is incompatible with dsh 0.2.1` 并点名，而不是拖到用户机器上变成运行期怪错
+  （`0.1.5 → 0.1.7` 曾一次性打断所有按 `0.1.5-alpha.1` 构建的插件）。
 - 范围只表示「测过哪些」，不等于承诺不破坏；真正的防线是每换一个 DSH 版本重跑一遍这套验证。
-  `pnpm run test:peers`（已并入 `pnpm verify`）用两种解析模式逐个断言受管 peer，并自带 `--selftest` 已知行为自校验。
+  `pnpm run test:peers`（已并入 `pnpm verify`）用两种解析模式逐个断言受管 peer：`0.2.0-rc.2` 必须通过，
+  `0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.1-alpha.1` 必须被拒绝；并自带 `--selftest` 已知行为自校验。
+
 `0.1.15` 使用 DSH 新客户端分包：状态存储来自
 `dsh-client-store`，设置契约来自 `dsh-client-ui-settings`，客户端 Context
 来自 Cordis。npm 上 `0.1.15-alpha.2` 仍声明旧版 DSH peer，不能与本版混用。
 
-启动期设置解析对宿主版本自适应：旧宿主仍提供 `settings.register(ns, schema, opts)`
-时沿用 live scope；`dsh-v0.1.7-rc.2` 起移除了该方法，设置页改由 Loader 条目的
-`Config` schema 直接派生，插件改为读取宿主注入的条目配置。
+设置的读取不再对宿主版本做适配：Host 半边直接使用 Loader 传给 `apply` 的条目配置（设置页由条目的 `Config` schema 派生，
+条目 id 为 `browser`），浏览器设置卡片使用 `ConfigForm`/`ctx.configForms`，`devDependencies` 锁定 `0.2.0-rc.2`。
+可编辑字段都是 `.volatile()`：保存后新值写入运行中的引用，但浏览器进程、工具暴露与审批规则在启动时一次读取，
+所以保存后仍需重启 profile 才生效（只有提示文本覆盖里的目录、错误提示等按调用实时读取，见「自定义提示文本」）。
 
-浏览器设置卡片则只适配 `dsh-v0.1.7-rc.2`：`SettingsScope`/`ctx.settingsScope`
-（≤ `dsh-v0.1.5-alpha.1`）与 `ConfigForm`/`ctx.configForms`（`dsh-v0.1.7-rc.2`+）
-是互斥的客户端契约，没有一份源码能同时编译两者，因此 `devDependencies` 锁定
-`0.1.7-rc.2`。Host 半边的自适应是优雅降级，不是受支持目标。
+插件只声明 `inject: ['tools']`，**不依赖宿主的 `settings` 服务**：Cordis 4.0.4 把声明了的 `inject` 一律当作必需，若声明 `settings`，
+在没有该服务的组合（如 sdk-minimal，或关了 settings 行的 profile）里插件会一直挂起。插件的 Host 半边从不读取 `ctx.settings`，
+配置来自 Loader 条目；没有 Settings 服务时按 `Config` 默认值运行，设置卡片只是不显示（客户端只在宿主提供 `browser` 命名空间时才挂载它）。
 
 ## 安装
 
 ```bash
-# 稳定版（旧的 browser_* 工具体系）：
+# 默认安装（新的 browser_index / browser_call 工具体系，面向 dsh-v0.2.0-rc.2 宿主）：
+dsh plugin --profile web add @anweat/dsh-browser@0.2.0
+# 宿主仍是 0.1.7 线（dsh-v0.1.7-rc.2）时，固定安装 0.1.17（旧的 browser_* 工具体系）：
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17
-# 预发布版（新的 browser_index / browser_call 工具体系）：
-dsh plugin --profile web add @anweat/dsh-browser@next
 # 或本地目录 / tarball：
 dsh plugin --profile web add ./dsh-browser
 # 重启（web profile 关闭了 HMR）：
 dsh --profile web
 ```
 
-> 本版支持 `dsh-v0.1.7-rc.2` 至 `dsh-v0.2.0-rc.2`；范围之外的宿主版本未经验证。
+> `0.2.0` 只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`）；范围之外的宿主版本未经验证，
+> 旧宿主（`dsh-v0.1.7-rc.2` 线）请固定使用 `0.1.17`。预发布通道 `@next` 不再用于安装，`0.2.0-rc.1` 仅作历史记录。
 > 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
 ## 从旧版本升级
 
-### 升级到 0.2.0-rc.1
+### 升级到 0.2.0
 
 - 旧的 `browser_open`、`browser_click` 等工具名不再注册。模型通过 `browser_index` 查看动作目录，再用 `browser_call` 执行，例如 `{"action":"act.click","args":{...}}`。需要一次性看到全部动作时，把 `toolSurface` 设为 `flat`。
 - 其他插件或自定义提示词里如果写了旧工具名，需要同步修改。Web Search Pro 请使用提示词已更新的版本。
@@ -70,6 +76,11 @@ dsh --profile web
 - 激活资产现在要求当前版本有通过的测试记录。旧资产加载时会自动补一条“旧版”记录。
 - **声明了输入的资产，激活门槛提高了。**新增策略项 `automationAssets.minInputSetsForActivation`（默认 2，范围 1–5）：带 `inputSchema` 或 `inputNames` 的资产，当前版本的通过凭据必须覆盖至少这么多组不同输入（`automation.develop` 的 `test` 传 `inputSets`；设置面板的“测试输入 JSON”填 2 到 5 个对象的数组），否则激活被拒绝，错误里写明原因。只用一组输入测试通过的 recipe 可能把那组输入写死，换一组就失败。没有输入的资产不受影响；升级前已通过测试的旧资产带“旧版”凭据，视为满足，不会因升级而无法激活。要恢复旧行为，把它设为 `1`。
 - `BrowserService` 上供其他插件调用的方法（`render`、`snapshot`、`searchResults`、`opencli`、`close`）签名不变。
+- **依赖范围收窄到 DSH 0.2.0 线。**peer 范围为 `>=0.2.0-rc.2 <0.2.1-0`（插件自身不再覆盖 `0.1.7-rc.2` 与 `0.2.0-rc.1`）。
+- 先确认宿主是 `dsh-v0.2.0-rc.2`。宿主更旧时，`dsh plugin add` 会因 peer 不满足而拒绝，或在组装期点名报 `incompatible`；这类宿主继续使用 `0.1.17`。
+- 工具、动作、参数 schema、文本与审批规则都没有变化，已保存的资产、配置与提示文本覆盖照常使用。
+- 设置的保存与重启生效路径不变：在设置卡片保存后重启 profile 生效。
+- 不再要求宿主提供 `settings` 服务：插件只声明 `inject: ['tools']`；有 Settings 服务时设置卡片照常显示，没有时按配置默认值运行。
 
 ### 升级到 0.1.17
 
