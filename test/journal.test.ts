@@ -148,11 +148,21 @@ test('a service without a journal (a double, an older service) still dispatches 
   assert.equal(reply.seq, undefined)
 })
 
-test('each session has its own journal, and the real service releases it with the session', () => {
+test('each session has its own journal, and the real service releases it when the session is evicted or the service closes', async () => {
   const service = new BrowserService(resolveConfig({ enabled: true, maxSessions: 1 } as never))
+  const internals = service as any
   const a = service.journalFor('session:a')
   const b = service.journalFor('session:b')
   assert.notEqual(a, b)
   assert.equal(service.journalFor('session:a'), a)
   assert.equal(service.pageStamp('session:a'), undefined, 'no page: nothing to stamp, nothing created')
+  assert.equal(internals.sessions.size, 0, 'a journal does not create a browser session')
+  // A session slot over the limit evicts the least recently used session, and its journal goes with it.
+  internals.state('session:a')
+  internals.state('session:b')
+  await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(internals.journals.has('session:a'), false)
+  assert.equal(internals.journals.has('session:b'), true)
+  await service.close()
+  assert.equal(internals.journals.size, 0)
 })
