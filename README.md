@@ -13,6 +13,7 @@
 | `0.1.12` 及更早的维护版本 | `dsh-v0.1.1-rc.2` 至 `dsh-v0.1.2-rc.1` | 旧基线；不与新插件混装 |
 | `0.1.15` | `dsh-v0.1.7-rc.2` | 精确锁定该宿主版本；组合安装、真实 Web profile 与设置持久化已验证 |
 | `0.1.17` | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | peer 收口为「实测过的两条线」（上界 `<0.2.1-0`）；在 `0.2.0-rc.2` 上完成 typecheck、构建、52 项测试与真实挂载验证；补充浏览器缓存路径配置说明，并新增 peer 双解析模式检查 |
+| `0.2.0-rc.1`（npm `next`） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 292 项测试、59 项真实浏览器 e2e 与真实 Web profile 验证 |
 
 `0.1.17` 把 DSH 运行时依赖由精确锁定改为范围声明（`^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.1-0`），
 使同一份包可装在 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代宿主上（两代之间的 `defineTool`、
@@ -44,7 +45,10 @@
 ## 安装
 
 ```bash
+# 稳定版（旧的 browser_* 工具体系）：
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17
+# 预发布版（新的 browser_index / browser_call 工具体系）：
+dsh plugin --profile web add @anweat/dsh-browser@next
 # 或本地目录 / tarball：
 dsh plugin --profile web add ./dsh-browser
 # 重启（web profile 关闭了 HMR）：
@@ -57,6 +61,16 @@ dsh --profile web
 > 里对齐版本后重装即可。
 
 ## 从旧版本升级
+
+### 升级到 0.2.0-rc.1
+
+- 旧的 `browser_open`、`browser_click` 等工具名不再注册。模型通过 `browser_index` 查看动作目录，再用 `browser_call` 执行，例如 `{"action":"act.click","args":{...}}`。需要一次性看到全部动作时，把 `toolSurface` 设为 `flat`。
+- 其他插件或自定义提示词里如果写了旧工具名，需要同步修改。Web Search Pro 请使用提示词已更新的版本。
+- 已保存的 recipe 和 userscript 资产照常可读、可运行；升级到 v2 用 `automation.develop` 的 `convert`，它只生成新草稿，不改原资产。
+- 激活资产现在要求当前版本有通过的测试记录。旧资产加载时会自动补一条“旧版”记录。
+- `BrowserService` 上供其他插件调用的方法（`render`、`snapshot`、`searchResults`、`opencli`、`close`）签名不变。
+
+### 升级到 0.1.17
 
 Web Search Pro 与浏览器插件应同步升级；面向 `dsh-v0.1.7-rc.2` 不要混用仍声明旧 peer 的 Browser `0.1.15-alpha.2`；两者都升到 `0.1.17` 即可。
 
