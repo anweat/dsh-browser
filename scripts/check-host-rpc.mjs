@@ -1,4 +1,8 @@
-/** Exercise compiled asset routes on an exact installed DSH host's real auth/HTTP stack. */
+/**
+ * Exercise the compiled asset RPC channel on an exact installed DSH host's real auth/HTTP stack.
+ * Usage: node scripts/check-host-rpc.mjs <dir whose node_modules resolve the host's cordis, connection and webserver>
+ * The plugin owns the private channel `/dsh-browser-assets`; the Host hands its handler the endpoint relative to it.
+ */
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
@@ -31,7 +35,7 @@ try {
     writeHead(_status, values) { if (values['set-cookie']) headers.cookie = values['set-cookie'].split(';')[0] }, end() {},
   })
   assert.ok(headers.cookie)
-  const request = (signed, method = 'dsh-browser-assets/snapshot') => fetch(base + '/api/' + method, {
+  const request = (signed, method = 'snapshot') => fetch(base + '/dsh-browser-assets/' + method, {
     method: 'POST', headers: signed ? headers : { 'content-type': 'application/json', connection: 'close' },
     body: JSON.stringify({ type: 'client-request', rpcId: 'probe', method, payload: {} }),
   })
@@ -39,8 +43,11 @@ try {
   const response = await request(true)
   assert.equal(response.status, 200)
   assert.deepEqual((await response.json()).result, { ok: true, value: { assets: [] } })
-  assert.equal((await request(true, 'dsh-browser-assets/unknown')).status, 404)
+  // An unknown endpoint of our own channel is an RPC-level not-found; only a removed channel is an HTTP 404.
+  const unknown = await request(true, 'unknown')
+  assert.equal(unknown.status, 200)
+  assert.equal((await unknown.json()).result.error.code, 'not-found')
   await fiber.dispose()
   assert.equal((await request(true)).status, 404)
-  console.log('PASS: compiled asset routes; Connection before WebServer; authenticated access, unsigned rejection, exact routing, disposal')
+  console.log('PASS: compiled asset routes; Connection before WebServer; authenticated access, unsigned rejection, own-channel routing, disposal')
 } finally { await root.fiber.dispose() }
