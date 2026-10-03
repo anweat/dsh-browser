@@ -11,14 +11,6 @@ import { Config } from './config.ts';
 export declare const name = "dsh-browser";
 export declare const inject: string[];
 /**
- * Loader entry id of this plugin's row in `cordis.patch.yml`, which is also the
- * settings namespace the plugin owns. On hosts whose `SettingsForms` still
- * exposes `register()` this is the scope namespace; on newer hosts it is the
- * profile patch entry id whose `Config` schema the settings page is derived
- * from. Keep it in sync with the bundle patch.
- */
-export declare const BROWSER_SETTINGS_NS = "browser";
-/**
  * The object cordis actually receives.
  *
  * `Loader.unwrapExports(exports)` normalizes a module to ONE plugin object via
