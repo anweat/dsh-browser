@@ -1,6 +1,8 @@
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import type { Context } from './context-types.ts';
 import { type BrowserCardState } from './form.ts';
+import type { PromptTextFieldId } from './prompts-form.ts';
+import { type PromptsStatusState } from './prompts-status-client.ts';
 import { SETTINGS_NAMESPACE } from './settings-namespace.ts';
 import { type AutomationAssetsState } from './automation-assets-client.ts';
 import type { AutomationAsset, AutomationAssetStatus } from '../automation-assets.ts';
@@ -16,6 +18,12 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
     resetField: (field: string) => void;
     save: () => void;
     discard: () => void;
+    editPromptText: (id: PromptTextFieldId, text: string) => void;
+    setPromptSkillEnabled: (enabled: boolean) => void;
+    editPromptExtras: (text: string) => void;
+    resetPromptExtras: () => void;
+    usePromptsStatus: <R>(selector: (snapshot: PromptsStatusState) => R) => R;
+    refreshPromptsStatus: () => void;
     useAutomationAssets: <R>(selector: (snapshot: AutomationAssetsState) => R) => R;
     refreshAutomationAssets: () => void;
     selectAutomationAsset: (id?: string) => void;

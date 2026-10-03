@@ -48,6 +48,7 @@ export interface AutomationAssetsState {
     selected?: AutomationAsset;
     editor: EditorState;
 }
+export declare function localStore<T>(initial: T): SnapshotStore<T>;
 /** A failed RPC call, with the structured details the Host attached (`errorCode`, `reason`, ...). */
 export declare class AssetCallError extends Error {
     readonly details: Record<string, unknown>;

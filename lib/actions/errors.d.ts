@@ -5,6 +5,12 @@
  * @module dsh-browser/actions/errors
  */
 import { type ActionErrorBody, type ErrorCode } from './types.ts';
+/** The built-in hint of every error code that has one fixed text. These are what `prompts.errorHints` can replace. */
+export declare const DEFAULT_ERROR_HINTS: Readonly<Partial<Record<ErrorCode, string>>>;
+type HintSource = () => Readonly<Partial<Record<string, string>>>;
+/** Install a live source of hint overrides. @returns the function that removes it. */
+export declare function installErrorHints(source: HintSource): () => void;
+/** The hint for a code: the configured override, else the built-in text (undefined when the code has none). */
 export declare function hintFor(code: ErrorCode): string | undefined;
 /** Thrown by a recipe `assert` step whose condition did not become true in time. */
 export declare class RecipeAssertionError extends Error {
@@ -42,3 +48,4 @@ export declare function blockedBeforeAction(error: unknown): boolean;
 export declare function mapError(error: unknown, action: string, opts?: {
     signal?: AbortSignal;
 }): ActionErrorBody;
+export {};

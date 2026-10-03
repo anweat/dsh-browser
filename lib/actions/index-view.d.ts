@@ -8,6 +8,7 @@
  */
 import { type ActionDef } from './types.ts';
 import { type AutomationMode, type ExposureOptions } from '../freedom.ts';
+import type { ResolvedPrompts } from '../prompts.ts';
 export interface IndexEnvironment {
     mode: AutomationMode;
     options: ExposureOptions;
@@ -20,6 +21,8 @@ export interface IndexEnvironment {
         opencliInstalled?: boolean;
         opencliEnabled?: boolean;
     };
+    /** Deployment overrides of the text (`prompts` configuration); absent means the built-in text everywhere. */
+    prompts?: ResolvedPrompts;
 }
 /** The fallback guide shown at the root when no skill service is present (kept under ~300 tokens). */
 export declare const COMPACT_GUIDE: string;

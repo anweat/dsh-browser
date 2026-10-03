@@ -20,5 +20,7 @@ import type { AutomationAssetStore } from './automation-assets.ts';
 export interface ToolRuntime {
     /** Whether the `dsh-browser` skill is currently registered; read at call time. */
     skillAvailable?: () => boolean;
+    /** Bring the skill registration in line with the current `prompts.skill` (called at the start of each index/call). */
+    refreshSkill?: () => void;
 }
 export declare function registerTools(ctx: Context, config: ResolvedConfig, service: BrowserService, assets?: AutomationAssetStore, runtime?: ToolRuntime): void;

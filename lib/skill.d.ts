@@ -9,6 +9,8 @@
  * @module dsh-browser/skill
  */
 import type { Context } from '@deepseek-ai/cordis';
+import type { PromptsSource } from './prompts.ts';
+import { SKILL_BODY_FILE_LIMIT } from './prompt-limits.ts';
 export declare const SKILL_NAME = "dsh-browser";
 /** `assets/skills/dsh-browser/`, resolved next to `src/` or the built `lib/`. */
 export declare const SKILL_DIR: string;
@@ -23,8 +25,30 @@ export declare function readSkill(dir?: string): {
     description: string;
     body: string;
 };
-/** A provider object shaped like the Host's `SkillProvider` (declared locally to avoid a build-time dependency). */
-export declare function createSkillProvider(dir?: string): {
+export { SKILL_BODY_FILE_LIMIT };
+/**
+ * Read a replacement skill body. A leading front matter block is dropped (the name and description come from the
+ * packaged file or `prompts.skill.description`). Never throws: a missing, unreadable, empty or oversized file is
+ * reported as a reason, and the caller falls back to the packaged body.
+ */
+export declare function loadSkillBodyFile(file: string): {
+    ok: true;
+    body: string;
+} | {
+    ok: false;
+    reason: string;
+};
+/** What the skill says right now: the packaged file with the `prompts.skill` overrides applied. */
+export declare function currentSkill(dir?: string, prompts?: PromptsSource): {
+    name: string;
+    description: string;
+    body: string;
+};
+/**
+ * A provider object shaped like the Host's `SkillProvider` (declared locally to avoid a build-time dependency).
+ * It reads the packaged file and the `prompts.skill` overrides on every call, so it is never stale.
+ */
+export declare function createSkillProvider(dir?: string, prompts?: PromptsSource): {
     name: string;
     list: () => Promise<{
         name: string;
@@ -58,11 +82,19 @@ export declare function createSkillProvider(dir?: string): {
         content: string;
     }>;
 };
+export interface SkillRegistration {
+    /** Whether the skill is registered with the Host right now (false without a skill service, or when disabled). */
+    isAvailable: () => boolean;
+    /**
+     * Bring the registration in line with the current `prompts.skill`: register or withdraw the provider when `enabled`
+     * changed, and tell the Host (`invalidate()`) when the description, body file or appended text changed. Cheap; the
+     * tools call it on every use, which is how a config edit reaches the skill without a restart.
+     */
+    refresh: () => void;
+}
 /**
  * Register the skill when the Host provides a skill registry, and track whether
  * it is registered so the index can fall back to its compact guide otherwise.
- * @returns a reader for "is the skill currently available".
+ * With `prompts.skill.enabled=false` nothing is registered.
  */
-export declare function registerSkillWhenAvailable(ctx: Context, dir?: string): {
-    isAvailable: () => boolean;
-};
+export declare function registerSkillWhenAvailable(ctx: Context, dir?: string, prompts?: PromptsSource): SkillRegistration;

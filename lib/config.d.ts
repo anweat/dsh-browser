@@ -7,10 +7,38 @@ import type { AuthProfileConfig } from './auth-profiles.ts';
 import type { RulePackConfig } from './rule-packs.ts';
 import { type AutomationMode, type ToolSurface } from './freedom.ts';
 import { type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts';
+import { type PromptsSource } from './prompts.ts';
 import { type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts';
 export declare const BROWSER_RUNTIMES: readonly ["playwright", "patchright"];
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number];
 export declare function resolveBrowserRuntime(value: unknown): BrowserRuntime;
+/** The `prompts` configuration (see `src/prompts.ts`). Unknown keys are tolerated at parse time and reported as diagnostics. */
+export interface PromptsInput {
+    tools?: {
+        browser_index?: {
+            description?: string;
+        };
+        browser_call?: {
+            description?: string;
+        };
+    };
+    rootGuide?: string;
+    rootNote?: string;
+    groups?: Record<string, {
+        summary?: string;
+    }>;
+    actions?: Record<string, {
+        summary?: string;
+        notes?: string;
+    }>;
+    errorHints?: Record<string, string>;
+    skill?: {
+        enabled?: boolean;
+        description?: string;
+        bodyFile?: string;
+        append?: string;
+    };
+}
 export interface Config {
     /** Whether the browser service is active. */
     enabled: boolean;
@@ -43,6 +71,11 @@ export interface Config {
     usagePolicy?: UsagePolicyInput;
     /** Reusable automation capture, review, activation, and retrieval policy. */
     automationAssets?: AutomationAssetPolicyInput;
+    /**
+     * Deployment overrides of the model-facing text (tool descriptions, root guide, catalog summaries and notes,
+     * error hints, the skill). Every field is optional; see `prompts:dump` for the full structure with defaults.
+     */
+    prompts?: PromptsInput;
     /** Lazily run `playwright install chromium` when the browser is missing. */
     autoInstall: boolean;
     /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
@@ -75,6 +108,8 @@ export interface ResolvedConfig {
     toolSurface: ToolSurface;
     usagePolicy: UsagePolicy;
     automationAssets: AutomationAssetPolicy;
+    /** Live view of the `prompts` overrides: `current()` reads the configuration at call time. */
+    prompts: PromptsSource;
     autoInstall: boolean;
     snapshotDir: string;
     verbose: boolean;

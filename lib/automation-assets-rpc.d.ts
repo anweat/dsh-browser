@@ -7,4 +7,5 @@ export declare class AssetRpcFailure extends Error {
     readonly details: Record<string, unknown>;
     constructor(message: string, details: Record<string, unknown>);
 }
-export declare function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService): void;
+/** `promptsStatus` answers the settings card's "prompt text" section: the overrides in force, diagnostics and the L0 estimate. */
+export declare function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService, promptsStatus?: () => unknown): void;
