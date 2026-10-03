@@ -24,6 +24,19 @@ const WEB_LOCAL_MUTATIONS = new Set(['web_cache_clear'])
 
 const clip = (text: string, max = 120): string => text.length > max ? text.slice(0, max) + '…' : text
 
+/** An asset as the approval prompt names it: enough to recognise it without the full UUID. */
+export interface AssetRef { id: string; name: string; revision: number }
+
+/**
+ * `"Host check: docs search" r1 (5fdc912d)`: the name (control characters and line breaks flattened, cut to 60 characters,
+ * quoted so it reads as data), the revision, and the first 8 characters of the id. The name is whatever a model saved, so
+ * it is never trusted to be one line.
+ */
+export function assetLabel(asset: AssetRef): string {
+  const name = clip(asset.name.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim(), 60)
+  return `${JSON.stringify(name)} r${asset.revision} (${asset.id.slice(0, 8)})`
+}
+
 /** Short, human-readable description of an action's target for approval prompts. */
 function targetLabel(args: unknown): string {
   const input = (args && typeof args === 'object' ? args : {}) as { selector?: unknown; locator?: unknown }
@@ -68,9 +81,10 @@ export function recipeStepsDecision(name: string, steps: readonly AnyRecipeStep[
  * @param mode - the configured automationMode.
  * @param assetKind - for `automation.run` and `automation.develop` test, the kind of the asset about to run.
  * @param draftSteps - for `automation.develop` test of a recipe, the steps the draft would replay.
+ * @param asset - for the same two, the asset itself, so the approval prompt names it instead of showing a bare id.
  */
 export function browserPolicyDecision(
-  name: string, args: unknown, mode: AutomationMode = 'standard', assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[],
+  name: string, args: unknown, mode: AutomationMode = 'standard', assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[], asset?: AssetRef,
 ): BrowserPolicyDecision {
   const action = findAction(name)
   if (!action && (name.startsWith('browser_') || /^[a-z]+\.[a-z_]+$/.test(name))) {
@@ -132,7 +146,7 @@ export function browserPolicyDecision(
       }
       case 'asset-run': {
         const id = (args as { id?: unknown })?.id
-        const label = typeof id === 'string' ? ` ${clip(id, 60)}` : ''
+        const label = asset ? ` ${assetLabel(asset)}` : typeof id === 'string' ? ` ${clip(id.replace(/\s+/g, ' '), 60)}` : ''
         if (mode === 'read-only') return { kind: 'deny', reason: `Reusable automation execution is disabled by automationMode=${mode}` }
         if (mode === 'unrestricted' || (mode === 'autonomous' && assetKind === 'recipe')) return { kind: 'allow' }
         return { kind: 'ask', reason: `${name}${label}: Run an active reusable browser automation asset` }
@@ -149,7 +163,7 @@ export function browserPolicyDecision(
             const byRecipeRule = recipeStepsDecision(name + ' test', draftSteps, mode)
             if (byRecipeRule.kind === 'allow') return byRecipeRule
           }
-          return { kind: 'ask', reason: `${name} test: Replay a reusable automation draft in a real browser context` }
+          return { kind: 'ask', reason: `${name} test${asset ? ' ' + assetLabel(asset) : ''}: Replay a reusable automation draft in a real browser context` }
         }
         if (mode === 'standard') return { kind: 'ask', reason: `${name} ${develop || '(unspecified)'}: Save a bounded local reusable automation draft` }
         return { kind: 'allow' }

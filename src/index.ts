@@ -97,7 +97,7 @@ export function apply(ctx: Context, config: Config): void {
       const callArgs = (call.args ?? {}) as { id?: unknown; action?: unknown }
       const replaysAsset = call.action === 'automation.run' || (call.action === 'automation.develop' && callArgs.action === 'test')
       const target = replaysAsset && typeof callArgs.id === 'string' ? assets.get(callArgs.id) : undefined
-      return browserPolicyDecision(call.action, call.args, resolved.automationMode, target?.kind, call.action === 'automation.develop' ? target?.recipe : undefined)
+      return browserPolicyDecision(call.action, call.args, resolved.automationMode, target?.kind, call.action === 'automation.develop' ? target?.recipe : undefined, target ? { id: target.id, name: target.name, revision: target.revision } : undefined)
     }
     return browserPolicyDecision(exec.name, exec.arguments, resolved.automationMode)
   })
