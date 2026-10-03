@@ -11,6 +11,7 @@ import {
   hostInDomains, type BrowserRecipeStepV2, type InputSpec, type OutputSpec, type PendingDisambiguation, type Postcondition,
 } from './automation-v2.ts'
 import { validateUserscript } from './scripts.ts'
+import { inputSetShortfall } from './activation-rules.ts'
 
 export const ASSET_PERSISTENCE_MODES = ['off', 'manual', 'suggest', 'auto-draft'] as const
 export type AssetPersistenceMode = typeof ASSET_PERSISTENCE_MODES[number]
@@ -311,16 +312,6 @@ export class ActivationRefusedError extends Error {
     super(message)
     this.name = 'ActivationRefusedError'
   }
-}
-
-/**
- * How many different input sets the credential's passing test covered: its passed sets, one for a plain single run,
- * and enough for any requirement when it is a `legacy` credential synthesized from data written before input sets
- * existed (so upgrading never strands an already-tested asset).
- */
-export function inputSetsCovered(credential: TestCredential): number {
-  if (credential.legacy) return Number.POSITIVE_INFINITY
-  return credential.inputSets ? credential.inputSets.filter(entry => entry.passed).length : 1
 }
 
 function safeDomain(url: string): string {
@@ -696,12 +687,9 @@ export class AutomationAssetStore {
     if (latest.contentHash !== computeContentHash(asset)) {
       throw new ActivationRefusedError('content-changed', `automation asset must pass testing before activation: the passed test of revision ${asset.revision} covered different content than the asset has now; save and test it again`)
     }
-    const declared = Math.max(asset.inputSchema?.length ?? 0, asset.inputNames.length)
-    if (declared > 0) {
-      const covered = inputSetsCovered(latest)
-      if (covered < this.policy.minInputSetsForActivation) {
-        throw new ActivationRefusedError('insufficient-input-sets', `automation asset declares ${declared} input(s), so its passing test must cover at least ${this.policy.minInputSetsForActivation} different input sets (automationAssets.minInputSetsForActivation), but the test of revision ${asset.revision} covered ${covered}. A recipe written against one input can hard-code it. Test again with ${this.policy.minInputSetsForActivation} to 5 different input objects (automation.develop test with inputSets, or a JSON array in the panel's test inputs)`)
-      }
+    const shortfall = inputSetShortfall(asset, latest, this.policy.minInputSetsForActivation)
+    if (shortfall) {
+      throw new ActivationRefusedError('insufficient-input-sets', `automation asset declares ${shortfall.declared} input(s), so its passing test must cover at least ${shortfall.required} different input sets (automationAssets.minInputSetsForActivation), but the test of revision ${asset.revision} covered ${shortfall.covered}. A recipe written against one input can hard-code it. Test again with ${shortfall.required} to 5 different input objects (automation.develop test with inputSets, or a JSON array in the panel's test inputs)`)
     }
     if (asset.origin?.unmapped) throw new ActivationRefusedError('incomplete-draft', `automation draft is incomplete: ${asset.origin.unmapped} action(s) of the exploration it was built from (journal seq ${asset.origin.fromSeq}-${asset.origin.toSeq}) could not become steps. Finish the recipe yourself and save it, test it, then activate`)
     if (asset.domains.length < 1) throw new ActivationRefusedError('no-domain', 'automation asset must declare at least one domain before activation')

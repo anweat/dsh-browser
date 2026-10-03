@@ -16,9 +16,12 @@ export function rpcFixture(behavior: () => Behavior = () => ({}), promptsStatus?
   const store = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual' }))
   /** The steps each replay actually ran, so a test can tell which content was tested. */
   const recipeRuns: AnyRecipeStep[][] = []
+  /** The options each replay was asked with (`isolated` for a fresh context). */
+  const recipeOptions: Record<string, any>[] = []
   const service = {
     async recipe(steps: AnyRecipeStep[], opts: Record<string, any>) {
       recipeRuns.push(structuredClone(steps))
+      recipeOptions.push({ isolated: opts.isolated, session: opts.session })
       const { page } = fakePage(behavior())
       const run = await runRecipe(page, steps, shot, opts.signal, { legacy: opts.legacyRecipe, schemaVersion: opts.schemaVersion, postconditions: opts.postconditions, allowedDomains: opts.allowedDomains })
       return { url: URL, title: 'T', text: 'page text', ...run, steps: run.completedSteps }
@@ -36,6 +39,6 @@ export function rpcFixture(behavior: () => Behavior = () => ({}), promptsStatus?
   /** The same handler as the client sees it: `rpc.call(channel, endpoint, payload)`, with every request logged. */
   const requests: { endpoint: string; payload: any }[] = []
   const rpc = { async call(_channel: string, endpoint: string, payload: unknown) { requests.push({ endpoint, payload: structuredClone(payload) }); return call(endpoint, payload) } }
-  return { store, call, rpc, requests, recipeRuns }
+  return { store, call, rpc, requests, recipeRuns, recipeOptions }
 }
 

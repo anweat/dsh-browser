@@ -4,7 +4,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { ActivationRefusedError, type AutomationAsset, type AutomationAssetStatus, type AutomationAssetStore } from './automation-assets.ts'
 import type { BrowserService } from './browser-service.ts'
-import { executeAutomationAsset } from './automation-execution.ts'
+import { executeAutomationAsset, executeDraftInputSets } from './automation-execution.ts'
+import { convertV1ToV2Draft } from './automation-convert.ts'
 
 /**
  * This plugin's own logical RPC channel.
@@ -80,6 +81,21 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
           case 'dismiss': store.dismissCandidate(stringField(payload, 'id')); value = store.snapshot(); break
           case 'validate': value = store.validate(stringField(payload, 'id')); break
           case 'test': {
+            if (payload.inputSets !== undefined) {
+              if (payload.inputs !== undefined) throw new Error('pass either inputs (one run) or inputSets (2 to 5 runs), not both')
+              // Each set runs in a fresh context; the credential the store keeps records every set (digests only), which is what the panel shows.
+              const replay = await executeDraftInputSets(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputSets, { expectedRevision: expectedRevision(payload) })
+              if (!replay.succeeded) {
+                const failed = replay.sets.find(entry => !entry.passed)
+                const errorCode = replay.verifierMissing ? 'VALIDATION_MISSING' : failed?.execution.failedStep?.errorCode ?? (failed?.execution.validationStatus === 'failed' ? 'VALIDATION_FAILED' : 'ACTION_FAILED')
+                throw new AssetRpcFailure(
+                  replay.verifierMissing?.message ?? `Input set ${(failed?.index ?? 0) + 1} of ${replay.planned} did not pass: ${failed?.execution.failedStep?.message ?? failed?.execution.message ?? 'the replay did not complete'}`,
+                  { errorCode, failedSet: failed ? failed.index + 1 : undefined, inputSets: replay.planned, setsRun: replay.sets.length, revision: replay.asset.revision },
+                )
+              }
+              value = replay.asset
+              break
+            }
             const result = await executeAutomationAsset(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputs, 'draft', { expectedRevision: expectedRevision(payload) })
             // The review UI shows a failed replay as an error, as it did when a failure threw. The errorCode lets it
             // say "the result did not hold" (VALIDATION_FAILED / VALIDATION_MISSING) apart from a backend problem.
@@ -92,6 +108,14 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
               )
             }
             value = result.asset
+            break
+          }
+          case 'convert': {
+            // Same conversion as `automation.develop convert`: the source is only read; the result is a NEW v2 draft.
+            const source = store.get(stringField(payload, 'id'))
+            if (!source) throw new Error('automation asset not found')
+            const conversion = convertV1ToV2Draft(source)
+            value = { draft: store.saveDraft(conversion.draft), pendingDisambiguation: conversion.pendingDisambiguation, notes: conversion.notes }
             break
           }
           case 'prompts': value = promptsStatus ? promptsStatus() : null; break
