@@ -23,7 +23,7 @@ export declare const inject: string[];
  */
 declare const plugin: {
     name: string;
-    inject: readonly ["tools", "settings"];
+    inject: string[];
     apply: typeof apply;
     Config: import("@deepseek-ai/schemastery").default<Config>;
 };
