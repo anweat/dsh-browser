@@ -80,3 +80,18 @@ test('every public config field is a control in the rendered card, or is named w
     assert.equal(html.includes(locale === 'zh' ? '配置文件' : 'config file'), true, 'the note says where to edit')
   }
 })
+
+test('the policy boxes list every key the code accepts, in both locales (maxTestCredentials and minInputSetsForActivation included)', async (t) => {
+  if (skip) return t.skip(skip)
+  const { ASSET_POLICY_KEYS, USAGE_POLICY_KEYS } = await import('../src/policy-keys.ts')
+  assert.ok(ASSET_POLICY_KEYS.includes('maxTestCredentials') && ASSET_POLICY_KEYS.includes('minInputSetsForActivation'))
+  for (const locale of ['en', 'zh'] as const) {
+    const { html } = renderCard!({ locale })
+    const hintOf = (field: string) => html.match(new RegExp(`data-dsh-field="plugin-config-dsh-browser-${field}"[\\s\\S]*?<p>([^<]*)</p>`))?.[1] ?? ''
+    for (const [field, keys] of [['automationAssets', ASSET_POLICY_KEYS], ['usagePolicy', USAGE_POLICY_KEYS]] as const) {
+      const hint = hintOf(field)
+      const listed = hint.slice(hint.lastIndexOf(locale === 'zh' ? '可用键名：' : 'Keys:')).replace(/^[^:：]*[:：]\s*/, '').split(/,\s*/)
+      assert.deepEqual(listed, [...keys], `${field} hint (${locale}) lists exactly the code's keys`)
+    }
+  }
+})

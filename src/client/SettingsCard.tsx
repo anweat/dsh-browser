@@ -17,6 +17,7 @@ import { useEffect } from 'react'
 import { SettingsForm, SettingsValueField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BrowserSettingsCardProps } from './index.ts'
+import { ASSET_POLICY_KEYS, USAGE_POLICY_KEYS } from '../policy-keys.ts'
 import { CONFIG_FILE_ONLY_FIELDS, FIELD_SPECS, JSON_FIELDS, type SectionField } from './form.ts'
 import { PROMPT_TEXT_FIELDS, type PromptTextFieldId } from './prompts-form.ts'
 import { styles as css } from './styles.ts'
@@ -60,6 +61,9 @@ const SECTION_LAYOUT: readonly { title: LabelKey; hint: LabelKey; fields: readon
 /** The usage section's JSON boxes. */
 const USAGE_FIELDS = ['usagePolicy', 'automationAssets'] as const
 
+/** The keys each JSON policy box accepts, generated from the code's own lists so the hint cannot leave one out. */
+const POLICY_KEY_LISTS: Readonly<Record<string, readonly string[]>> = { usagePolicy: USAGE_POLICY_KEYS, automationAssets: ASSET_POLICY_KEYS }
+
 /** The single-input fields, where `state.fields` holds their state. */
 const SINGLE_INPUT_FIELDS: ReadonlySet<string> = new Set(FIELD_SPECS.map(spec => spec.field))
 
@@ -77,11 +81,12 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
   const numeric = new Set<string>(['cdpPort', 'maxSessions'])
   const field = (name: string) => {
     const fieldState = SINGLE_INPUT_FIELDS.has(name) ? state.fields[name as SectionField] : state.jsonFields[name]
+    const policyKeys = POLICY_KEY_LISTS[name]
     return <SettingsValueField
       key={name}
       id={`plugin-config-dsh-browser-${name}`}
       label={t(name as LabelKey)}
-      hint={t(`${name}Hint` as LabelKey)}
+      hint={policyKeys ? `${t(`${name}Hint` as LabelKey)} ${t('policyKeys')} ${policyKeys.join(', ')}` : t(`${name}Hint` as LabelKey)}
       overriddenLabel={t('overridden')}
       resetLabel={t('reset')}
       invalidLabel={t(JSON_FIELDS.has(name) ? 'invalidJson' : 'invalidNumber')}
