@@ -18,7 +18,7 @@ import { ACTIONS, GROUP_SUMMARIES, findAction, findSubAction, findTopic } from '
 import { ACTION_GROUPS, ERROR_CODES, type ActionGroup } from './actions/types.ts'
 import { DEFAULT_ERROR_HINTS } from './actions/errors.ts'
 import { COMPACT_GUIDE, renderIndex, type IndexEnvironment } from './actions/index-view.ts'
-import { DEFAULT_CALL_DESCRIPTION, DEFAULT_INDEX_DESCRIPTION, PROMPT_TOOL_NAMES, indexedToolDefinitions } from './tool-defs.ts'
+import { CHARS_PER_TOKEN, DEFAULT_CALL_DESCRIPTION, DEFAULT_INDEX_DESCRIPTION, PROMPT_TOOL_NAMES, estimateTokens, indexedToolDefinitions, modelFacingChars } from './tool-defs.ts'
 import { readSkill, loadSkillBodyFile } from './skill.ts'
 import { PROMPT_LIMITS } from './prompt-limits.ts'
 import type { AutomationMode, ExposureOptions } from './freedom.ts'
@@ -26,7 +26,7 @@ import type { AutomationMode, ExposureOptions } from './freedom.ts'
 export { PROMPT_LIMITS }
 
 /** Context budgets from the tool-system design (estimated tokens = characters / 3.5, as `measure:tools` counts). */
-export const CHARS_PER_TOKEN = 3.5
+export { CHARS_PER_TOKEN }
 export const L0_BUDGET_TOKENS = 1500
 export const LAYER_BUDGET_TOKENS = 1000
 
@@ -253,7 +253,7 @@ export function defaultPrompts(): Record<string, unknown> {
 
 // --- budget and status -----------------------------------------------------------------------------------------
 
-const tokensOf = (chars: number): number => Math.round(chars / CHARS_PER_TOKEN)
+const tokensOf = estimateTokens
 
 export interface PromptBudget {
   /** Estimated tokens of the two L0 tools (name + description + parameters, as the host sends them). */
@@ -274,7 +274,7 @@ export interface BudgetEnvironment {
 
 /** Measure the L0 tools and every browser_index layer under these overrides. */
 export function measurePromptBudget(prompts: ResolvedPrompts, environment: BudgetEnvironment): PromptBudget {
-  const l0Chars = indexedToolDefinitions(prompts.tools).reduce((sum, tool) => sum + JSON.stringify(tool).length, 0)
+  const l0Chars = modelFacingChars(indexedToolDefinitions(prompts.tools))
   const env = (skillAvailable: boolean): IndexEnvironment => ({ mode: environment.mode, options: environment.options, enabled: environment.enabled, skillAvailable, prompts })
   const layers: { name: string; tokens: number }[] = [
     { name: 'root', tokens: tokensOf(renderIndex({}, env(false)).text.length) },

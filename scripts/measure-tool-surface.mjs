@@ -22,7 +22,6 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 
-const CHARS_PER_TOKEN = 3.5
 const INDEXED_L0_BUDGET_TOKENS = 1500
 // Every browser_index() layer (root, group, action, sub-action) must stay within this.
 const DISCLOSURE_BUDGET_TOKENS = 1000
@@ -43,8 +42,10 @@ const mode = modeIndex >= 0 ? args[modeIndex + 1] : 'unrestricted'
 const { registerTools } = await import(pathToFileURL(path.join(root, 'src/tools.ts')).href)
 const { resolveConfig } = await import(pathToFileURL(path.join(root, 'src/config.ts')).href)
 const { ACTION_GROUPS } = await import(pathToFileURL(path.join(root, 'src/actions/types.ts')).href)
+// The estimate is shared with the settings card and runtime.status (src/tool-defs.ts), so the three cannot drift apart.
+const { CHARS_PER_TOKEN, estimateTokens, modelFacingChars } = await import(pathToFileURL(path.join(root, 'src/tool-defs.ts')).href)
 
-const tokens = chars => Math.round(chars / CHARS_PER_TOKEN)
+const tokens = estimateTokens
 
 function register(automationMode, toolSurface, runtime = {}) {
   const registered = []
@@ -56,11 +57,9 @@ function register(automationMode, toolSurface, runtime = {}) {
 
 function collect(registered) {
   return registered.map(tool => {
-    const modelFacing = { name: tool.name, description: tool.description, parameters: tool.parameters }
-    const serialized = JSON.stringify(modelFacing)
     return {
       name: tool.name,
-      chars: serialized.length,
+      chars: modelFacingChars([tool]),
       descriptionChars: String(tool.description ?? '').length,
       parametersChars: JSON.stringify(tool.parameters ?? {}).length,
       outputSchemaChars: JSON.stringify(tool.output?.schema ?? {}).length,

@@ -43,10 +43,41 @@ export function callDescription(override?: string): string {
   return `${(override ?? DEFAULT_CALL_DESCRIPTION).trimEnd()} ${COMPLIANCE_NOTICE}`
 }
 
-/** What the host sends to the model for the two indexed tools (name + description + parameters). */
-export function indexedToolDefinitions(overrides: { browser_index?: string; browser_call?: string } = {}): { name: string; description: string; parameters: unknown }[] {
+/** One tool as the host sends it to the model. */
+export interface ModelFacingTool { name: string; description: string; parameters: unknown }
+
+/**
+ * The JSON Schema `defineTool` produces from a parameter shorthand map: `required: true` moves to a `required` list.
+ * Kept here, not imported, so the budget code does not need the tool runtime; test/l0-estimate.test.ts holds it equal
+ * to what `defineTool` really registers.
+ */
+function jsonSchemaOf(shorthand: Record<string, Record<string, unknown>>): unknown {
+  const properties = Object.fromEntries(Object.entries(shorthand).map(([name, spec]) => [name, Object.fromEntries(Object.entries(spec).filter(([key]) => key !== 'required'))]))
+  const required = Object.entries(shorthand).filter(([, spec]) => spec.required === true).map(([name]) => name)
+  return { type: 'object', properties, ...required.length ? { required } : {} }
+}
+
+/**
+ * What the host sends to the model for the two indexed tools (name + description + parameters).
+ * The parameters are the JSON Schema form (`type`/`properties`/`required`), which is what is registered and what the
+ * model is billed for, not the shorthand map the tools are declared with.
+ */
+export function indexedToolDefinitions(overrides: { browser_index?: string; browser_call?: string } = {}): ModelFacingTool[] {
   return [
-    { name: INDEX_TOOL, description: indexDescription(overrides.browser_index), parameters: INDEX_PARAMETERS },
-    { name: CALL_TOOL, description: callDescription(overrides.browser_call), parameters: CALL_PARAMETERS },
+    { name: INDEX_TOOL, description: indexDescription(overrides.browser_index), parameters: jsonSchemaOf(INDEX_PARAMETERS) },
+    { name: CALL_TOOL, description: callDescription(overrides.browser_call), parameters: jsonSchemaOf(CALL_PARAMETERS) },
   ]
+}
+
+/** Characters per token of the surface estimate. */
+export const CHARS_PER_TOKEN = 3.5
+
+/** Estimated tokens of a character count. The one rounding rule for the settings card, `runtime.status` and the measure script. */
+export function estimateTokens(chars: number): number {
+  return Math.round(chars / CHARS_PER_TOKEN)
+}
+
+/** Serialized size of tools as the host sends them: the one input of every L0 estimate. */
+export function modelFacingChars(tools: readonly { name: string; description?: unknown; parameters?: unknown }[]): number {
+  return tools.reduce((sum, tool) => sum + JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.parameters }).length, 0)
 }
