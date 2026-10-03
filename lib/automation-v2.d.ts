@@ -47,6 +47,11 @@ export interface OutputSpec {
     name: string;
     type: typeof OUTPUT_TYPES[number];
     description?: string;
+    /**
+     * Post-process the value: drop repeats, keep first occurrences in order. A `json` array is deduplicated by
+     * element, a `string` by line (blank lines dropped). It does not fail on duplicates; it removes them.
+     */
+    dedupe?: true;
 }
 export type Postcondition = {
     selector: string;
@@ -118,6 +123,8 @@ export declare function coerceOutput(spec: OutputSpec, value: unknown): {
     ok: false;
     problem: string;
 };
+/** Drop repeats, keeping the first of each in order: array elements by value, text by line. Other values are returned unchanged. */
+export declare function dedupeValue(value: unknown): unknown;
 export interface PostconditionOutcome {
     /** One line per condition that did not hold. */
     failures: string[];

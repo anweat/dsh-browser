@@ -29,6 +29,7 @@ import { type AutomationMode } from './freedom.ts';
 import { type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts';
 import { UsageGovernor } from './usage-policy.ts';
 import { type BrowserTarget } from './locator.ts';
+import { SessionJournal } from './journal.ts';
 import { type ObserveRegion, type ObserveSection } from './observe.ts';
 export interface RenderRule {
     hostname: string;
@@ -272,10 +273,32 @@ export declare class BrowserService {
     private readonly authProfiles;
     private readonly usageGovernor;
     private opencliCatalogCache?;
+    /** Per-session exploration journals (see src/journal.ts). Released with the session, never written to disk. */
+    private readonly journals;
     /** How many sessions may hold a context+page at once before LRU eviction. */
     private readonly sessionLimit;
     constructor(config: ResolvedConfig);
     available(): boolean;
+    /**
+     * This session's exploration journal, created on first use. It outlives `target.close` (the session is
+     * still the same) and is released when the session is evicted or the service closes. A session that never
+     * records anything costs nothing: journals are only created by the action dispatcher.
+     */
+    journalFor(session: string): SessionJournal;
+    /** The active page of a session as `{targetId, generation, url}`, without opening or creating anything. */
+    pageStamp(session: string): {
+        targetId?: string;
+        generation?: number;
+        url?: string;
+    } | undefined;
+    /**
+     * Whether the control a fill/type would hit is a secret field (password, one-time code, name that says so).
+     * Best effort and quick: any trouble (no page, several matches, a slow page) answers false, and the journal
+     * still treats secret-looking values and secret-looking locators as sensitive.
+     */
+    inputSensitivity(target: BrowserTarget, opts?: {
+        session?: string;
+    }): Promise<boolean>;
     /**
      * The state bucket belonging to a tool execution's session.
      *
@@ -508,6 +531,12 @@ export declare class BrowserService {
         session?: string;
     }): Promise<InteractiveState>;
     /**
+     * Run a read of the page. If the page navigates under it ("Execution context was destroyed"), the read is
+     * tried once more on the new document; if that fails the same way the page is still moving, which is a
+     * stale observation (TARGET_STALE), not a failed action. Nothing a read does changes the page.
+     */
+    private readingNavigation;
+    /**
      * Structured observation of the active page (or of one element's subtree): readable text, controls, links,
      * and tables, each section bounded by `maxItems` and the whole record by `maxBytes` (see src/observe.ts).
      * With only the default `content` section, no scope and no limits it is exactly {@link read}.
@@ -522,6 +551,7 @@ export declare class BrowserService {
         timeoutMs?: number;
         session?: string;
     }): Promise<Record<string, unknown>>;
+    private observeOnce;
     consoleMessages(opts?: {
         level?: string;
         limit?: number;
@@ -572,7 +602,12 @@ export declare class BrowserService {
         allowedDomains?: readonly string[];
         /** v2 goto may also stay on the origin the recipe started on (inline recipes; stored assets are limited to their domains). */
         gotoSameOrigin?: boolean;
+        /** Run in a brand-new BrowserContext (its own cookies and storage) that is closed afterwards; the session's page is not touched. Needs `url`. */
+        isolated?: boolean;
     }): Promise<RecipeServiceResult>;
+    /** A recipe in its own context: nothing of the caller's session (page, cookies, storage, journal) is shared or changed. */
+    private isolatedRecipe;
+    private runRecipeOn;
     /**
      * Close one session's page.
      *

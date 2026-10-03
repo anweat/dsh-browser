@@ -39,6 +39,19 @@ export interface TestCredential {
     passed: boolean;
     /** Synthesized when data written before B4 was loaded: `testStatus` was `passed` and nothing else is known. */
     legacy?: true;
+    /** A test with several input sets (each in a fresh context): one entry per set that ran. Digests only. */
+    inputSets?: {
+        index: number;
+        inputsDigest: string;
+        passed: boolean;
+        executionStatus: RecipeExecutionStatus;
+        validationStatus: RecipeValidationStatus;
+        outputsDigest: string;
+    }[];
+    /** How many sets the test was asked to run (more than `inputSets.length` when a failing set stopped it). */
+    plannedSets?: number;
+    /** Cautions on a passing test, e.g. `PARAMETERIZATION_SUSPECT`: different inputs gave identical outputs. */
+    warnings?: string[];
 }
 export interface AutomationAssetPolicyInput {
     enabled?: boolean;
@@ -122,6 +135,17 @@ export interface AutomationAsset {
     /** Set when this draft was converted from another asset; the source is never modified. */
     sourceAssetId?: string;
     sourceRevision?: number;
+    /**
+     * Set on a draft built from an exploration journal (`draft_from_journal`). `unmapped` counts the journaled
+     * actions that could not become steps; while it is above zero the draft is a half-finished copy of the
+     * exploration and cannot be activated. Saving the draft again with an explicit recipe replaces it and drops this.
+     */
+    origin?: {
+        kind: 'journal';
+        fromSeq: number;
+        toSeq: number;
+        unmapped: number;
+    };
     /** Bumped by every save, never reused. */
     revision: number;
     /** sha256 over the recipe or source, schemaVersion, inputSchema, outputSchema, postconditions and domains. Derived; recomputed on load. */
@@ -186,7 +210,7 @@ export declare function computeContentHash(asset: HashedContent): string;
 /** A digest of the inputs a test ran with. The values themselves are never stored. */
 export declare function digestInputs(inputs: unknown): string;
 /** Why an activation request was refused; the message says what to do. */
-export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached';
+export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached' | 'incomplete-draft';
 export declare class ActivationRefusedError extends Error {
     readonly reason: ActivationRefusal;
     constructor(reason: ActivationRefusal, message: string);
@@ -205,6 +229,9 @@ export interface TestDetails {
         revision: number;
         contentHash: string;
     };
+    inputSets?: NonNullable<TestCredential['inputSets']>;
+    plannedSets?: number;
+    warnings?: string[];
 }
 export declare class AutomationAssetStore {
     readonly policy: AutomationAssetPolicy;
