@@ -13,7 +13,6 @@ import path from 'node:path'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-settings'
 import { Config, resolveConfig, type ResolvedConfig } from './config.ts'
-import { resolveSettingsScope } from './settings-scope.ts'
 import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
 import { browserPolicyDecision } from './approval-policy.ts'
@@ -25,16 +24,9 @@ import { AutomationAssetStore } from './automation-assets.ts'
 import { registerAutomationAssetRpc } from './automation-assets-rpc.ts'
 
 export const name = 'dsh-browser'
+// `settings` is declared, not read: the plugin starts only where the Host mounts the Settings service that
+// serves and persists this plugin's configuration page. `apply` takes its config from the Loader entry.
 export const inject = ['tools', 'settings']
-
-/**
- * Loader entry id of this plugin's row in `cordis.patch.yml`, which is also the
- * settings namespace the plugin owns. On hosts whose `SettingsForms` still
- * exposes `register()` this is the scope namespace; on newer hosts it is the
- * profile patch entry id whose `Config` schema the settings page is derived
- * from. Keep it in sync with the bundle patch.
- */
-export const BROWSER_SETTINGS_NS = 'browser'
 
 /**
  * The object cordis actually receives.
@@ -64,15 +56,13 @@ export type { AutomationAssetPolicy, AutomationAssetPolicyInput, AutomationAsset
 export { ASSET_PERSISTENCE_MODES, ASSET_ACTIVATION_MODES, resolveAutomationAssetPolicy, AutomationAssetStore } from './automation-assets.ts'
 
 export function apply(ctx: Context, config: Config): void {
-  // Browser processes, tool exposure, and approval hooks are deliberately
-  // startup-scoped. On hosts that still ship the legacy `settings.register`
-  // provider we register a live scope; on dsh-v0.1.7-rc.2+ — which removed it
-  // and derives settings pages from this entry's own Config schema — the
-  // Loader re-applies the validated entry config by restarting this fiber.
-  // The namespace is the bundle patch's loader entry id (`browser`), which is
-  // also what the client settings card binds to.
-  const settingsScope = resolveSettingsScope<Config>(ctx.settings, BROWSER_SETTINGS_NS, Config, config)
-  const resolved: ResolvedConfig = resolveConfig(settingsScope.get())
+  // `config` is the Loader entry's own `Config` (entry id `browser` in `cordis.patch.yml`, the same id the
+  // client settings card binds to); the Host derives the settings page from that schema. Every field that
+  // page edits is `.volatile()`, so a save commits the new value into the running references and emits
+  // `loader/volatile-update` without remounting this plugin. Browser processes, tool exposure and approval
+  // hooks are deliberately startup-scoped: `resolveConfig` reads them once here, so a saved value applies
+  // when the profile restarts. Only `prompts` is read live (see `ResolvedConfig.prompts`).
+  const resolved: ResolvedConfig = resolveConfig(config)
   fs.mkdirSync(resolved.snapshotDir, { recursive: true })
 
   const service = new BrowserService(resolved)

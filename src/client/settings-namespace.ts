@@ -1,2 +1,2 @@
-/** Settings namespace used by both the Host registry and the card slot key. */
+/** The settings namespace: the loader entry id of the bundle patch row (`cordis.patch.yml`), which `ctx.configForms` addresses. */
 export const SETTINGS_NAMESPACE = 'browser'
