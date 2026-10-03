@@ -36,6 +36,13 @@ async function bundleCard(): Promise<{ code: string } | { skip: string }> {
   return { code: output[0]!.code }
 }
 
+const PROMPTS_REPORT = {
+  overrides: [{ key: 'rootNote', length: 42 }],
+  diagnostics: [{ level: 'warn', code: 'unknown-group', key: 'groups.nope', message: 'groups.nope: no such group; ignored' }],
+  budget: { l0Tokens: 325, l0Budget: 1500, layerBudget: 1000, largestLayer: { name: 'automation.develop.save', tokens: 980 }, overBudget: [] },
+  skill: { enabled: true, body: 'packaged' },
+}
+
 describe('the asset editor in a real browser', { skip: detection.ok ? false : (detection as { reason: string }).reason }, () => {
   let harness: Harness
   let server: Awaited<ReturnType<typeof startFixtureServer>>
@@ -68,7 +75,7 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
       effect(setup: () => unknown) { setup() },
       root: { connection: { rpc: { handle(_channel: string, h: unknown) { handler = h; return async () => {} } } } },
     }
-    registerAutomationAssetRpc(ctx, harness.assets, harness.service)
+    registerAutomationAssetRpc(ctx, harness.assets, harness.service, () => PROMPTS_REPORT)
     const peer = { id: 'peer', ctx: {} as never, dispose: async () => {} }
     return (endpoint: string, payload: unknown) => handler(endpoint, payload, new AbortController().signal, peer)
   }
@@ -218,6 +225,22 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     await page.waitForFunction(() => document.querySelector('[data-dsh-browser-notice="backend"]'))
     assert.match(await notice.innerText(), /Backend error: .*current revision 4/)
     assert.equal(harness.assets.get(C.id)!.status, 'draft')
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  it('the prompt text section renders and shows what the plugin reports: L0 estimate, overrides and diagnostics', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const { page, errors } = await openUi()
+    const section = page.locator('[data-dsh-browser-prompts]')
+    await section.waitFor()
+    await page.waitForFunction(() => document.querySelector('[data-dsh-browser-prompts-budget]') !== null)
+    assert.match(await section.locator('h3').innerText(), /Prompt text/)
+    assert.match(await page.locator('[data-dsh-browser-prompts-budget]').innerText(), /~325 tokens \(budget 1500\)/)
+    assert.match(await page.locator('[data-dsh-browser-prompts-status]').innerText(), /1 overrides in effect: rootNote \(42\)/)
+    assert.match(await page.locator('[data-dsh-browser-prompts-diagnostics]').innerText(), /groups\.nope: no such group/)
+    assert.equal(await page.locator('#plugin-config-dsh-browser-prompts-rootNote').count(), 1)
+    assert.equal(await page.locator('#plugin-config-dsh-browser-prompts-extras').count(), 1)
     assert.deepEqual(errors, [])
     await page.close()
   })
