@@ -7,6 +7,7 @@ import type { BrowserService } from './browser-service.ts'
 import { executeAutomationAsset, executeDraftInputSets } from './automation-execution.ts'
 import { convertV1ToV2Draft } from './automation-convert.ts'
 import { promptsDumpText } from './prompts.ts'
+import { stripAnsi } from './actions/errors.ts'
 
 /**
  * This plugin's own logical RPC channel.
@@ -128,7 +129,7 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
         return { ok: true, value }
       } catch (error) {
         const details = error instanceof AssetRpcFailure ? error.details : error instanceof ActivationRefusedError ? { errorCode: 'ACTIVATION_REFUSED', reason: error.reason } : {}
-        return { ok: false, error: { code: 'bad-request' as const, message: String(error instanceof Error ? error.message : error).slice(0, 500), details } }
+        return { ok: false, error: { code: 'bad-request' as const, message: stripAnsi(String(error instanceof Error ? error.message : error)).slice(0, 500), details } }
       }
     }
     connectionCtx.effect(

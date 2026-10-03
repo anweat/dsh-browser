@@ -379,3 +379,12 @@ test('the indexed always-on surface stays inside the 1.5k-token budget and every
     assert.ok(text.length <= 3_500, `${JSON.stringify(input)} is ${text.length} chars (budget 1k tokens)`)
   }
 })
+
+test('error messages drop terminal colour codes', async () => {
+  const { mapError } = await import('../src/actions/errors.ts')
+  const esc = String.fromCharCode(27)
+  const error = Object.assign(new Error(`locator.waitFor: Timeout 15000ms exceeded. Call log: ${esc}[2m - waiting for getByText('Alpha')${esc}[22m`), { name: 'TimeoutError' })
+  const body = mapError(error, 'automation.run_recipe')
+  assert.equal(body.code, 'LOCATOR_NOT_FOUND')
+  assert.equal(body.message.includes(esc), false)
+})

@@ -88,9 +88,13 @@ export function isTimeoutError(error: unknown): boolean {
   return /Timeout \d+ms exceeded|timed out after/i.test(messageOf(error))
 }
 
+/** Playwright colours its call log for terminals; the model and the settings card get plain text. */
+export function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, '')
+}
+
 function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
+  return stripAnsi(error instanceof Error ? error.message : String(error))
 }
 
 const NOT_ACTIONABLE_LOG = /locator resolved to|element is not (visible|enabled|stable|editable)|intercepts pointer events|is outside of the viewport|element is disabled|not receive pointer events|Element is not an <input>|readonly/i

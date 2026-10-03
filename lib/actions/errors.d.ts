@@ -28,6 +28,8 @@ export declare class DeadlineError extends Error {
 export declare function abortedByDeadline(signal: AbortSignal | undefined): boolean;
 /** True for a Playwright timeout (waiting for a locator, an actionability check, or a navigation). */
 export declare function isTimeoutError(error: unknown): boolean;
+/** Playwright colours its call log for terminals; the model and the settings card get plain text. */
+export declare function stripAnsi(text: string): string;
 /**
  * True when a failure proves the action never touched an element: the locator
  * never matched anything (a timeout whose call log only says "waiting for
