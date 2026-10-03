@@ -1,7 +1,7 @@
 /** `automation` group: reusable assets and inline recipes. @module dsh-browser/actions/automation */
 
 import type { ActionDef } from './types.ts'
-import { ActionUnavailableError, withOutcome } from './types.ts'
+import { ActionArgError, ActionUnavailableError, withOutcome } from './types.ts'
 import type { AnyRecipeStep, BrowserRecipeStep } from '../automation.ts'
 import { RecipeValidationError, hintFor } from './errors.ts'
 import { normalizePostconditions, type BrowserRecipeStepV2 } from '../automation-v2.ts'
@@ -40,10 +40,10 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
   {
     name: 'automation.develop',
     group: 'automation',
-    summary: 'Get, save, validate, test, convert (v1 to v2) or fork (repair copy) one automation draft. Never activates assets.',
+    summary: 'Get, save, validate, test, convert (v1 to v2), fork (repair copy) or draft_from_journal (explored steps to a v2 draft). Never activates assets.',
     notes: 'One tool, sub-actions selected by `action`; browser_index({action:"automation.develop.<sub>"}) gives one sub-action\'s full schema. Every save is a new revision; a test is bound to its revision and only the user can activate a tested revision.',
     params: {
-      action: { type: 'string', required: true, enum: ['get', 'save', 'validate', 'test', 'convert', 'fork'] },
+      action: { type: 'string', required: true, enum: ['get', 'save', 'validate', 'test', 'convert', 'fork', 'draft_from_journal'] },
       id: { type: 'string', description: 'asset id; omit on save to create' },
       kind: { type: 'string', enum: ['recipe', 'userscript'], description: 'save' },
       name: { type: 'string', description: 'save' },
@@ -60,6 +60,12 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
       source: { type: 'string', description: 'UserScript' },
       url: { type: 'string', description: 'test: inside the draft domains' },
       inputs: { type: 'object', additionalProperties: true, description: 'test inputs' },
+      inputSets: { type: 'array', items: { type: 'object', additionalProperties: true }, description: 'test: 2-5 input objects, each replayed in a fresh browser context' },
+      fromSeq: { type: 'number', description: 'draft_from_journal: first journal seq (default: the first)' },
+      toSeq: { type: 'number', description: 'draft_from_journal: last journal seq (default: the last)' },
+      exclude: { type: 'array', items: { type: 'number' }, description: 'draft_from_journal: seq to leave out (failed calls and observations are left out already)' },
+      parameters: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { seq: { type: 'number', required: true }, field: { type: 'string', required: true, enum: ['text', 'values', 'url'] }, name: { type: 'string', required: true }, type: { type: 'string', enum: ['string', 'number'] } } }, description: 'draft_from_journal: turn the typed text / chosen option / later opened url of a seq into an input' },
+      extract: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { seq: { type: 'number', required: true }, as: { type: 'string', required: true }, mode: { type: 'string', enum: ['text', 'html', 'links'] }, limit: { type: 'number' }, dedupe: { type: 'boolean' } } }, description: 'draft_from_journal: turn an observe.read seq into a named extract output' },
       authProfile: { type: 'string' },
       rulePack: { type: 'string' },
     },
@@ -96,9 +102,17 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
             },
           }],
         },
+        draft_from_journal: {
+          summary: 'Turn the calls you explored with (this session\'s journal) into a saved v2 draft, with a map back to each call.',
+          params: ['id', 'name', 'description', 'domains', 'postconditions', 'fromSeq', 'toSeq', 'exclude', 'parameters', 'extract'], required: ['name'],
+          hints: { id: 'replace the draft of an earlier call; omit to create', name: '', description: '', domains: 'default: hosts the pages had', postconditions: 'checks the result; without them a test cannot pass' },
+          errors: ['INVALID_ARGS', 'INVALID_RECIPE'],
+          notes: 'Each browser_call reply has a seq. Failed calls and observe calls are left out; fill/type text, act.select and later target.open become inputs only via `parameters`. `extract` names the observe.read (with a locator) whose text is the result. The reply lists sourceMap (seq to step), unmapped (actions a recipe cannot express: the draft is then incomplete and cannot be activated), pendingDisambiguation, parameterCandidates, suggestedPostconditions and warnings. Then test with inputSets.',
+          examples: [{ args: { action: 'draft_from_journal', name: 'Keyword search', parameters: [{ seq: 3, field: 'text', name: 'keyword' }], extract: [{ seq: 6, as: 'items', dedupe: true }], postconditions: [{ output: 'items', allowEmpty: true }, { selector: '#status' }] } }],
+        },
         test: {
           summary: 'Replay a draft in a real browser. The result is recorded as a credential bound to the draft\'s current revision and content.',
-          params: ['id', 'url', 'inputs', 'authProfile', 'rulePack'], required: ['id', 'url'], hints: { id: 'draft id', url: 'inside the draft domains', inputs: '' },
+          params: ['id', 'url', 'inputs', 'inputSets', 'authProfile', 'rulePack'], required: ['id', 'url'], hints: { id: 'draft id', url: 'inside the draft domains', inputs: '', inputSets: '2-5 input objects; each runs in a fresh context; all must pass' },
           errors: ['VALIDATION_FAILED', 'VALIDATION_MISSING', 'OUTCOME_UNKNOWN', 'LOCATOR_NOT_FOUND', 'LOCATOR_AMBIGUOUS'],
           notes: 'A v2 test passes only if an assert step or a postcondition checks the result; otherwise it fails with VALIDATION_MISSING. url must be inside the draft\'s domains. A recipe draft is approved like automation.run_recipe in autonomous mode; a UserScript draft asks.',
           examples: [{ args: { action: 'test', id: 'draft-id', url: 'https://example.com/search', inputs: { query: 'dsh' } } }],
@@ -167,6 +181,21 @@ export const AUTOMATION_ACTIONS: ActionDef[] = [
           })
         }
         return withOutcome(body, recipeOutcome(result.execution))
+      }
+      if (args.action === 'draft_from_journal') {
+        if (!args.name) throw new ActionArgError('draft_from_journal requires name')
+        const journal = ctx.service.journalFor?.(ctx.session)
+        if (!journal) throw new ActionUnavailableError('this browser service keeps no exploration journal')
+        const { asset: draft, report } = development.draftFromJournal(journal, {
+          name: args.name, ...args.id ? { id: args.id } : {},
+          ...args.description !== undefined ? { description: args.description } : {}, ...args.domains ? { domains: args.domains } : {},
+          ...args.postconditions ? { postconditions: args.postconditions } : {},
+          ...args.fromSeq !== undefined ? { fromSeq: args.fromSeq } : {}, ...args.toSeq !== undefined ? { toSeq: args.toSeq } : {},
+          ...args.exclude ? { exclude: args.exclude } : {}, ...args.parameters ? { parameters: args.parameters } : {}, ...args.extract ? { extract: args.extract } : {},
+        }, ctx.sessionId)
+        return developmentResult('draft_from_journal', {
+          id: draft.id, status: draft.status, revision: draft.revision, schemaVersion: 2, name: draft.name, testStatus: draft.testStatus, ...report,
+        }, draft)
       }
       if (args.action === 'fork') {
         if (!args.id) throw new Error('automation development fork requires id')

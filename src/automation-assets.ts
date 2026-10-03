@@ -139,6 +139,12 @@ export interface AutomationAsset {
   /** Set when this draft was converted from another asset; the source is never modified. */
   sourceAssetId?: string
   sourceRevision?: number
+  /**
+   * Set on a draft built from an exploration journal (`draft_from_journal`). `unmapped` counts the journaled
+   * actions that could not become steps; while it is above zero the draft is a half-finished copy of the
+   * exploration and cannot be activated. Saving the draft again with an explicit recipe replaces it and drops this.
+   */
+  origin?: { kind: 'journal'; fromSeq: number; toSeq: number; unmapped: number }
   /** Bumped by every save, never reused. */
   revision: number
   /** sha256 over the recipe or source, schemaVersion, inputSchema, outputSchema, postconditions and domains. Derived; recomputed on load. */
@@ -285,7 +291,7 @@ export function digestInputs(inputs: unknown): string {
 }
 
 /** Why an activation request was refused; the message says what to do. */
-export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached'
+export type ActivationRefusal = 'expected-revision-required' | 'revision-mismatch' | 'not-tested' | 'test-failed' | 'content-changed' | 'no-domain' | 'limit-reached' | 'incomplete-draft'
 
 export class ActivationRefusedError extends Error {
   constructor(readonly reason: ActivationRefusal, message: string) {
@@ -536,6 +542,7 @@ export class AutomationAssetStore {
         ...v2.pending.length ? { pendingDisambiguation: v2.pending } : {},
       } : {},
       ...sourceAssetId !== undefined ? { sourceAssetId, sourceRevision: sourceRevision! } : {},
+      ...input.origin ? { origin: structuredClone(input.origin) } : {},
       revision: (existing?.revision ?? 0) + 1, testStatus: 'untested', successCount: existing?.successCount ?? 0, failureCount: existing?.failureCount ?? 0,
       // Earlier credentials stay as history; each is bound to its own revision and never vouches for this one.
       ...existing?.testCredentials?.length ? { testCredentials: existing.testCredentials.slice(-this.policy.maxTestCredentials) } : {},
@@ -663,6 +670,7 @@ export class AutomationAssetStore {
     if (latest.contentHash !== computeContentHash(asset)) {
       throw new ActivationRefusedError('content-changed', `automation asset must pass testing before activation: the passed test of revision ${asset.revision} covered different content than the asset has now; save and test it again`)
     }
+    if (asset.origin?.unmapped) throw new ActivationRefusedError('incomplete-draft', `automation draft is incomplete: ${asset.origin.unmapped} action(s) of the exploration it was built from (journal seq ${asset.origin.fromSeq}-${asset.origin.toSeq}) could not become steps. Finish the recipe yourself and save it, test it, then activate`)
     if (asset.domains.length < 1) throw new ActivationRefusedError('no-domain', 'automation asset must declare at least one domain before activation')
     const replaced = asset.sourceAssetId ? this.state.assets.find(item => item.id === asset.sourceAssetId && item.id !== asset.id && item.status === 'active') : undefined
     if (this.state.assets.filter(item => item.status === 'active' && item.id !== asset.id && item.id !== replaced?.id).length >= this.policy.maxActiveAssets) {
