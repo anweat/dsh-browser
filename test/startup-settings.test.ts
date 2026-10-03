@@ -48,10 +48,16 @@ test('startup resolves persisted settings before browser tools and policy are re
     assert.deepEqual(inject, ['tools', 'settings'])
     assert.equal(order[0], 'settings')
     assert.equal(registerOptions?.applies, 'restart')
-    assert.equal(definitions.has('browser_click'), false)
-    const status = await definitions.get('browser_status').execute({}, { signal: undefined })
-    assert.equal(status.automationMode, 'read-only')
-    assert.equal(status.exposedTools.includes('browser_click'), false)
+    // Startup settings (read-only) win over the entry config (unrestricted): no flat tools, and no interactive action.
+    assert.deepEqual([...definitions.keys()].sort(), ['browser_call', 'browser_index'])
+    const reply = await definitions.get('browser_call').execute({ action: 'runtime.status' }, { signal: new AbortController().signal })
+    assert.equal(reply.ok, true)
+    assert.equal(reply.result.automationMode, 'read-only')
+    assert.equal(reply.result.exposedActions.includes('act.click'), false)
+    assert.equal(reply.result.exposedActions.includes('observe.read'), true)
+    const denied = await definitions.get('browser_call').execute({ action: 'act.click', args: { selector: 'a' } }, { signal: new AbortController().signal })
+    assert.equal(denied.ok, false)
+    assert.equal(denied.error.code, 'POLICY_DENIED')
   } finally {
     fs.rmSync(snapshotDir, { recursive: true, force: true })
   }

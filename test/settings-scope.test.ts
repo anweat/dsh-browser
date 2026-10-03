@@ -51,13 +51,13 @@ test('hosts without settings.register fall back to the Loader-managed entry conf
     // The service must still be provided and tools must still register.
     assert.ok(order.includes('service'), 'browser service was not provided')
     assert.ok(order.includes('policy'), 'policy hook was not registered')
-    assert.ok(definitions.has('browser_click'), 'browser tools did not register')
+    assert.ok(definitions.has('browser_call') && definitions.has('browser_index'), 'browser tools did not register')
 
     // The live config is the entry config the host passed in, so the
     // unrestricted mode requested at composition is honoured.
-    const status = await definitions.get('browser_status').execute({}, { signal: undefined })
-    assert.equal(status.automationMode, 'unrestricted')
-    assert.equal(status.exposedTools.includes('browser_click'), true)
+    const reply = await definitions.get('browser_call').execute({ action: 'runtime.status' }, { signal: new AbortController().signal })
+    assert.equal(reply.result.automationMode, 'unrestricted')
+    assert.equal(reply.result.exposedActions.includes('act.click'), true)
   } finally {
     fs.rmSync(snapshotDir, { recursive: true, force: true })
   }

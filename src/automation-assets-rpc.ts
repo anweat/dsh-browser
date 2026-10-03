@@ -2,9 +2,12 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-import type { AutomationAsset, AutomationAssetStatus, AutomationAssetStore } from './automation-assets.ts'
+import { ActivationRefusedError, type AutomationAsset, type AutomationAssetStatus, type AutomationAssetStore } from './automation-assets.ts'
 import type { BrowserService } from './browser-service.ts'
-import { executeAutomationAsset } from './automation-execution.ts'
+import { executeAutomationAsset, executeDraftInputSets } from './automation-execution.ts'
+import { convertV1ToV2Draft } from './automation-convert.ts'
+import { promptsDumpText } from './prompts.ts'
+import { stripAnsi } from './actions/errors.ts'
 
 /**
  * This plugin's own logical RPC channel.
@@ -17,7 +20,6 @@ import { executeAutomationAsset } from './automation-execution.ts'
  */
 const CHANNEL = '/dsh-browser-assets'
 const PREFIX = 'dsh-browser-assets'
-const ENDPOINTS = ['snapshot', 'get', 'save', 'summarize', 'dismiss', 'validate', 'test', 'status'] as const
 
 function record(payload: unknown): Record<string, unknown> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('request payload must be an object')
@@ -31,7 +33,23 @@ function stringField(payload: Record<string, unknown>, name: string): string {
   return value
 }
 
-export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService): void {
+/** A failure the review UI should tell apart from a transport or storage error. `details.errorCode` names it. */
+export class AssetRpcFailure extends Error {
+  constructor(message: string, readonly details: Record<string, unknown>) {
+    super(message)
+    this.name = 'AssetRpcFailure'
+  }
+}
+
+function expectedRevision(payload: Record<string, unknown>): number | undefined {
+  const value = payload.expectedRevision
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value)) throw new Error('expectedRevision must be an integer')
+  return value
+}
+
+/** `promptsStatus` answers the settings card's "prompt text" section: the overrides in force, diagnostics and the L0 estimate. */
+export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService, promptsStatus?: () => unknown): void {
   ctx.inject(['connection', 'webServer'], (connectionCtx) => {
     // Register the channel with the Host transport rather than hand-rolling the
     // client-request/server-response envelope on an exact Fetch route. The
@@ -60,20 +78,58 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
           case 'snapshot': value = store.snapshot(); break
           case 'get': value = store.get(stringField(payload, 'id')) ?? null; break
           case 'save': value = store.saveDraft(payload.asset as Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>); break
+          case 'fork': value = store.fork(stringField(payload, 'id')); break
           case 'summarize': value = store.summarizeCandidate(stringField(payload, 'id')); break
           case 'dismiss': store.dismissCandidate(stringField(payload, 'id')); value = store.snapshot(); break
           case 'validate': value = store.validate(stringField(payload, 'id')); break
           case 'test': {
-            const result = await executeAutomationAsset(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputs, 'draft')
+            if (payload.inputSets !== undefined) {
+              if (payload.inputs !== undefined) throw new Error('pass either inputs (one run) or inputSets (2 to 5 runs), not both')
+              // Each set runs in a fresh context; the credential the store keeps records every set (digests only), which is what the panel shows.
+              const replay = await executeDraftInputSets(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputSets, { expectedRevision: expectedRevision(payload) })
+              if (!replay.succeeded) {
+                const failed = replay.sets.find(entry => !entry.passed)
+                const errorCode = replay.verifierMissing ? 'VALIDATION_MISSING' : failed?.execution.failedStep?.errorCode ?? (failed?.execution.validationStatus === 'failed' ? 'VALIDATION_FAILED' : 'ACTION_FAILED')
+                throw new AssetRpcFailure(
+                  replay.verifierMissing?.message ?? `Input set ${(failed?.index ?? 0) + 1} of ${replay.planned} did not pass: ${failed?.execution.failedStep?.message ?? failed?.execution.message ?? 'the replay did not complete'}`,
+                  { errorCode, failedSet: failed ? failed.index + 1 : undefined, inputSets: replay.planned, setsRun: replay.sets.length, revision: replay.asset.revision },
+                )
+              }
+              value = replay.asset
+              break
+            }
+            const result = await executeAutomationAsset(service, store, stringField(payload, 'id'), stringField(payload, 'url'), payload.inputs, 'draft', { expectedRevision: expectedRevision(payload) })
+            // The review UI shows a failed replay as an error, as it did when a failure threw. The errorCode lets it
+            // say "the result did not hold" (VALIDATION_FAILED / VALIDATION_MISSING) apart from a backend problem.
+            if (!result.succeeded) {
+              const execution = result.execution
+              const errorCode = result.verifierMissing ? 'VALIDATION_MISSING' : execution.failedStep?.errorCode ?? (execution.validationStatus === 'failed' ? 'VALIDATION_FAILED' : 'ACTION_FAILED')
+              throw new AssetRpcFailure(
+                result.verifierMissing?.message ?? execution.failedStep?.message ?? execution.message ?? 'Runtime replay did not complete.',
+                { errorCode, executionStatus: execution.executionStatus, validationStatus: execution.validationStatus, effects: execution.effects, revision: result.asset.revision },
+              )
+            }
             value = result.asset
             break
           }
-          case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus); break
+          case 'convert': {
+            // Same conversion as `automation.develop convert`: the source is only read; the result is a NEW v2 draft.
+            const source = store.get(stringField(payload, 'id'))
+            if (!source) throw new Error('automation asset not found')
+            const conversion = convertV1ToV2Draft(source)
+            value = { draft: store.saveDraft(conversion.draft), pendingDisambiguation: conversion.pendingDisambiguation, notes: conversion.notes }
+            break
+          }
+          case 'prompts': value = promptsStatus ? promptsStatus() : null; break
+          // The same JSON `prompts:dump` prints, for installs that have no script environment.
+          case 'promptsDefaults': value = { json: promptsDumpText() }; break
+          case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus, { expectedRevision: expectedRevision(payload) }); break
           default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}`, details: {} } }
         }
         return { ok: true, value }
       } catch (error) {
-        return { ok: false, error: { code: 'bad-request' as const, message: String(error instanceof Error ? error.message : error).slice(0, 500), details: {} } }
+        const details = error instanceof AssetRpcFailure ? error.details : error instanceof ActivationRefusedError ? { errorCode: 'ACTIVATION_REFUSED', reason: error.reason } : {}
+        return { ok: false, error: { code: 'bad-request' as const, message: stripAnsi(String(error instanceof Error ? error.message : error)).slice(0, 500), details } }
       }
     }
     connectionCtx.effect(

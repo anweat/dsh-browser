@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Popup Opener</title></head>
+<body>
+  <h1>Opener page</h1>
+  <a id="child-link" href="/popup-child.html" target="_blank">Open child</a>
+  <button id="open-script" type="button">Open via script</button>
+  <p id="note">Opener ready</p>
+  <script>
+    document.getElementById('open-script').addEventListener('click', function () { window.open('/popup-child.html?via=script') })
+  </script>
+</body>
+</html>

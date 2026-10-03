@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Form</title></head>
+<body>
+  <h1>Form fixture</h1>
+  <label for="name">Name</label>
+  <input id="name" type="text">
+  <button id="inc" type="button">Increment</button>
+  <p id="count">Count: 0</p>
+  <p id="greeting">Hello, nobody</p>
+  <script>
+    var count = 0
+    document.getElementById('inc').addEventListener('click', function () {
+      count += 1
+      document.getElementById('count').textContent = 'Count: ' + count
+    })
+    document.getElementById('name').addEventListener('input', function (event) {
+      document.getElementById('greeting').textContent = 'Hello, ' + (event.target.value || 'nobody')
+    })
+  </script>
+</body>
+</html>

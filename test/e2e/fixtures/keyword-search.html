@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Keyword Search</title></head>
+<body>
+  <h1>Keyword search</h1>
+  <label for="q">Query</label>
+  <input id="q" type="text">
+  <label for="access">Access</label>
+  <input id="access" type="password">
+  <button id="go" type="button">Search</button>
+  <p id="status">Idle</p>
+  <ul id="results"></ul>
+  <script>
+    // ?static=1: the results ignore the query. ?broken=1: the results container is gone (an extraction failure).
+    var flags = location.search
+    var index = {
+      alpha: ['Alpha guide', 'Alpha handbook', 'Alpha guide', 'Alpha index', 'Alpha handbook'],
+      beta: ['Beta primer', 'Beta primer', 'Beta manual'],
+      gamma: ['Gamma notes', 'Gamma notes', 'Gamma notes', 'Gamma atlas']
+    }
+    if (flags.indexOf('broken=1') >= 0) document.getElementById('results').id = 'results-moved'
+    document.getElementById('go').addEventListener('click', function () {
+      var q = document.getElementById('q').value.trim().toLowerCase()
+      var items = flags.indexOf('static=1') >= 0 ? index.alpha : (index[q] || [])
+      setTimeout(function () {
+        var list = document.getElementById('results') || document.getElementById('results-moved')
+        list.innerHTML = items.map(function (item) { return '<li class="hit">' + item + '</li>' }).join('')
+        var status = document.getElementById('status')
+        status.textContent = items.length + ' results'
+        status.className = 'done'
+      }, 150)
+    })
+  </script>
+</body>
+</html>

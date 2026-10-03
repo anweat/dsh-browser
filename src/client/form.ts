@@ -13,11 +13,13 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SettingsFormModel, settingsNumberField, settingsTextField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
+import { ASSET_POLICY_BOOLEAN_KEYS, ASSET_POLICY_ENUMS, ASSET_POLICY_INTEGER_RANGES, ASSET_POLICY_KEYS, ASSET_POLICY_STRING_KEYS, USAGE_POLICY_BOUNDS, type AssetPolicyKey } from '../policy-keys.ts'
+import { PROMPT_TEXT_FIELDS, canonicalPrompts, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
-  | 'enabled' | 'automationMode' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
+  | 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
   | 'autoInstall' | 'storageStatePath' | 'defaultAuthProfile'
-  | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort'
+  | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'maxSessions'
 
 /** Retained name for callers that predate the section/JSON split. */
 export type SettingField = SectionField
@@ -30,6 +32,19 @@ export interface BrowserCardState extends SettingsFormShell {
   fields: Record<SectionField, CardFieldState>
   /** JSON code-editor controls, kept apart so `fields` stays exhaustively keyed. */
   jsonFields: Record<string, CardFieldState>
+  /** The "prompt text" section: views of the one staged `prompts` draft. */
+  prompts: PromptsCardState
+}
+
+export interface PromptsCardState {
+  texts: Record<PromptTextFieldId, { text: string; invalid: boolean }>
+  skillEnabled: boolean
+  /** The JSON box for groups, actions and errorHints. */
+  extras: { text: string; invalid: boolean }
+  /** Whether saving would leave a `prompts` entry in the user layer. */
+  overridden: boolean
+  /** Whether the whole `prompts` draft is one the plugin would refuse to take. */
+  invalid: boolean
 }
 
 /** A free-text field that clears when emptied, so blanking the control resets it. */
@@ -84,35 +99,39 @@ const jsonField = (field: string, validate?: (value: Record<string, unknown>) =>
   },
 })
 
-const POLICY_BOUNDS: Record<string, readonly [number, number]> = {
-  minDelayMs: [0, 60_000], maxConcurrency: [1, 8], burst: [1, 20], maxPagesPerRun: [1, 100],
-  maxDepth: [0, 5], retryLimit: [0, 5], backoffBaseMs: [1, 60_000], cooldownMs: [100, 300_000],
-}
+/** A JSON array of strings (Chromium launch arguments): written compactly on one line, an empty draft clears it. */
+const stringArrayField = (field: string): SettingsFieldSpec => ({
+  field,
+  format: value => Array.isArray(value) && value.length ? JSON.stringify(value) : '',
+  parse(text) {
+    if (text.trim() === '') return { kind: 'clear' }
+    try {
+      const value = JSON.parse(text) as unknown
+      return Array.isArray(value) && value.every(entry => typeof entry === 'string' && entry.length > 0) ? { kind: 'set', value } : undefined
+    } catch { return undefined }
+  },
+})
 
-const ASSET_POLICY_KEYS = new Set([
-  'enabled', 'directory', 'persistenceMode', 'activationMode', 'minSuccessfulRuns', 'minDistinctSessions',
-  'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay',
-  'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget',
-  'modelDevelopmentEnabled', 'maxModelDraftWritesPerSession',
-])
+const ASSET_KEYS: ReadonlySet<string> = new Set(ASSET_POLICY_KEYS)
+const NON_NUMERIC_ASSET_KEYS: ReadonlySet<string> = new Set([...ASSET_POLICY_BOOLEAN_KEYS, ...ASSET_POLICY_STRING_KEYS, ...Object.keys(ASSET_POLICY_ENUMS)])
 
 function validAssetPolicy(value: Record<string, unknown>): boolean {
-  if (Object.keys(value).some(key => !ASSET_POLICY_KEYS.has(key))) return false
-  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') return false
-  if (value.directory !== undefined && typeof value.directory !== 'string') return false
-  if (value.modelDevelopmentEnabled !== undefined && typeof value.modelDevelopmentEnabled !== 'boolean') return false
-  if (value.persistenceMode !== undefined && !['off', 'manual', 'suggest', 'auto-draft'].includes(String(value.persistenceMode))) return false
-  if (value.activationMode !== undefined && !['manual', 'auto-tested'].includes(String(value.activationMode))) return false
-  const numeric = ['minSuccessfulRuns', 'minDistinctSessions', 'successWindowDays', 'minSuccessRate', 'maxCandidates', 'candidateTtlDays', 'maxSuggestionsPerDay', 'maxDrafts', 'maxActiveAssets', 'retrievalTopK', 'catalogTokenBudget', 'maxModelDraftWritesPerSession']
+  if (Object.keys(value).some(key => !ASSET_KEYS.has(key))) return false
   return Object.entries(value).every(([key, entry]) => {
-    if (!numeric.includes(key)) return true
-    return typeof entry === 'number' && Number.isFinite(entry) && entry >= 0
+    if (ASSET_POLICY_BOOLEAN_KEYS.includes(key as AssetPolicyKey)) return entry === undefined || typeof entry === 'boolean'
+    if (ASSET_POLICY_STRING_KEYS.includes(key as AssetPolicyKey)) return entry === undefined || typeof entry === 'string'
+    const choices = ASSET_POLICY_ENUMS[key as AssetPolicyKey]
+    if (choices) return entry === undefined || choices.includes(String(entry))
+    if (NON_NUMERIC_ASSET_KEYS.has(key)) return true
+    if (typeof entry !== 'number' || !Number.isFinite(entry) || entry < 0) return false
+    const range = ASSET_POLICY_INTEGER_RANGES[key as AssetPolicyKey]
+    return !range || (Number.isInteger(entry) && entry >= range[0] && entry <= range[1])
   })
 }
 
 function validUsagePolicy(value: Record<string, unknown>): boolean {
-  if (Object.keys(value).some(key => !(key in POLICY_BOUNDS))) return false
-  return Object.entries(POLICY_BOUNDS).every(([key, [min, max]]) => {
+  if (Object.keys(value).some(key => !(key in USAGE_POLICY_BOUNDS))) return false
+  return Object.entries(USAGE_POLICY_BOUNDS).every(([key, [min, max]]) => {
     const entry = value[key]
     return entry === undefined || (typeof entry === 'number' && Number.isInteger(entry) && entry >= min && entry <= max)
   })
@@ -126,9 +145,11 @@ function validUsagePolicy(value: Record<string, unknown>): boolean {
 export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   booleanField('enabled'),
   enumField('automationMode', ['read-only', 'standard', 'autonomous', 'unrestricted']),
+  enumField('toolSurface', ['indexed', 'flat']),
   enumField('browserRuntime', ['playwright', 'patchright']),
   textField('channel'),
   rangedNumberField('cdpPort', 1, 65_535),
+  rangedNumberField('maxSessions', 1, 64),
   booleanField('headless'),
   booleanField('opencliEnabled'),
   booleanField('autoInstall'),
@@ -139,11 +160,20 @@ export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   booleanField('verbose'),
 ] as const
 
-/** The JSON-shaped section fields the card renders as code editors. */
+/** The JSON-shaped section fields: objects (policies, prompts) and the launch-argument array. */
 export const JSON_FIELD_SPECS: readonly SettingsFieldSpec[] = [
   jsonField('usagePolicy', validUsagePolicy),
   jsonField('automationAssets', validAssetPolicy),
+  jsonField('prompts', validPrompts),
+  stringArrayField('args'),
 ] as const
+
+/**
+ * Public config fields the card has no form for, on purpose: nested records (named login states, rule packs with
+ * hash-pinned scripts) that are safer to edit in the profile config file. The card names each one and says so, instead
+ * of leaving it out without a word. `rulePacks` is not `.volatile()` in the Host schema, so no form could write it.
+ */
+export const CONFIG_FILE_ONLY_FIELDS = ['authProfiles', 'rulePacks'] as const
 
 /** Section fields rendered as JSON code editors rather than single inputs. */
 export const JSON_FIELDS: ReadonlySet<string> = new Set(JSON_FIELD_SPECS.map(spec => spec.field))
@@ -154,17 +184,89 @@ export const ALL_FIELD_SPECS: readonly SettingsFieldSpec[] = [...FIELD_SPECS, ..
 export class BrowserSettingsController {
   private readonly form: SettingsFormModel<Record<string, unknown>>
   private readonly store: SnapshotStore<BrowserCardState>
+  /** What the person typed in the groups/actions/errorHints box, kept verbatim while it is not valid JSON yet. */
+  private extrasRaw: string | undefined
+  private extrasInvalid = false
 
-  constructor(scope: SettingsFormScope<Record<string, unknown>>) {
+  constructor(private readonly scope: SettingsFormScope<Record<string, unknown>>) {
     this.form = new SettingsFormModel<Record<string, unknown>>(scope, [...ALL_FIELD_SPECS])
     this.store = this.form.bind(() => this.project())
   }
 
   inject() {
+    const actions = this.form.actions()
     return {
       hooks: { browserSettings: this.store },
-      ...this.form.actions(),
+      ...actions,
+      // A save is refused while the groups/actions/errorHints box holds something that is not valid.
+      save: () => this.save(),
+      discard: () => { this.extrasRaw = undefined; this.extrasInvalid = false; actions.discard() },
+      editPromptText: (id: PromptTextFieldId, text: string) => this.editPromptText(id, text),
+      setPromptSkillEnabled: (enabled: boolean) => this.setPromptSkillEnabled(enabled),
+      editPromptExtras: (text: string) => this.editPromptExtras(text),
+      resetPromptExtras: () => this.resetPromptExtras(),
     }
+  }
+
+  private async save(): Promise<void> {
+    if (this.extrasInvalid) return
+    await this.form.save()
+    // What was typed is now the stored value, so the box shows that again. (A failed save keeps the draft and its flag.)
+    if (!this.form.shell().failed && this.extrasRaw !== undefined) { this.extrasRaw = undefined; this.refresh() }
+  }
+
+  // --- the prompt text section: one staged `prompts` draft, several views of it ----------------------------------
+
+  /** The staged `prompts` value as an object (empty when none, or when its text is not JSON). */
+  private promptsDraft(): Record<string, unknown> {
+    const text = this.form.field('prompts').text
+    if (text.trim() === '') return {}
+    try {
+      const value = JSON.parse(text) as unknown
+      return value && typeof value === 'object' && !Array.isArray(value) ? canonicalPrompts(value as Record<string, unknown>) : {}
+    } catch { return {} }
+  }
+
+  private stagePrompts(value: Record<string, unknown>): void {
+    const next = canonicalPrompts(value)
+    const stored = this.scope.getSnapshot().value?.prompts
+    const same = JSON.stringify(next) === JSON.stringify(stored && typeof stored === 'object' ? canonicalPrompts(stored as Record<string, unknown>) : {})
+    // Back at the stored value: stage its own text, so the form no longer counts a change.
+    const text = same ? ALL_FIELD_SPECS.find(spec => spec.field === 'prompts')!.format(stored) : Object.keys(next).length ? JSON.stringify(next, null, 2) : ''
+    this.form.actions().edit('prompts', text)
+  }
+
+  private refresh(): void { this.form.actions().edit('prompts', this.form.field('prompts').text) }
+
+  editPromptText(id: PromptTextFieldId, text: string): void {
+    const field = PROMPT_TEXT_FIELDS.find(entry => entry.id === id)!
+    this.stagePrompts(setAt(this.promptsDraft(), field.path, text.trim() === '' ? undefined : text))
+  }
+
+  setPromptSkillEnabled(enabled: boolean): void {
+    this.stagePrompts(setAt(this.promptsDraft(), ['skill', 'enabled'], enabled ? undefined : false))
+  }
+
+  editPromptExtras(text: string): void {
+    this.extrasRaw = text
+    this.extrasInvalid = false
+    if (text.trim() === '') { this.stagePrompts(withExtras(this.promptsDraft(), {})); return }
+    try {
+      const value = JSON.parse(text) as unknown
+      if (value && typeof value === 'object' && !Array.isArray(value) && validExtras(value as Record<string, unknown>)) {
+        this.stagePrompts(withExtras(this.promptsDraft(), value as Record<string, unknown>))
+        return
+      }
+    } catch { /* reported below */ }
+    this.extrasInvalid = true
+    this.refresh()
+  }
+
+  /** Back to the plugin's own text for groups, actions and error hints. */
+  resetPromptExtras(): void {
+    this.extrasRaw = undefined
+    this.extrasInvalid = false
+    this.stagePrompts(withExtras(this.promptsDraft(), {}))
   }
 
   snapshot(): BrowserCardState { return this.store.getSnapshot() }
@@ -176,6 +278,24 @@ export class BrowserSettingsController {
     for (const spec of FIELD_SPECS) fields[spec.field as SectionField] = this.form.field(spec.field)
     const jsonFields: Record<string, CardFieldState> = {}
     for (const spec of JSON_FIELD_SPECS) jsonFields[spec.field] = this.form.field(spec.field)
-    return { ...this.form.shell(), fields, jsonFields }
+    const shell = this.form.shell()
+    return { ...shell, invalid: shell.invalid || this.extrasInvalid, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!) }
+  }
+
+  private projectPrompts(field: CardFieldState): PromptsCardState {
+    const draft = this.promptsDraft()
+    const texts = {} as PromptsCardState['texts']
+    for (const entry of PROMPT_TEXT_FIELDS) {
+      const value = getAt(draft, entry.path)
+      const text = typeof value === 'string' ? value : ''
+      texts[entry.id] = { text, invalid: text.length > entry.limit }
+    }
+    return {
+      texts,
+      skillEnabled: getAt(draft, ['skill', 'enabled']) !== false,
+      extras: { text: this.extrasRaw ?? extrasText(draft), invalid: this.extrasInvalid },
+      overridden: field.overridden,
+      invalid: field.invalid,
+    }
   }
 }
