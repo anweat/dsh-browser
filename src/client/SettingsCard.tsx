@@ -210,6 +210,21 @@ function PromptsPanel(props: BrowserSettingsCardProps & { disabled: boolean }) {
         {report.diagnostics.length ? <ul data-dsh-browser-prompts-diagnostics>{report.diagnostics.map((entry, index) => <li key={index}>{entry.message}</li>)}</ul> : null}
       </> : null}
     </div>
+    <div className={css.field} data-dsh-browser-prompts-export>
+      <div className={css.fieldHead}>
+        <span className={css.label}>{t('promptsDefaults')}</span>
+        {status.defaults === undefined
+          ? <button type="button" className={css.secondary} onClick={() => void props.exportPromptDefaults()}>{t('promptsExport')}</button>
+          : <span className={css.actions}>
+            <button type="button" className={css.secondary} onClick={() => { void navigator.clipboard?.writeText(status.defaults ?? '').catch(() => undefined) }}>{t('promptsCopy')}</button>
+            <button type="button" className={css.secondary} onClick={props.hidePromptDefaults}>{t('promptsHideDefaults')}</button>
+          </span>}
+      </div>
+      {status.defaults !== undefined
+        ? <textarea className={`${css.input} ${css.textarea} ${css.code}`} rows={12} readOnly spellCheck={false} aria-label={t('promptsDefaults')} value={status.defaults} onFocus={event => event.currentTarget.select()} data-dsh-browser-prompts-defaults />
+        : null}
+      {status.defaultsFailed ? <p className={css.failed} role="alert">{t('promptsDefaultsFailed')}</p> : <p className={css.hint}>{t('promptsDefaultsHint')}</p>}
+    </div>
     <p className={css.notice} role="note">{t('promptsRestart')}</p>
   </section>
 }

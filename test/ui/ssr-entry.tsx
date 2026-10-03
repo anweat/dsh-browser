@@ -15,6 +15,8 @@ export interface RenderOptions {
   editor?: Record<string, unknown>
   policy?: Record<string, unknown>
   prompts?: Record<string, unknown>
+  /** The exported default text, when it has been loaded. */
+  promptsDefaults?: string
 }
 
 export function renderCard(options: RenderOptions = {}): { html: string; missingKeys: string[] } {
@@ -36,14 +38,14 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
     selected: options.selected,
     editor: { text: options.selected ? '{"kind":"recipe","name":"x"}' : '', baseline: options.selected ? '{"kind":"recipe","name":"x"}' : '', testUrl: '', testInputs: '{}', ...options.editor },
   }
-  const status = { loading: false, failed: false, status: options.prompts }
+  const status = { loading: false, failed: false, status: options.prompts, defaults: options.promptsDefaults }
   const props = {
     view: 'page', t,
     useBrowserSettings: (select: (state: unknown) => unknown) => select(settings),
     useAutomationAssets: (select: (state: unknown) => unknown) => select(assets),
     usePromptsStatus: (select: (state: unknown) => unknown) => select(status),
     edit: noop, resetField: noop, save: noop, discard: noop,
-    editPromptText: noop, setPromptSkillEnabled: noop, editPromptExtras: noop, resetPromptExtras: noop, refreshPromptsStatus: noop,
+    editPromptText: noop, setPromptSkillEnabled: noop, editPromptExtras: noop, resetPromptExtras: noop, refreshPromptsStatus: noop, exportPromptDefaults: noop, hidePromptDefaults: noop,
     refreshAutomationAssets: noop, selectAutomationAsset: noop, saveAutomationAsset: noop, summarizeAutomationCandidate: noop, dismissAutomationCandidate: noop,
     validateAutomationAsset: noop, testAutomationAsset: noop, setAutomationAssetStatus: noop, editAutomationAsset: noop, setAssetTestUrl: noop, setAssetTestInputs: noop,
     requestSelectAutomationAsset: noop, requestNewAutomationAsset: noop, requestRefreshAutomationAssets: noop, requestForkAutomationAsset: noop, requestConvertAutomationAsset: noop,

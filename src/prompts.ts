@@ -251,6 +251,14 @@ export function defaultPrompts(): Record<string, unknown> {
   }
 }
 
+/**
+ * The text `prompts:dump` prints and the settings card's "Export default text" shows: {@link defaultPrompts} as JSON,
+ * two-space indented unless `compact`. One function, so the script and the card cannot drift apart.
+ */
+export function promptsDumpText(compact = false): string {
+  return JSON.stringify(defaultPrompts(), null, compact ? 0 : 2)
+}
+
 // --- budget and status -----------------------------------------------------------------------------------------
 
 const tokensOf = estimateTokens

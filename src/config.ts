@@ -70,7 +70,7 @@ export interface Config {
   automationAssets?: AutomationAssetPolicyInput
   /**
    * Deployment overrides of the model-facing text (tool descriptions, root guide, catalog summaries and notes,
-   * error hints, the skill). Every field is optional; see `prompts:dump` for the full structure with defaults.
+   * error hints, the skill). Every field is optional; the settings card button Export default text (or `prompts:dump`) shows the full structure with defaults.
    */
   prompts?: PromptsInput
   /** Lazily run `playwright install chromium` when the browser is missing. */
@@ -181,7 +181,7 @@ export const Config = z.object({
       bodyFile: z.string().description(`Absolute path of a Markdown file replacing the SKILL.md body (at most ${PROMPT_LIMITS.skillBodyFile} characters). A missing or unreadable file falls back to the packaged body.`),
       append: z.string().description(`Text appended to the end of the skill body. At most ${PROMPT_LIMITS.skillAppend} characters.`),
     }),
-  }).description('Overrides of the model-facing text. Run `pnpm prompts:dump` for every key with its default. Values over the length limits and unknown keys are ignored and reported by runtime.status. Tool descriptions apply after a restart; everything else applies on the next call.').volatile(),
+  }).description('Overrides of the model-facing text. The settings card button Export default text (or `pnpm prompts:dump` in a repository checkout) prints every key with its default. Values over the length limits and unknown keys are ignored and reported by runtime.status. Tool descriptions apply after a restart; everything else applies on the next call.').volatile(),
   autoInstall: z.boolean().default(false).volatile(),
   snapshotDir: z.string().volatile(),
   verbose: z.boolean().default(false).volatile(),

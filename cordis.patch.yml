@@ -10,8 +10,8 @@
 # disappear on restart. Config schema defaults supply the initial values.
 #
 # Model-facing text (tool descriptions, root guide/note, summaries, error hints, skill) can be
-# overridden under `prompts` in that config row; `pnpm prompts:dump` prints every default in the
-# exact structure. See README "自定义提示文本".
+# overridden under `prompts` in that config row; the settings card's "Export default text" (or `pnpm prompts:dump` in a
+# repository checkout) prints every default in the exact structure. See README "自定义提示文本".
 - insert:
     - id: browser
       name: '@anweat/dsh-browser'

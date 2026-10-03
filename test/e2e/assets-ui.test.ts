@@ -10,6 +10,7 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { loadBrowserRuntime } from '../../src/deps.ts'
+import { defaultPrompts } from '../../src/prompts.ts'
 import { computeContentHash } from '../../src/automation-assets.ts'
 import { registerAutomationAssetRpc } from '../../src/automation-assets-rpc.ts'
 import { createHarness, detectBrowser, startFixtureServer, type Harness } from './support.ts'
@@ -348,6 +349,27 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     assert.match(await page.locator('[data-dsh-browser-prompts-diagnostics]').innerText(), /groups\.nope: no such group/)
     assert.equal(await page.locator('#plugin-config-dsh-browser-prompts-rootNote').count(), 1)
     assert.equal(await page.locator('#plugin-config-dsh-browser-prompts-extras').count(), 1)
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  it('Export default text shows the same JSON as prompts:dump in a read-only box, with no pnpm in the section', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const { page, errors } = await openUi()
+    const section = page.locator('[data-dsh-browser-prompts]')
+    await section.waitFor()
+    assert.equal(/pnpm/i.test(await section.innerText()), false)
+    assert.equal(await page.locator('[data-dsh-browser-prompts-defaults]').count(), 0, 'nothing is shown until asked for')
+    await page.getByRole('button', { name: 'Export default text', exact: true }).click()
+    const box = page.locator('[data-dsh-browser-prompts-defaults]')
+    await box.waitFor()
+    assert.equal(await box.getAttribute('readonly') !== null, true)
+    const text = await box.inputValue()
+    assert.deepEqual(JSON.parse(text), defaultPrompts())
+    assert.equal(text, JSON.stringify(defaultPrompts(), null, 2))
+    assert.equal(await page.getByRole('textbox', { name: 'Default text (read-only)' }).count(), 1, 'the box has an accessible name')
+    await page.getByRole('button', { name: 'Hide', exact: true }).click()
+    assert.equal(await page.locator('[data-dsh-browser-prompts-defaults]').count(), 0)
     assert.deepEqual(errors, [])
     await page.close()
   })

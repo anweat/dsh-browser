@@ -11,7 +11,8 @@
 // Usage: node scripts/dump-prompts.mjs [--compact]
 //   --compact  single-line JSON (default is 2-space indented)
 //
-// It reads the TypeScript sources, so it never reports a stale build, and it needs no browser.
+// It reads the TypeScript sources, so it never reports a stale build, and it needs no browser. It only runs from a
+// checkout of the repository; an installed plugin shows the same JSON under the settings card's "Export default text".
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
@@ -24,5 +25,5 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
   process.exit(result.status ?? 1)
 }
 
-const { defaultPrompts } = await import(pathToFileURL(path.join(root, 'src/prompts.ts')).href)
-console.log(JSON.stringify(defaultPrompts(), null, process.argv.includes('--compact') ? 0 : 2))
+const { promptsDumpText } = await import(pathToFileURL(path.join(root, 'src/prompts.ts')).href)
+console.log(promptsDumpText(process.argv.includes('--compact')))

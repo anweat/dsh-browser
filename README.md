@@ -496,7 +496,7 @@ Camoufox 当前没有硬集成：截至本版，其 JS 包要求 Node 22 且 pee
 
 动作键可以是 `group.action`、子动作（`automation.develop.save`）或详情页（`observe.read.controls`，其 `notes` 即该页正文）。空字符串等于不覆盖。
 
-**导出全部默认文本**：`pnpm prompts:dump`（`node scripts/dump-prompts.mjs`）输出一份 JSON，结构与 `prompts` 完全一致，包含每个可覆盖项的内置文本。复制它，删掉保持默认的部分，改写其余部分，放进配置即可；原样放回不改变任何输出（有测试保证）。
+**导出全部默认文本**：设置面板“提示文本”分区的“导出默认文本”按钮会在只读文本框里显示一份 JSON，结构与 `prompts` 完全一致，包含每个可覆盖项的内置文本，安装包用户不需要任何脚本环境。在仓库检出里也可以运行 `pnpm prompts:dump`（`node scripts/dump-prompts.mjs`），输出与按钮完全相同。复制它，删掉保持默认的部分，改写其余部分，放进配置即可；原样放回不改变任何输出（有测试保证）。
 
 **长度上限**（超限的值整条忽略，不会被截断，并写入诊断）：
 

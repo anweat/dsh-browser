@@ -33,6 +33,8 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   resetPromptExtras: () => void
   usePromptsStatus: <R>(selector: (snapshot: PromptsStatusState) => R) => R
   refreshPromptsStatus: () => void
+  exportPromptDefaults: () => Promise<void>
+  hidePromptDefaults: () => void
   useAutomationAssets: <R>(selector: (snapshot: AutomationAssetsState) => R) => R
   refreshAutomationAssets: () => void
   selectAutomationAsset: (id?: string) => void

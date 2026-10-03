@@ -95,3 +95,20 @@ test('the policy boxes list every key the code accepts, in both locales (maxTest
     }
   }
 })
+
+test('the prompt section offers "Export default text" and no longer asks anyone to run pnpm', (t) => {
+  if (skip) return t.skip(skip)
+  for (const locale of ['en', 'zh'] as const) {
+    const { html } = renderCard!({ locale })
+    assert.equal(/pnpm/i.test(html), false, `the ${locale} card never mentions pnpm`)
+    assert.match(html, locale === 'zh' ? /导出默认文本/ : /Export default text/)
+    assert.ok(html.includes('data-dsh-browser-prompts-export'))
+    // Once loaded, the defaults sit in a read-only box that has a name.
+    const loaded = renderCard!({ locale, promptsDefaults: '{"rootNote":""}' }).html
+    const box = loaded.match(/<textarea[^>]*data-dsh-browser-prompts-defaults[^>]*>/)?.[0] ?? ''
+    assert.match(box, /aria-label="[^"]+"/, 'the box has a name')
+    assert.match(box, /readonly/i, 'and is read-only')
+    assert.ok(loaded.includes('data-dsh-browser-prompts-defaults'))
+    assert.ok(loaded.includes('rootNote'))
+  }
+})

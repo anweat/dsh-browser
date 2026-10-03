@@ -6,6 +6,7 @@ import { ActivationRefusedError, type AutomationAsset, type AutomationAssetStatu
 import type { BrowserService } from './browser-service.ts'
 import { executeAutomationAsset, executeDraftInputSets } from './automation-execution.ts'
 import { convertV1ToV2Draft } from './automation-convert.ts'
+import { promptsDumpText } from './prompts.ts'
 
 /**
  * This plugin's own logical RPC channel.
@@ -119,6 +120,8 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
             break
           }
           case 'prompts': value = promptsStatus ? promptsStatus() : null; break
+          // The same JSON `prompts:dump` prints, for installs that have no script environment.
+          case 'promptsDefaults': value = { json: promptsDumpText() }; break
           case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus, { expectedRevision: expectedRevision(payload) }); break
           default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}`, details: {} } }
         }

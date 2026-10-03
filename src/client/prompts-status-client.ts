@@ -8,6 +8,10 @@ export interface PromptsStatusState {
   failed: boolean
   /** What the running plugin reports: the overrides in force, the diagnostics, and the L0 estimate. */
   status?: PromptsStatus
+  /** The JSON of every default prompt text, once "Export default text" has loaded it (the same text `prompts:dump` prints). */
+  defaults?: string
+  /** Set when loading the defaults failed. */
+  defaultsFailed?: boolean
 }
 
 /** Same private channel as the automation assets (see automation-assets-rpc.ts). */
@@ -24,6 +28,8 @@ export class PromptsStatusController {
     return {
       hooks: { promptsStatus: this.store },
       refreshPromptsStatus: () => { void this.refresh() },
+      exportPromptDefaults: () => this.exportDefaults(),
+      hidePromptDefaults: () => { const { defaults: _defaults, defaultsFailed: _failed, ...rest } = this.store.getSnapshot(); this.publish(rest) },
     }
   }
 
@@ -31,13 +37,25 @@ export class PromptsStatusController {
 
   dispose(): void { this.disposed = true }
 
+  /** Load the default prompt texts as JSON, for the read-only box under the section. */
+  async exportDefaults(): Promise<void> {
+    try {
+      const result = await this.rpc.call(CHANNEL, 'promptsDefaults', {})
+      if (!result.ok) throw new Error(result.error.message)
+      const { defaultsFailed: _failed, ...rest } = this.store.getSnapshot()
+      this.publish({ ...rest, defaults: (result.value as { json: string }).json })
+    } catch {
+      this.publish({ ...this.store.getSnapshot(), defaultsFailed: true })
+    }
+  }
+
   async refresh(): Promise<void> {
     const current = this.store.getSnapshot()
     this.publish({ ...current, loading: true })
     try {
       const result = await this.rpc.call(CHANNEL, 'prompts', {})
       if (!result.ok) throw new Error(result.error.message)
-      this.publish({ loading: false, failed: false, status: result.value as PromptsStatus })
+      this.publish({ ...this.store.getSnapshot(), loading: false, failed: false, status: result.value as PromptsStatus })
     } catch {
       // The plugin restarts when a setting is saved; the next refresh finds it again.
       this.publish({ ...this.store.getSnapshot(), loading: false, failed: true })
