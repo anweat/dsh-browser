@@ -8,6 +8,10 @@
 
 import type { AutomationAsset, TestCredential } from './automation-assets.ts'
 
+/** How many input sets one test takes. */
+export const INPUT_SET_MIN = 2
+export const INPUT_SET_MAX = 5
+
 /**
  * How many different input sets the credential's passing test covered: its passed sets, one for a plain single run,
  * and enough for any requirement when it is a `legacy` credential synthesized from data written before input sets

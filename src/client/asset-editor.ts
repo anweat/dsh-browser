@@ -5,6 +5,7 @@
  */
 
 import type { AutomationAsset, TestCredential } from '../automation-assets.ts'
+import { INPUT_SET_MAX, INPUT_SET_MIN } from '../activation-rules.ts'
 
 /** The fields a person edits. Everything else (id, revision, hash, status, credentials, counters) is shown, never edited. */
 const EDITABLE_KEYS = [
@@ -69,4 +70,44 @@ export function credentialView(asset: AutomationAsset | undefined): CredentialVi
     ...current ? { current } : {}, ...credentials.at(-1) ? { latest: credentials.at(-1)! } : {},
     vouches: !!asset && !!current && current.passed && asset.testStatus === 'passed' && (asset.contentHash === undefined || current.contentHash === asset.contentHash),
   }
+}
+
+/** What the "test inputs JSON" box holds: one object (one run on the session page) or 2 to 5 objects (each run in a fresh context). */
+export type TestInputs =
+  | { kind: 'single'; inputs: Record<string, unknown> }
+  | { kind: 'sets'; sets: Record<string, unknown>[] }
+  | { kind: 'error'; message: string }
+
+const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+
+export function parseTestInputs(text: string): TestInputs {
+  let value: unknown
+  try { value = JSON.parse(text.trim() || '{}') } catch (error) { return { kind: 'error', message: 'test inputs: ' + (error instanceof Error ? error.message : String(error)) } }
+  if (isObject(value)) return { kind: 'single', inputs: value }
+  if (!Array.isArray(value)) return { kind: 'error', message: `test inputs must be a JSON object, or an array of ${INPUT_SET_MIN} to ${INPUT_SET_MAX} objects` }
+  if (value.length < INPUT_SET_MIN || value.length > INPUT_SET_MAX) return { kind: 'error', message: `test inputs: an array holds ${INPUT_SET_MIN} to ${INPUT_SET_MAX} input objects, found ${value.length}` }
+  const bad = value.findIndex(entry => !isObject(entry))
+  if (bad >= 0) return { kind: 'error', message: `test inputs: set ${bad + 1} is not an object` }
+  return { kind: 'sets', sets: value as Record<string, unknown>[] }
+}
+
+/** One input set of the latest test, as the panel lists it. */
+export interface InputSetLine {
+  set: number
+  passed: boolean
+  status: string
+  inputsDigest: string
+  outputsDigest: string
+}
+
+export function inputSetLines(credential: TestCredential | undefined): InputSetLine[] {
+  return (credential?.inputSets ?? []).map(entry => ({ set: entry.index + 1, passed: entry.passed, status: `${entry.executionStatus}/${entry.validationStatus}`, inputsDigest: entry.inputsDigest, outputsDigest: entry.outputsDigest }))
+}
+
+/** Pairs of sets (1-based) that got the same output from different inputs: what `PARAMETERIZATION_SUSPECT` is about. */
+export function identicalOutputPairs(credential: TestCredential | undefined): number[][] {
+  const lines = inputSetLines(credential)
+  const pairs: number[][] = []
+  for (let a = 0; a < lines.length; a += 1) for (let b = a + 1; b < lines.length; b += 1) if (lines[a]!.outputsDigest === lines[b]!.outputsDigest) pairs.push([lines[a]!.set, lines[b]!.set])
+  return pairs
 }

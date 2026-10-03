@@ -50,6 +50,7 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   requestNewAutomationAsset: (kind: AutomationAsset['kind']) => void
   requestRefreshAutomationAssets: () => void
   requestForkAutomationAsset: (id: string) => void
+  requestConvertAutomationAsset: (id: string) => void
   confirmLeaveAutomationAsset: () => void
   cancelLeaveAutomationAsset: () => void
   saveEditedAutomationAsset: () => Promise<unknown>

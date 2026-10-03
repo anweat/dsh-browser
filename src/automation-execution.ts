@@ -5,6 +5,7 @@ import { coerceInputs, materializeDeep, type BrowserRecipeStepV2 } from './autom
 import { computeContentHash, digestInputs, type AutomationAsset, type AutomationAssetStore, type EvidenceLevel } from './automation-assets.ts'
 import type { BrowserService } from './browser-service.ts'
 import { mapError } from './actions/errors.ts'
+import { INPUT_SET_MAX, INPUT_SET_MIN } from './activation-rules.ts'
 
 export interface AutomationExecutionOptions {
   signal?: AbortSignal
@@ -183,9 +184,7 @@ export async function executeAutomationAsset(
 
 // --- independent replay with several input sets --------------------------------
 
-/** How many input sets one test takes. */
-export const INPUT_SET_MIN = 2
-export const INPUT_SET_MAX = 5
+export { INPUT_SET_MIN, INPUT_SET_MAX }
 export const PARAMETERIZATION_SUSPECT = 'PARAMETERIZATION_SUSPECT'
 
 export interface InputSetResult {

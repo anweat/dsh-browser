@@ -229,6 +229,113 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     await page.close()
   })
 
+  const v2Search = (name: string, output: string) => harness.assets.saveDraft({
+    kind: 'recipe', schemaVersion: 2, name, domains: ['127.0.0.1'],
+    recipe: [
+      { type: 'fill', locator: { label: 'Query' }, value: '{{query}}' },
+      { type: 'click', locator: { role: 'button', name: 'Search' } },
+      { type: 'extract', locator: { css: output }, as: 'out' },
+    ] as never,
+    inputSchema: [{ name: 'query', type: 'string', required: true, example: 'ap' }],
+    postconditions: [{ output: 'out', nonEmpty: true }],
+  })
+
+  it('several input sets: the array runs each set, the panel lists them, warns about identical outputs, and the Activate hint follows the policy', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const real = v2Search('Sets real', '#results')
+    const flat = v2Search('Sets flat', 'h1')
+    const { page, errors } = await openUi()
+    const button = (name: string | RegExp) => page.getByRole('button', { name, exact: typeof name === 'string' })
+    const inputs = page.getByLabel(/Test inputs JSON/)
+    const sentTo = (endpoint: string) => rpcLog.filter(entry => entry.endpoint === endpoint)
+    const select = async (name: string) => { await button(new RegExp(name)).click(); await page.waitForFunction((n: string) => (document.querySelector('#dsh-browser-asset-editor') as HTMLTextAreaElement).value.includes(n), name) }
+
+    await select('Sets real')
+    await page.getByPlaceholder('Test URL (must match an allowed domain)').fill(url('search.html'))
+    // One input: the test passes, but two input sets are needed, and the panel says so before the click.
+    await inputs.fill('{"query":"ap"}')
+    rpcLog.length = 0
+    await button('Runtime replay').click()
+    await page.waitForFunction(() => document.querySelector('[data-dsh-browser-credential]')?.textContent?.includes('passed'))
+    assert.deepEqual(sentTo('test')[0]!.payload, { id: real.id, url: url('search.html'), inputs: { query: 'ap' }, expectedRevision: 1 })
+    assert.equal(await page.locator('[data-dsh-browser-sets]').count(), 0)
+    assert.match(await page.locator('[data-dsh-browser-activation-hint]').innerText(), /at least 2 different input sets \(it covered 1\)/)
+    assert.equal(await button('Activate r1').isDisabled(), true)
+
+    // Two sets: each is listed, no warning (the outputs differ), the hint is gone and Activate is enabled.
+    await inputs.fill('[{"query":"ap"},{"query":"ba"}]')
+    rpcLog.length = 0
+    await button('Runtime replay').click()
+    await page.waitForFunction(() => document.querySelectorAll('[data-dsh-browser-set]').length === 2)
+    assert.deepEqual(sentTo('test')[0]!.payload.inputSets, [{ query: 'ap' }, { query: 'ba' }])
+    assert.match(await page.locator('[data-dsh-browser-set="1"]').innerText(), /Set 1 .*passed \(completed\/passed\)/)
+    assert.match(await page.locator('[data-dsh-browser-set="2"]').innerText(), /Set 2 .*passed/)
+    assert.equal(await page.locator('[data-dsh-browser-suspect]').count(), 0)
+    assert.equal(await page.locator('[data-dsh-browser-activation-hint]').count(), 0)
+    assert.equal(await button('Activate r1').isEnabled(), true)
+
+    // A bad array is a JSON notice and nothing is sent.
+    await inputs.fill('[{"query":"ap"}]')
+    rpcLog.length = 0
+    await button('Runtime replay').click()
+    await page.locator('[data-dsh-browser-notice="json"]').waitFor()
+    assert.match(await page.locator('[data-dsh-browser-notice]').innerText(), /2 to 5 input objects/)
+    assert.equal(sentTo('test').length, 0)
+
+    // Identical outputs for different inputs: still passed, with PARAMETERIZATION_SUSPECT.
+    await select('Sets flat')
+    await inputs.fill('[{"query":"ap"},{"query":"ba"}]')
+    await button('Runtime replay').click()
+    await page.locator('[data-dsh-browser-suspect]').waitFor()
+    assert.match(await page.locator('[data-dsh-browser-suspect]').innerText(), /PARAMETERIZATION_SUSPECT: sets 1\/2 had different inputs but identical outputs/)
+    assert.equal(await page.locator('[data-dsh-browser-set]').count(), 2)
+    assert.equal(harness.assets.get(flat.id)!.testStatus, 'passed')
+    assert.deepEqual(harness.assets.get(flat.id)!.testCredentials!.at(-1)!.warnings, ['PARAMETERIZATION_SUSPECT'])
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  it('a new recipe starts from the v2 template and saves; a v1 asset converts to a v2 draft, asking first when there are unsaved edits', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const old = harness.assets.saveDraft({ kind: 'recipe', name: 'Legacy search', domains: ['127.0.0.1'], inputNames: ['q'], recipe: [{ type: 'fill', selector: '#q', value: '{{q}}' }, { type: 'click', selector: '#go' }, { type: 'assert', text: 'results' }] as never })
+    const { page, errors } = await openUi()
+    const editor = page.locator('#dsh-browser-asset-editor')
+    const button = (name: string | RegExp) => page.getByRole('button', { name, exact: typeof name === 'string' })
+
+    await button('New recipe').click()
+    const template = JSON.parse(await editor.inputValue())
+    assert.equal(template.schemaVersion, 2)
+    assert.ok(template.inputSchema.length && template.postconditions.length && template.recipe[0].locator)
+    await button('Save draft').click()
+    await page.waitForFunction(() => document.querySelector('[data-dsh-browser-version]')?.textContent?.includes('r1'))
+    assert.equal(await page.locator('[data-dsh-browser-notice]').count(), 0, 'the template saves as it is')
+    assert.equal(await button('Convert to v2').count(), 0, 'a v2 asset has no convert button')
+
+    await button(/Legacy search/).click()
+    await page.waitForFunction(() => (document.querySelector('#dsh-browser-asset-editor') as HTMLTextAreaElement).value.includes('Legacy search'))
+    // With an unsaved edit the conversion asks first and converts nothing.
+    const saved = await editor.inputValue()
+    await editor.fill(saved.replace('Legacy search', 'Legacy edited'))
+    rpcLog.length = 0
+    await button('Convert to v2').click()
+    await page.getByRole('alertdialog').waitFor()
+    assert.equal(rpcLog.filter(entry => entry.endpoint === 'convert').length, 0)
+    await button('Keep editing').click()
+
+    await button('Convert to v2').click()
+    await page.getByRole('alertdialog').waitFor()
+    await button('Discard edits and continue').click()
+    await page.locator('[data-dsh-browser-converted]').waitFor()
+    assert.match(await page.locator('[data-dsh-browser-converted]').innerText(), /Converted "Legacy search" into a new v2 draft/)
+    assert.match(await page.locator('[data-dsh-browser-pending]').innerText(), /2 step\(s\) still take the first match \(pendingDisambiguation\)/)
+    assert.equal(JSON.parse(await editor.inputValue()).schemaVersion, 2)
+    assert.equal(await button('Convert to v2').count(), 0)
+    assert.equal(harness.assets.get(old.id)!.schemaVersion, undefined, 'the original is untouched')
+    assert.deepEqual(rpcLog.filter(entry => entry.endpoint === 'convert').map(entry => entry.payload), [{ id: old.id }])
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
   it('the prompt text section renders and shows what the plugin reports: L0 estimate, overrides and diagnostics', async (t) => {
     if ('skip' in bundled) return t.skip(bundled.skip)
     const { page, errors } = await openUi()

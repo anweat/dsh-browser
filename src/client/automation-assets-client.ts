@@ -1,7 +1,7 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
 import type { AutomationAsset, AutomationAssetSnapshot, AutomationAssetStatus } from '../automation-assets.ts'
-import { isDirty, parseEditor, serializeEditable } from './asset-editor.ts'
+import { isDirty, parseEditor, parseTestInputs, serializeEditable } from './asset-editor.ts'
 
 /**
  * Which kind of problem a message is about, so the editor can say it differently:
@@ -25,6 +25,7 @@ export type PendingLeave =
   | { kind: 'new'; assetKind: AutomationAsset['kind'] }
   | { kind: 'refresh' }
   | { kind: 'fork'; id: string }
+  | { kind: 'convert'; id: string }
 
 export interface EditorState {
   /** The textarea content. */
@@ -34,6 +35,8 @@ export interface EditorState {
   testUrl: string
   testInputs: string
   notice?: AssetNotice
+  /** Set right after a v1 recipe was converted: what the conversion changed and what the author still has to do. */
+  converted?: { sourceName: string; notes: string[] }
   /** Set while unsaved edits stand between the person and what they asked for. */
   confirm?: PendingLeave
 }
@@ -81,7 +84,21 @@ export function noticeFor(error: unknown): AssetNotice {
   return { kind: code && VALIDATION_CODES.has(code) ? 'validation' : 'backend', message, ...code ? { code } : {} }
 }
 
-const NEW_RECIPE: Partial<AutomationAsset> = { kind: 'recipe', name: 'New recipe', description: '', domains: [], tags: [], inputNames: [], recipe: [{ type: 'extract', selector: 'main', mode: 'text', limit: 20 }] }
+/**
+ * The "new recipe" template: schema v2 (typed inputs, locators, a result to extract and a postcondition that checks it),
+ * so what a person starts from is what the plugin writes today. Every value is a placeholder to replace; the template
+ * itself passes the save validation, which test/automation-assets-client.test.ts holds it to.
+ */
+export const NEW_RECIPE: Partial<AutomationAsset> = {
+  kind: 'recipe', schemaVersion: 2, name: 'New recipe', description: '', domains: ['example.com'], tags: [],
+  inputSchema: [{ name: 'keyword', type: 'string', required: true, example: 'example' }],
+  recipe: [
+    { type: 'fill', locator: { label: 'Search' }, value: '{{keyword}}' },
+    { type: 'click', locator: { role: 'button', name: 'Search' } },
+    { type: 'extract', locator: { css: '#results' }, as: 'results' },
+  ] as never,
+  postconditions: [{ output: 'results', nonEmpty: true }],
+}
 const NEW_SCRIPT: Partial<AutomationAsset> = {
   kind: 'userscript', name: 'New userscript', description: '', domains: [], tags: [], inputNames: [],
   source: '// ==UserScript==\n// @name New userscript\n// @match https://example.com/*\n// @grant none\n// ==/UserScript==\nreturn { title: document.title }',
@@ -114,6 +131,7 @@ export class AutomationAssetsController {
       requestNewAutomationAsset: (assetKind: AutomationAsset['kind']) => this.requestLeave({ kind: 'new', assetKind }),
       requestRefreshAutomationAssets: () => this.requestLeave({ kind: 'refresh' }),
       requestForkAutomationAsset: (id: string) => this.requestLeave({ kind: 'fork', id }),
+      requestConvertAutomationAsset: (id: string) => this.requestLeave({ kind: 'convert', id }),
       confirmLeaveAutomationAsset: () => this.confirmLeave(),
       cancelLeaveAutomationAsset: () => this.patchEditor({ confirm: undefined }),
       saveEditedAutomationAsset: () => this.saveEdited(),
@@ -182,6 +200,15 @@ export class AutomationAssetsController {
       case 'fork': {
         const draft = await this.run(() => this.call<AutomationAsset>('fork', { id: leave.id }))
         if (draft) { await this.reloadSnapshot(); this.publish({ ...this.store.getSnapshot(), selected: draft, editor: this.editorFor(draft) }) }
+        return
+      }
+      case 'convert': {
+        const sourceName = this.store.getSnapshot().snapshot?.assets.find(entry => entry.id === leave.id)?.name ?? this.store.getSnapshot().selected?.name ?? ''
+        const result = await this.run(() => this.call<{ draft: AutomationAsset; pendingDisambiguation: unknown[]; notes: string[] }>('convert', { id: leave.id }))
+        if (result) {
+          await this.reloadSnapshot()
+          this.publish({ ...this.store.getSnapshot(), selected: result.draft, editor: { ...this.editorFor(result.draft), converted: { sourceName, notes: result.notes } } })
+        }
       }
     }
   }
@@ -219,12 +246,8 @@ export class AutomationAssetsController {
   private async saveAndTest(): Promise<void> {
     const state = this.store.getSnapshot()
     const url = state.editor.testUrl.trim()
-    let inputs: Record<string, string>
-    try {
-      const parsed = JSON.parse(state.editor.testInputs || '{}') as unknown
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('test inputs must be a JSON object')
-      inputs = parsed as Record<string, string>
-    } catch (error) { this.patchEditor({ notice: { kind: 'json', message: 'test inputs: ' + (error instanceof Error ? error.message : String(error)) } }); return }
+    const parsedInputs = parseTestInputs(state.editor.testInputs)
+    if (parsedInputs.kind === 'error') { this.patchEditor({ notice: { kind: 'json', message: parsedInputs.message } }); return }
     if (!url) { this.patchEditor({ notice: { kind: 'json', message: 'enter the test URL first' } }); return }
     let target = state.selected
     if (this.dirty() || !target) {
@@ -236,7 +259,9 @@ export class AutomationAssetsController {
     const revision = target.revision
     this.publish({ ...this.store.getSnapshot(), busy: true })
     try {
-      const tested = await this.call<AutomationAsset>('test', { id, url, inputs, expectedRevision: revision })
+      // One object is one run on the session page; an array is 2 to 5 runs, each in a fresh context.
+      const body = parsedInputs.kind === 'sets' ? { inputSets: parsedInputs.sets } : { inputs: parsedInputs.inputs }
+      const tested = await this.call<AutomationAsset>('test', { id, url, ...body, expectedRevision: revision })
       await this.reloadSnapshot()
       this.publish({ ...this.store.getSnapshot(), busy: false, selected: tested, editor: { ...this.store.getSnapshot().editor, notice: undefined } })
     } catch (error) {

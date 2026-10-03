@@ -11,7 +11,7 @@ import {
   hostInDomains, type BrowserRecipeStepV2, type InputSpec, type OutputSpec, type PendingDisambiguation, type Postcondition,
 } from './automation-v2.ts'
 import { validateUserscript } from './scripts.ts'
-import { inputSetShortfall } from './activation-rules.ts'
+import { INPUT_SET_MAX, inputSetShortfall } from './activation-rules.ts'
 
 export const ASSET_PERSISTENCE_MODES = ['off', 'manual', 'suggest', 'auto-draft'] as const
 export type AssetPersistenceMode = typeof ASSET_PERSISTENCE_MODES[number]
@@ -689,7 +689,7 @@ export class AutomationAssetStore {
     }
     const shortfall = inputSetShortfall(asset, latest, this.policy.minInputSetsForActivation)
     if (shortfall) {
-      throw new ActivationRefusedError('insufficient-input-sets', `automation asset declares ${shortfall.declared} input(s), so its passing test must cover at least ${shortfall.required} different input sets (automationAssets.minInputSetsForActivation), but the test of revision ${asset.revision} covered ${shortfall.covered}. A recipe written against one input can hard-code it. Test again with ${shortfall.required} to 5 different input objects (automation.develop test with inputSets, or a JSON array in the panel's test inputs)`)
+      throw new ActivationRefusedError('insufficient-input-sets', `automation asset declares ${shortfall.declared} input(s), so its passing test must cover at least ${shortfall.required} different input sets (automationAssets.minInputSetsForActivation), but the test of revision ${asset.revision} covered ${shortfall.covered}. A recipe written against one input can hard-code it. Test again with ${shortfall.required} to ${INPUT_SET_MAX} different input objects (automation.develop test with inputSets, or a JSON array in the panel's test inputs)`)
     }
     if (asset.origin?.unmapped) throw new ActivationRefusedError('incomplete-draft', `automation draft is incomplete: ${asset.origin.unmapped} action(s) of the exploration it was built from (journal seq ${asset.origin.fromSeq}-${asset.origin.toSeq}) could not become steps. Finish the recipe yourself and save it, test it, then activate`)
     if (asset.domains.length < 1) throw new ActivationRefusedError('no-domain', 'automation asset must declare at least one domain before activation')

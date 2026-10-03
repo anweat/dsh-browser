@@ -21,7 +21,8 @@ import { FIELD_SPECS, JSON_FIELD_SPECS, JSON_FIELDS, type SectionField, type Car
 import type { SettingsFieldSpec } from '@deepseek-ai/dsh-client-ui-primitives'
 import { PROMPT_TEXT_FIELDS, type PromptTextFieldId } from './prompts-form.ts'
 import { styles as css } from './styles.ts'
-import { credentialView, isDirty, shortHash } from './asset-editor.ts'
+import { credentialView, identicalOutputPairs, inputSetLines, isDirty, shortHash } from './asset-editor.ts'
+import { inputSetShortfall } from '../activation-rules.ts'
 import type { AssetNoticeKind } from './automation-assets-client.ts'
 
 /**
@@ -31,6 +32,9 @@ import type { AssetNoticeKind } from './automation-assets-client.ts'
  */
 type Translator = BrowserSettingsCardProps['t']
 type LabelKey = Parameters<Translator>[0]
+
+/** Fill `{name}` placeholders of a dictionary entry. */
+const fill = (text: string, values: Record<string, string | number>): string => text.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key] ?? ''))
 
 /** The copy the shared form frame renders, from this page's dictionary. */
 function formLabels(t: Translator): SettingsFormLabels {
@@ -215,6 +219,14 @@ function AutomationAssetsPanel(props: BrowserSettingsCardProps) {
   const noticeLabel = (kind: AssetNoticeKind) => t(({ json: 'assetNoticeJson', backend: 'assetNoticeBackend', validation: 'assetNoticeValidation', refused: 'assetNoticeRefused' } as const)[kind])
   // Unsaved edits, or a brand-new draft that was never saved: the button saves what is on screen, then tests exactly that revision.
   const saveFirst = dirty || !selected
+  const latest = credentials.latest
+  const sets = latest?.revision === selected?.revision ? inputSetLines(latest) : []
+  const suspect = latest && sets.length ? identicalOutputPairs(latest) : []
+  const required = state.snapshot?.policy.minInputSetsForActivation ?? 1
+  // A passed test that is too narrow: activation would be refused, and this says why before the click.
+  const shortfall = selected && draft && credentials.vouches ? inputSetShortfall(selected, credentials.current, required) : undefined
+  const shortfallText = shortfall ? fill(t('assetNeedsInputSets'), { required: shortfall.required, covered: shortfall.covered }) : ''
+  const convertible = !!selected && selected.kind === 'recipe' && (selected.schemaVersion ?? 1) === 1
 
   return <section className={css.section} data-dsh-browser-assets>
     <div className={css.sectionHead}><h3>{t('assetLibrary')}</h3><p>{t('assetLibraryHint')}</p></div>
@@ -237,14 +249,26 @@ function AutomationAssetsPanel(props: BrowserSettingsCardProps) {
           <p>{t('assetRevision')} r{selected.revision} · {t('assetHash')} <code>{shortHash(selected.contentHash)}</code> · {selected.status}{selected.sourceAssetId ? <> · {t('assetDerivedFrom')} {selected.sourceAssetId.slice(0, 8)} r{selected.sourceRevision}</> : null}</p>
           {credentials.latest ? <p data-dsh-browser-credential>{t('assetLastTest')}: r{credentials.latest.revision} · <code>{shortHash(credentials.latest.contentHash)}</code> · {credentials.latest.passed ? t('assetPassed') : t('assetNotPassed')} ({credentials.latest.executionStatus}/{credentials.latest.validationStatus}, {credentials.latest.evidenceLevel}{credentials.latest.legacy ? ', legacy' : ''}) · {new Date(credentials.latest.testedAt).toLocaleString()} · {t('assetInputsDigest')} {credentials.latest.inputsDigest}{credentials.latest.revision !== selected.revision ? <> · {t('assetStaleTest')}</> : null}</p> : null}
           {selected.status === 'draft' && !credentials.vouches ? <p>{t('assetNoTest')}</p> : null}
+          {sets.length ? <div data-dsh-browser-sets>
+            <p>{t('assetInputSets')}{latest?.plannedSets && latest.plannedSets > sets.length ? ` (${t('assetSetsRan')} ${sets.length}/${latest.plannedSets})` : ''}</p>
+            <ul>{sets.map(line => <li key={line.set} data-dsh-browser-set={line.set}>{t('assetInputSet')} {line.set} {t('assetInputSetUnit')} · {line.passed ? t('assetPassed') : t('assetNotPassed')} ({line.status}) · {t('assetInputsDigest')} <code>{line.inputsDigest}</code></li>)}</ul>
+          </div> : null}
+          {suspect.length ? <p className={css.failed} role="note" data-dsh-browser-suspect>{fill(t('assetSuspect'), { pairs: suspect.map(pair => pair.join('/')).join('; ') })}</p> : null}
+          {selected.pendingDisambiguation?.length ? <p data-dsh-browser-pending>{fill(t('assetPending'), { n: selected.pendingDisambiguation.length })}</p> : null}
+        </div> : null}
+        {editor.converted ? <div className={css.notice} role="status" data-dsh-browser-converted>
+          <p>{fill(t('assetConverted'), { name: editor.converted.sourceName })}</p>
+          <ul>{editor.converted.notes.map((note, index) => <li key={index}>{note}</li>)}</ul>
         </div> : null}
         <textarea id="dsh-browser-asset-editor" className={`${css.input} ${css.textarea} ${css.code} ${editor.notice?.kind === 'json' ? css.invalidInput : ''}`} rows={18} value={editor.text} spellCheck={false} disabled={state.busy} placeholder={t('assetEditorHint')} onChange={event => props.editAutomationAsset(event.currentTarget.value)} />
         {editor.notice ? <p className={css.failed} role="alert" data-dsh-browser-notice={editor.notice.kind}>{noticeLabel(editor.notice.kind)}{editor.notice.message}{editor.notice.code ? ` [${editor.notice.code}]` : ''}</p> : <p className={css.hint}>{dirty ? t('assetUnsaved') : t('assetSourceBoundary')}</p>}
         {draft || !selected ? <div className={css.assetTestForm}><input className={css.input} value={editor.testUrl} placeholder={t('assetTestUrl')} onChange={event => props.setAssetTestUrl(event.currentTarget.value)} /><textarea className={`${css.input} ${css.textarea} ${css.code}`} rows={3} value={editor.testInputs} spellCheck={false} aria-label={t('assetTestInputs')} onChange={event => props.setAssetTestInputs(event.currentTarget.value)} /></div> : null}
+        {shortfall ? <p className={css.hint} role="note" data-dsh-browser-activation-hint>{shortfallText}</p> : null}
         <div className={css.actions}>
           {selected ? <button type="button" className={css.secondary} disabled={state.busy || dirty} onClick={() => props.validateAutomationAsset(selected.id)}>{t('assetValidate')}</button> : null}
           {draft || !selected ? <button type="button" className={css.secondary} disabled={state.busy || !editor.testUrl.trim() || !editor.text} onClick={() => void props.saveAndTestAutomationAsset()}>{saveFirst ? t('assetSaveAndTest') : t('assetTest')}</button> : null}
-          {draft ? <button type="button" className={css.secondary} disabled={state.busy || dirty || !credentials.vouches} title={dirty ? t('assetActivateNeedsSave') : undefined} onClick={() => void props.activateAutomationAsset()}>{t('assetActivate')} r{selected.revision}</button> : null}
+          {draft ? <button type="button" className={css.secondary} disabled={state.busy || dirty || !credentials.vouches || !!shortfall} title={dirty ? t('assetActivateNeedsSave') : shortfallText || undefined} onClick={() => void props.activateAutomationAsset()}>{t('assetActivate')} r{selected.revision}</button> : null}
+          {convertible ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.requestConvertAutomationAsset(selected.id)}>{t('assetConvert')}</button> : null}
           {selected && selected.status !== 'draft' ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.requestForkAutomationAsset(selected.id)}>{t('assetFork')}</button> : null}
           {selected && selected.status !== 'archived' ? <button type="button" className={css.secondary} disabled={state.busy} onClick={() => props.setAutomationAssetStatus(selected.id, 'archived')}>{t('assetArchive')}</button> : null}
           <button type="button" className={css.primary} disabled={state.busy || !editor.text || selected?.status === 'active'} onClick={() => void props.saveEditedAutomationAsset()}>{t('assetSaveDraft')}</button>
