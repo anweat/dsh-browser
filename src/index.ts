@@ -20,6 +20,7 @@ import { browserPolicyDecision } from './approval-policy.ts'
 import { resolveBrowserCall } from './actions/surface.ts'
 import { registerSkillWhenAvailable } from './skill.ts'
 import { installErrorHints } from './actions/errors.ts'
+import { describePrompts } from './prompts.ts'
 import { AutomationAssetStore } from './automation-assets.ts'
 import { registerAutomationAssetRpc } from './automation-assets-rpc.ts'
 
@@ -117,7 +118,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => installErrorHints(() => resolved.prompts.current().errorHints))
 
   registerTools(ctx, resolved, service, assets, { skillAvailable: skill.isAvailable, refreshSkill: skill.refresh })
-  registerAutomationAssetRpc(ctx, assets, service)
+  registerAutomationAssetRpc(ctx, assets, service, () => describePrompts({ prompts: resolved.prompts, mode: resolved.automationMode, options: resolved.automationAssets, enabled: resolved.enabled }))
 
   if (resolved.verbose) {
     try {

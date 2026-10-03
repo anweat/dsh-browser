@@ -19,32 +19,11 @@ import { ACTION_GROUPS, ERROR_CODES, type ActionGroup } from './actions/types.ts
 import { DEFAULT_ERROR_HINTS } from './actions/errors.ts'
 import { COMPACT_GUIDE, renderIndex, type IndexEnvironment } from './actions/index-view.ts'
 import { DEFAULT_CALL_DESCRIPTION, DEFAULT_INDEX_DESCRIPTION, PROMPT_TOOL_NAMES, indexedToolDefinitions } from './tool-defs.ts'
-import { readSkill, loadSkillBodyFile, SKILL_BODY_FILE_LIMIT } from './skill.ts'
+import { readSkill, loadSkillBodyFile } from './skill.ts'
+import { PROMPT_LIMITS } from './prompt-limits.ts'
 import type { AutomationMode, ExposureOptions } from './freedom.ts'
 
-/** Length caps (in characters) of each kind of override. A longer value is ignored, not truncated. */
-export const PROMPT_LIMITS = {
-  /** A group or action summary: one line of the catalog. */
-  summary: 300,
-  /** The extra guidance of an action or sub-action. */
-  notes: 1000,
-  /** The text of a detail topic (`observe.read.controls`), which is a page of its own. */
-  topicText: 3500,
-  /** A tool description (`prompts.tools.<tool>.description`). */
-  description: 1500,
-  /** The compact guide that replaces the skill pointer at the root. */
-  rootGuide: 1500,
-  /** The deployer's note at the end of the root. */
-  rootNote: 800,
-  /** The hint of one error code. */
-  errorHint: 600,
-  /** The skill's description in the skill list. */
-  skillDescription: 1000,
-  /** Text appended to the skill body. */
-  skillAppend: 4000,
-  /** A `skill.bodyFile` larger than this falls back to the packaged body. */
-  skillBodyFile: SKILL_BODY_FILE_LIMIT,
-} as const
+export { PROMPT_LIMITS }
 
 /** Context budgets from the tool-system design (estimated tokens = characters / 3.5, as `measure:tools` counts). */
 export const CHARS_PER_TOKEN = 3.5

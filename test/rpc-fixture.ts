@@ -11,7 +11,7 @@ export const URL = 'https://example.com/search'
 const shot = async (): Promise<string> => '/tmp/shot.png'
 
 /** The real RPC handler over a real store and a service whose recipe() is the real runRecipe over a scripted page. */
-export function rpcFixture(behavior: () => Behavior = () => ({})) {
+export function rpcFixture(behavior: () => Behavior = () => ({}), promptsStatus?: () => unknown) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-rpc-'))
   const store = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual' }))
   /** The steps each replay actually ran, so a test can tell which content was tested. */
@@ -30,7 +30,7 @@ export function rpcFixture(behavior: () => Behavior = () => ({})) {
     effect(setup: () => unknown) { setup() },
     root: { connection: { rpc: { handle(_channel: string, h: unknown) { handler = h; return async () => {} } } } },
   }
-  registerAutomationAssetRpc(ctx, store, service)
+  registerAutomationAssetRpc(ctx, store, service, promptsStatus)
   const peer = { id: 'peer', ctx: {} as never, dispose: async () => {} }
   const call = (endpoint: string, payload: unknown = {}) => handler(endpoint, payload, new AbortController().signal, peer) as Promise<{ ok: boolean; value?: any; error?: { code: string; message: string; details: Record<string, any> } }>
   /** The same handler as the client sees it: `rpc.call(channel, endpoint, payload)`, with every request logged. */

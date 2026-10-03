@@ -10,7 +10,8 @@ import type { AuthProfileConfig } from './auth-profiles.ts'
 import type { RulePackConfig } from './rule-packs.ts'
 import { resolveAutomationMode, resolveToolSurface, type AutomationMode, type ToolSurface } from './freedom.ts'
 import { resolveUsagePolicy, type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts'
-import { PROMPT_LIMITS, promptsSource, type PromptsSource } from './prompts.ts'
+import { PROMPT_LIMITS } from './prompt-limits.ts'
+import { promptsSource, type PromptsSource } from './prompts.ts'
 import { resolveAutomationAssetPolicy, type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts'
 
 export const BROWSER_RUNTIMES = ['playwright', 'patchright'] as const

@@ -14,12 +14,14 @@ const rpc = {
 const controller = new AutomationAssetsController(rpc as never)
 const injected = controller.inject()
 const store = injected.hooks.automationAssets
-const settings = { available: true, writable: true, saving: false, dirty: false, fields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), jsonFields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }) }
+const settings = { available: true, writable: true, saving: false, dirty: false, fields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), jsonFields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), prompts: { texts: new Proxy({}, { get: () => ({ text: '', invalid: false }) }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false } }
 const noop = () => {}
 const props = {
   ...injected, view: 'page', t: (key: string) => (en as Record<string, string>)[key] ?? key,
   useBrowserSettings: (select: (state: unknown) => unknown) => select(settings),
   useAutomationAssets: (select: (state: unknown) => unknown) => select(useSyncExternalStore(store.subscribe, store.getSnapshot)),
   edit: noop, resetField: noop, save: noop, discard: noop,
+  editPromptText: noop, setPromptSkillEnabled: noop, editPromptExtras: noop, resetPromptExtras: noop, refreshPromptsStatus: noop,
+  usePromptsStatus: (select: (state: unknown) => unknown) => select({ loading: false, failed: false }),
 }
 createRoot(document.getElementById('root')!).render(<SettingsCard {...(props as never)} />)

@@ -19,6 +19,7 @@ import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BrowserSettingsCardProps } from './index.ts'
 import { FIELD_SPECS, JSON_FIELD_SPECS, JSON_FIELDS, type SectionField, type CardFieldState } from './form.ts'
 import type { SettingsFieldSpec } from '@deepseek-ai/dsh-client-ui-primitives'
+import { PROMPT_TEXT_FIELDS, type PromptTextFieldId } from './prompts-form.ts'
 import { styles as css } from './styles.ts'
 import { credentialView, isDirty, shortHash } from './asset-editor.ts'
 import type { AssetNoticeKind } from './automation-assets-client.ts'
@@ -99,12 +100,99 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
     <section className={css.section}>
       <div className={css.sectionHead}><h3>{t('usage')}</h3><p>{t('usageHint')}</p></div>
       <div className={css.grid}>
-        {JSON_FIELD_SPECS.map(spec => field(spec))}
+        {/* `prompts` has its own section below: several controls over one staged draft. */}
+        {JSON_FIELD_SPECS.filter(spec => spec.field !== 'prompts').map(spec => field(spec))}
       </div>
       <p className={css.notice} role="note">{t('restart')}</p>
     </section>
+    <PromptsPanel {...props} disabled={disabled} />
     <AutomationAssetsPanel {...props} />
   </SettingsForm>
+}
+
+/** Label and hint keys of each text control, by field id. */
+const PROMPT_LABELS: Record<PromptTextFieldId, { label: LabelKey; hint: LabelKey }> = {
+  indexDescription: { label: 'promptsIndexDescription', hint: 'promptsIndexDescriptionHint' },
+  callDescription: { label: 'promptsCallDescription', hint: 'promptsCallDescriptionHint' },
+  rootGuide: { label: 'promptsRootGuide', hint: 'promptsRootGuideHint' },
+  rootNote: { label: 'promptsRootNote', hint: 'promptsRootNoteHint' },
+  skillDescription: { label: 'promptsSkillDescription', hint: 'promptsSkillDescriptionHint' },
+  skillBodyFile: { label: 'promptsSkillBodyFile', hint: 'promptsSkillBodyFileHint' },
+  skillAppend: { label: 'promptsSkillAppend', hint: 'promptsSkillAppendHint' },
+}
+
+/**
+ * The "prompt text" section: the text the model reads, overridable. The controls are views of one staged `prompts`
+ * draft that saves with the rest of the form; the status block below shows what the running plugin reports about it.
+ */
+function PromptsPanel(props: BrowserSettingsCardProps & { disabled: boolean }) {
+  const { t, disabled } = props
+  const settings = props.useBrowserSettings(snapshot => snapshot)
+  const status = props.usePromptsStatus(snapshot => snapshot)
+  const { refreshPromptsStatus } = props
+  // Refresh when the page opens and after each save settles: that is when what is in effect can have changed.
+  useEffect(() => { if (!settings.saving) refreshPromptsStatus() }, [settings.saving, refreshPromptsStatus])
+  const prompts = settings.prompts
+  const report = status.status
+  const text = (id: PromptTextFieldId) => {
+    const spec = PROMPT_TEXT_FIELDS.find(entry => entry.id === id)!
+    const state = prompts.texts[id]
+    const labels = PROMPT_LABELS[id]
+    const inputId = `plugin-config-dsh-browser-prompts-${id}`
+    const common = { id: inputId, className: `${css.input} ${state.invalid ? css.invalidInput : ''}`, value: state.text, disabled, 'aria-invalid': state.invalid || undefined, onChange: (value: string) => props.editPromptText(id, value) }
+    return <div key={id} className={css.field}>
+      <div className={css.fieldHead}>
+        <label className={css.label} htmlFor={inputId}>{t(labels.label)}</label>
+        {state.text ? <button type="button" className={css.reset} disabled={disabled} onClick={() => props.editPromptText(id, '')}>{t('promptsReset')}</button> : null}
+      </div>
+      {spec.multiline
+        ? <textarea {...common} className={`${common.className} ${css.textarea}`} rows={id === 'rootNote' ? 3 : 5} spellCheck={false} onChange={event => common.onChange(event.currentTarget.value)} />
+        : <input {...common} type="text" onChange={event => common.onChange(event.currentTarget.value)} />}
+      <p className={state.invalid ? css.failed : css.hint}>{state.invalid ? t('promptsTooLong') : t(labels.hint)}{spec.limit > 1024 || state.text ? ` (${state.text.length}/${spec.limit})` : ''}</p>
+    </div>
+  }
+  const budgetLine = report ? `${t('promptsL0')}: ~${report.budget.l0Tokens} ${t('promptsTokens')} (${t('promptsBudget')} ${report.budget.l0Budget}) · ${t('promptsLargest')}: ${report.budget.largestLayer.name} ~${report.budget.largestLayer.tokens} (${t('promptsBudget')} ${report.budget.layerBudget})` : ''
+  return <section className={css.section} data-dsh-browser-prompts>
+    <div className={css.sectionHead}><h3>{t('prompts')}</h3><p>{t('promptsHint')}</p></div>
+    <div className={css.grid}>
+      {text('indexDescription')}
+      {text('callDescription')}
+      {text('rootGuide')}
+      {text('rootNote')}
+    </div>
+    <div className={css.grid}>
+      <div className={css.field}>
+        <label className={css.toggleLabel}>
+          <input type="checkbox" className={css.check} checked={prompts.skillEnabled} disabled={disabled} onChange={event => props.setPromptSkillEnabled(event.currentTarget.checked)} />
+          <span><span className={css.label}>{t('promptsSkillEnabled')}</span><p className={css.hint}>{t('promptsSkillEnabledHint')}</p></span>
+        </label>
+      </div>
+      {text('skillDescription')}
+      {text('skillBodyFile')}
+      {text('skillAppend')}
+    </div>
+    <div className={css.field}>
+      <div className={css.fieldHead}>
+        <label className={css.label} htmlFor="plugin-config-dsh-browser-prompts-extras">{t('promptsExtras')}</label>
+        {prompts.extras.text ? <button type="button" className={css.reset} disabled={disabled} onClick={props.resetPromptExtras}>{t('promptsExtrasReset')}</button> : null}
+      </div>
+      <textarea id="plugin-config-dsh-browser-prompts-extras" className={`${css.input} ${css.textarea} ${css.code} ${prompts.extras.invalid ? css.invalidInput : ''}`} rows={10} spellCheck={false} disabled={disabled} aria-invalid={prompts.extras.invalid || undefined} value={prompts.extras.text} onChange={event => props.editPromptExtras(event.currentTarget.value)} />
+      <p className={prompts.extras.invalid ? css.failed : css.hint} role={prompts.extras.invalid ? 'alert' : undefined}>{prompts.extras.invalid ? t('promptsExtrasInvalid') : t('promptsExtrasHint')}</p>
+    </div>
+    <div className={css.notice} role="status" data-dsh-browser-prompts-status>
+      <strong>{t('promptsStatus')}</strong>{' '}
+      <button type="button" className={css.reset} onClick={refreshPromptsStatus}>{t('promptsRefresh')}</button>
+      {status.loading && !report ? <p>{t('promptsLoading')}</p> : null}
+      {status.failed ? <p>{t('promptsStatusUnavailable')}</p> : null}
+      {report ? <>
+        <p data-dsh-browser-prompts-budget>{budgetLine}</p>
+        <p>{report.overrides.length ? `${report.overrides.length} ${t('promptsOverrides')}: ${report.overrides.map(entry => entry.length === undefined ? entry.key : `${entry.key} (${entry.length})`).join(', ')}` : t('promptsNoOverrides')}</p>
+        <p>{t('promptsDiagnostics')}: {report.diagnostics.length ? '' : t('promptsNoDiagnostics')}</p>
+        {report.diagnostics.length ? <ul data-dsh-browser-prompts-diagnostics>{report.diagnostics.map((entry, index) => <li key={index}>{entry.message}</li>)}</ul> : null}
+      </> : null}
+    </div>
+    <p className={css.notice} role="note">{t('promptsRestart')}</p>
+  </section>
 }
 
 function AutomationAssetsPanel(props: BrowserSettingsCardProps) {

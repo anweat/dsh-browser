@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PromptsSource } from './prompts.ts'
+import { SKILL_BODY_FILE_LIMIT } from './prompt-limits.ts'
 
 export const SKILL_NAME = 'dsh-browser'
 const PROVIDER_NAME = 'dsh-browser'
@@ -37,8 +38,7 @@ export function readSkill(dir = SKILL_DIR): { name: string; description: string;
   return parseSkillFile(fs.readFileSync(dir + 'SKILL.md', 'utf8'))
 }
 
-/** A `prompts.skill.bodyFile` larger than this many characters is not used. */
-export const SKILL_BODY_FILE_LIMIT = 20_000
+export { SKILL_BODY_FILE_LIMIT }
 
 /**
  * Read a replacement skill body. A leading front matter block is dropped (the name and description come from the

@@ -50,7 +50,7 @@ export interface AutomationAssetsState {
 
 const EMPTY_EDITOR: EditorState = { text: '', baseline: '', testUrl: '', testInputs: '{}' }
 
-function localStore<T>(initial: T): SnapshotStore<T> {
+export function localStore<T>(initial: T): SnapshotStore<T> {
   let snapshot = initial
   const listeners = new Set<() => void>()
   return {

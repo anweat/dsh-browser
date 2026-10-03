@@ -13,6 +13,7 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SettingsFormModel, settingsNumberField, settingsTextField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
+import { PROMPT_TEXT_FIELDS, canonicalPrompts, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
   | 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
@@ -30,6 +31,19 @@ export interface BrowserCardState extends SettingsFormShell {
   fields: Record<SectionField, CardFieldState>
   /** JSON code-editor controls, kept apart so `fields` stays exhaustively keyed. */
   jsonFields: Record<string, CardFieldState>
+  /** The "prompt text" section: views of the one staged `prompts` draft. */
+  prompts: PromptsCardState
+}
+
+export interface PromptsCardState {
+  texts: Record<PromptTextFieldId, { text: string; invalid: boolean }>
+  skillEnabled: boolean
+  /** The JSON box for groups, actions and errorHints. */
+  extras: { text: string; invalid: boolean }
+  /** Whether saving would leave a `prompts` entry in the user layer. */
+  overridden: boolean
+  /** Whether the whole `prompts` draft is one the plugin would refuse to take. */
+  invalid: boolean
 }
 
 /** A free-text field that clears when emptied, so blanking the control resets it. */
@@ -145,6 +159,7 @@ export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
 export const JSON_FIELD_SPECS: readonly SettingsFieldSpec[] = [
   jsonField('usagePolicy', validUsagePolicy),
   jsonField('automationAssets', validAssetPolicy),
+  jsonField('prompts', validPrompts),
 ] as const
 
 /** Section fields rendered as JSON code editors rather than single inputs. */
@@ -156,17 +171,89 @@ export const ALL_FIELD_SPECS: readonly SettingsFieldSpec[] = [...FIELD_SPECS, ..
 export class BrowserSettingsController {
   private readonly form: SettingsFormModel<Record<string, unknown>>
   private readonly store: SnapshotStore<BrowserCardState>
+  /** What the person typed in the groups/actions/errorHints box, kept verbatim while it is not valid JSON yet. */
+  private extrasRaw: string | undefined
+  private extrasInvalid = false
 
-  constructor(scope: SettingsFormScope<Record<string, unknown>>) {
+  constructor(private readonly scope: SettingsFormScope<Record<string, unknown>>) {
     this.form = new SettingsFormModel<Record<string, unknown>>(scope, [...ALL_FIELD_SPECS])
     this.store = this.form.bind(() => this.project())
   }
 
   inject() {
+    const actions = this.form.actions()
     return {
       hooks: { browserSettings: this.store },
-      ...this.form.actions(),
+      ...actions,
+      // A save is refused while the groups/actions/errorHints box holds something that is not valid.
+      save: () => this.save(),
+      discard: () => { this.extrasRaw = undefined; this.extrasInvalid = false; actions.discard() },
+      editPromptText: (id: PromptTextFieldId, text: string) => this.editPromptText(id, text),
+      setPromptSkillEnabled: (enabled: boolean) => this.setPromptSkillEnabled(enabled),
+      editPromptExtras: (text: string) => this.editPromptExtras(text),
+      resetPromptExtras: () => this.resetPromptExtras(),
     }
+  }
+
+  private async save(): Promise<void> {
+    if (this.extrasInvalid) return
+    await this.form.save()
+    // What was typed is now the stored value, so the box shows that again. (A failed save keeps the draft and its flag.)
+    if (!this.form.shell().failed && this.extrasRaw !== undefined) { this.extrasRaw = undefined; this.refresh() }
+  }
+
+  // --- the prompt text section: one staged `prompts` draft, several views of it ----------------------------------
+
+  /** The staged `prompts` value as an object (empty when none, or when its text is not JSON). */
+  private promptsDraft(): Record<string, unknown> {
+    const text = this.form.field('prompts').text
+    if (text.trim() === '') return {}
+    try {
+      const value = JSON.parse(text) as unknown
+      return value && typeof value === 'object' && !Array.isArray(value) ? canonicalPrompts(value as Record<string, unknown>) : {}
+    } catch { return {} }
+  }
+
+  private stagePrompts(value: Record<string, unknown>): void {
+    const next = canonicalPrompts(value)
+    const stored = this.scope.getSnapshot().value?.prompts
+    const same = JSON.stringify(next) === JSON.stringify(stored && typeof stored === 'object' ? canonicalPrompts(stored as Record<string, unknown>) : {})
+    // Back at the stored value: stage its own text, so the form no longer counts a change.
+    const text = same ? ALL_FIELD_SPECS.find(spec => spec.field === 'prompts')!.format(stored) : Object.keys(next).length ? JSON.stringify(next, null, 2) : ''
+    this.form.actions().edit('prompts', text)
+  }
+
+  private refresh(): void { this.form.actions().edit('prompts', this.form.field('prompts').text) }
+
+  editPromptText(id: PromptTextFieldId, text: string): void {
+    const field = PROMPT_TEXT_FIELDS.find(entry => entry.id === id)!
+    this.stagePrompts(setAt(this.promptsDraft(), field.path, text.trim() === '' ? undefined : text))
+  }
+
+  setPromptSkillEnabled(enabled: boolean): void {
+    this.stagePrompts(setAt(this.promptsDraft(), ['skill', 'enabled'], enabled ? undefined : false))
+  }
+
+  editPromptExtras(text: string): void {
+    this.extrasRaw = text
+    this.extrasInvalid = false
+    if (text.trim() === '') { this.stagePrompts(withExtras(this.promptsDraft(), {})); return }
+    try {
+      const value = JSON.parse(text) as unknown
+      if (value && typeof value === 'object' && !Array.isArray(value) && validExtras(value as Record<string, unknown>)) {
+        this.stagePrompts(withExtras(this.promptsDraft(), value as Record<string, unknown>))
+        return
+      }
+    } catch { /* reported below */ }
+    this.extrasInvalid = true
+    this.refresh()
+  }
+
+  /** Back to the plugin's own text for groups, actions and error hints. */
+  resetPromptExtras(): void {
+    this.extrasRaw = undefined
+    this.extrasInvalid = false
+    this.stagePrompts(withExtras(this.promptsDraft(), {}))
   }
 
   snapshot(): BrowserCardState { return this.store.getSnapshot() }
@@ -178,6 +265,24 @@ export class BrowserSettingsController {
     for (const spec of FIELD_SPECS) fields[spec.field as SectionField] = this.form.field(spec.field)
     const jsonFields: Record<string, CardFieldState> = {}
     for (const spec of JSON_FIELD_SPECS) jsonFields[spec.field] = this.form.field(spec.field)
-    return { ...this.form.shell(), fields, jsonFields }
+    const shell = this.form.shell()
+    return { ...shell, invalid: shell.invalid || this.extrasInvalid, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!) }
+  }
+
+  private projectPrompts(field: CardFieldState): PromptsCardState {
+    const draft = this.promptsDraft()
+    const texts = {} as PromptsCardState['texts']
+    for (const entry of PROMPT_TEXT_FIELDS) {
+      const value = getAt(draft, entry.path)
+      const text = typeof value === 'string' ? value : ''
+      texts[entry.id] = { text, invalid: text.length > entry.limit }
+    }
+    return {
+      texts,
+      skillEnabled: getAt(draft, ['skill', 'enabled']) !== false,
+      extras: { text: this.extrasRaw ?? extrasText(draft), invalid: this.extrasInvalid },
+      overridden: field.overridden,
+      invalid: field.invalid,
+    }
   }
 }

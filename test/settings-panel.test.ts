@@ -114,7 +114,7 @@ test('browser settings panel covers every public browser configuration field', (
     'executablePath', 'snapshotDir', 'verbose', 'cdpPort', 'maxSessions',
   ]
   assert.deepEqual(FIELD_SPECS.map(spec => spec.field).toSorted(), fields.toSorted())
-  assert.deepEqual(JSON_FIELD_SPECS.map(spec => spec.field).toSorted(), ['automationAssets', 'usagePolicy'])
+  assert.deepEqual(JSON_FIELD_SPECS.map(spec => spec.field).toSorted(), ['automationAssets', 'prompts', 'usagePolicy'])
 
   // Every rendered field must be `.volatile()` in the Host schema: `volatileForm`
   // drops unmarked fields, so a control for one could never be written.
@@ -221,4 +221,127 @@ test('browser panel keeps rejected writes retryable and resets overrides', async
   assert.equal(Object.hasOwn(second.scope.getSnapshot().user ?? {}, 'channel'), false)
   second.controller.dispose()
   controller.dispose()
+})
+
+
+// --- the "prompt text" section ----------------------------------------------------------------------------------
+
+test('prompt text controls stage one pruned `prompts` draft, and saving writes it as a single field', async () => {
+  const { scope, controller, actions } = fixture()
+  const state = () => controller.snapshot().prompts
+  actions.editPromptText('rootNote', 'Prefer the intranet search.')
+  actions.editPromptText('indexDescription', 'INDEX')
+  actions.editPromptText('skillBodyFile', '/etc/skill.md')
+  assert.equal(state().texts.rootNote.text, 'Prefer the intranet search.')
+  assert.equal(controller.snapshot().dirty, true)
+  assert.equal(controller.snapshot().invalid, false)
+  await actions.save()
+  assert.deepEqual(scope.writes, ['set:prompts'], 'one field write for all of them')
+  assert.deepEqual(scope.getSnapshot().user?.prompts, { tools: { browser_index: { description: 'INDEX' } }, rootNote: 'Prefer the intranet search.', skill: { bodyFile: '/etc/skill.md' } })
+  assert.equal(state().overridden, true)
+  // Emptying a control removes just that key, and the parents it leaves empty.
+  actions.editPromptText('indexDescription', '')
+  actions.editPromptText('skillBodyFile', '')
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user?.prompts, { rootNote: 'Prefer the intranet search.' })
+  // Emptying the last one clears the field, back to the deployed value.
+  actions.editPromptText('rootNote', '')
+  await actions.save()
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'prompts'), false)
+  assert.equal(state().overridden, false)
+  controller.dispose()
+})
+
+test('prompt text: the skill switch only writes `false`, and an over-long text blocks the save', async () => {
+  const { scope, controller, actions } = fixture()
+  actions.setPromptSkillEnabled(false)
+  assert.equal(controller.snapshot().prompts.skillEnabled, false)
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user?.prompts, { skill: { enabled: false } })
+  actions.setPromptSkillEnabled(true)
+  await actions.save()
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'prompts'), false, 'enabled is the default, so nothing is stored')
+
+  actions.editPromptText('rootNote', 'x'.repeat(801))
+  assert.equal(controller.snapshot().prompts.texts.rootNote.invalid, true)
+  assert.equal(controller.snapshot().invalid, true)
+  const writes = scope.writes.length
+  await actions.save()
+  assert.equal(scope.writes.length, writes, 'nothing was written')
+  actions.editPromptText('rootNote', 'x'.repeat(800))
+  assert.equal(controller.snapshot().invalid, false)
+  controller.dispose()
+})
+
+test('prompt text: the groups/actions/errorHints box validates, keeps what is typed, merges into the draft, and resets', async () => {
+  const { scope, controller, actions } = fixture()
+  const state = () => controller.snapshot().prompts
+  actions.editPromptText('rootGuide', 'GUIDE')
+  // Not JSON yet: the text stays as typed, the form is invalid, and saving is refused.
+  actions.editPromptExtras('{"groups": {')
+  assert.equal(state().extras.text, '{"groups": {')
+  assert.equal(state().extras.invalid, true)
+  assert.equal(controller.snapshot().invalid, true)
+  const before = scope.writes.length
+  await actions.save()
+  assert.equal(scope.writes.length, before)
+  // Valid JSON, but a type or key the plugin would never take.
+  actions.editPromptExtras('{"actions":{"act.click":{"summary":5}}}')
+  assert.equal(state().extras.invalid, true)
+  actions.editPromptExtras('{"colors":{}}')
+  assert.equal(state().extras.invalid, true)
+  actions.editPromptExtras('{"errorHints":{"DEADLINE":"' + 'x'.repeat(601) + '"}}')
+  assert.equal(state().extras.invalid, true, 'over the hint limit')
+  // Valid: merged with the other controls' text in the one draft.
+  const good = '{"groups":{"act":{"summary":"ACT"}},"actions":{"act.click":{"summary":"CLICK","notes":"N"}},"errorHints":{"DEADLINE":"D"}}'
+  actions.editPromptExtras(good)
+  assert.equal(state().extras.invalid, false)
+  assert.equal(controller.snapshot().invalid, false)
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user?.prompts, { rootGuide: 'GUIDE', groups: { act: { summary: 'ACT' } }, actions: { 'act.click': { summary: 'CLICK', notes: 'N' } }, errorHints: { DEADLINE: 'D' } })
+  assert.deepEqual(JSON.parse(state().extras.text), JSON.parse(good), 'the box shows what is stored')
+  // Editing a plain control leaves the box's content alone.
+  actions.editPromptText('rootNote', 'NOTE')
+  assert.deepEqual(JSON.parse(state().extras.text), JSON.parse(good))
+  // Reset restores the defaults of those three members and nothing else.
+  actions.resetPromptExtras()
+  assert.equal(state().extras.text, '')
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user?.prompts, { rootGuide: 'GUIDE', rootNote: 'NOTE' })
+  // Discard drops an invalid box too.
+  actions.editPromptExtras('nope')
+  assert.equal(controller.snapshot().invalid, true)
+  actions.discard()
+  assert.equal(controller.snapshot().invalid, false)
+  assert.equal(state().extras.text, '')
+  controller.dispose()
+})
+
+test('prompt text: restoring the stored value by hand leaves the form clean, whatever empty defaults the host filled in', async () => {
+  const scope = new ScopeStub({ enabled: true, prompts: { tools: { browser_index: {}, browser_call: {} }, groups: {}, actions: {}, errorHints: {}, skill: { enabled: true } } })
+  const controller = new BrowserSettingsController(scope)
+  const actions = controller.inject()
+  actions.editPromptText('rootNote', 'temp')
+  assert.equal(controller.snapshot().dirty, true)
+  actions.editPromptText('rootNote', '')
+  assert.equal(controller.snapshot().dirty, false)
+  controller.dispose()
+})
+
+test('the prompts status controller reads the plugin report through the private channel and survives a restart gap', async () => {
+  const { PromptsStatusController } = await import('../src/client/prompts-status-client.ts')
+  const { rpcFixture } = await import('./rpc-fixture.ts')
+  const report = { overrides: [{ key: 'rootNote', length: 5 }], diagnostics: [], budget: { l0Tokens: 325, l0Budget: 1500, layerBudget: 1000, largestLayer: { name: 'x', tokens: 9 }, overBudget: [] }, skill: { enabled: true, body: 'packaged' } }
+  const { rpc, requests } = rpcFixture(undefined, () => report)
+  const controller = new PromptsStatusController(rpc as never)
+  await controller.refresh()
+  assert.deepEqual(controller.snapshot().status, report)
+  assert.equal(controller.snapshot().failed, false)
+  assert.equal(requests.at(-1)!.endpoint, 'prompts')
+  // A failing call keeps the last report and says so.
+  const flaky = new PromptsStatusController({ call: async () => { throw new Error('plugin restarting') } } as never)
+  await flaky.refresh()
+  assert.equal(flaky.snapshot().failed, true)
+  assert.equal(flaky.snapshot().loading, false)
+  controller.dispose(); flaky.dispose()
 })

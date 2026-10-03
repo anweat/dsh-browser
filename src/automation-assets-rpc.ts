@@ -17,7 +17,6 @@ import { executeAutomationAsset } from './automation-execution.ts'
  */
 const CHANNEL = '/dsh-browser-assets'
 const PREFIX = 'dsh-browser-assets'
-const ENDPOINTS = ['snapshot', 'get', 'save', 'fork', 'summarize', 'dismiss', 'validate', 'test', 'status'] as const
 
 function record(payload: unknown): Record<string, unknown> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('request payload must be an object')
@@ -46,7 +45,8 @@ function expectedRevision(payload: Record<string, unknown>): number | undefined 
   return value
 }
 
-export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService): void {
+/** `promptsStatus` answers the settings card's "prompt text" section: the overrides in force, diagnostics and the L0 estimate. */
+export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService, promptsStatus?: () => unknown): void {
   ctx.inject(['connection', 'webServer'], (connectionCtx) => {
     // Register the channel with the Host transport rather than hand-rolling the
     // client-request/server-response envelope on an exact Fetch route. The
@@ -94,6 +94,7 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
             value = result.asset
             break
           }
+          case 'prompts': value = promptsStatus ? promptsStatus() : null; break
           case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus, { expectedRevision: expectedRevision(payload) }); break
           default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}`, details: {} } }
         }
