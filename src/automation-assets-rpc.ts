@@ -19,7 +19,6 @@ import { stripAnsi } from './actions/errors.ts'
  * A plugin that owns its endpoints registers a private channel instead.
  */
 const CHANNEL = '/dsh-browser-assets'
-const PREFIX = 'dsh-browser-assets'
 
 function record(payload: unknown): Record<string, unknown> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('request payload must be an object')
@@ -70,11 +69,9 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
       try {
         // The transport hands the handler the endpoint relative to the channel,
         // so a request to `/dsh-browser-assets/snapshot` arrives as `snapshot`.
-        // Accept a prefixed form too, so either address style keeps working.
-        const leaf = endpoint.startsWith(PREFIX + '/') ? endpoint.slice(PREFIX.length + 1) : endpoint
         const payload = record(rawPayload)
         let value: unknown
-        switch (leaf) {
+        switch (endpoint) {
           case 'snapshot': value = store.snapshot(); break
           case 'get': value = store.get(stringField(payload, 'id')) ?? null; break
           case 'save': value = store.saveDraft(payload.asset as Partial<AutomationAsset> & Pick<AutomationAsset, 'kind' | 'name'>); break

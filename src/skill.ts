@@ -147,11 +147,11 @@ export function registerSkillWhenAvailable(ctx: Context, dir = SKILL_DIR, prompt
     let signature = ''
     let alive = true
     const register = (): void => {
-      const handle = skillCtx.skills.registerProvider((control: { invalidate?: () => void } | undefined) => {
-        invalidate = control?.invalidate?.bind(control)
+      // `registerProvider(create)` hands `create` the registration's control and returns its disposer.
+      unregister = skillCtx.skills.registerProvider((control: { invalidate: () => void }) => {
+        invalidate = control.invalidate
         return provider
       })
-      unregister = typeof handle === 'function' ? handle : () => {}
       available = true
     }
     const withdraw = (): void => {
@@ -170,7 +170,7 @@ export function registerSkillWhenAvailable(ctx: Context, dir = SKILL_DIR, prompt
       signature = next
     }
     sync()
-    skillCtx.effect?.(() => () => { alive = false; withdraw() })
+    skillCtx.effect(() => () => { alive = false; withdraw() })
   })
   return { isAvailable: () => available, refresh: () => sync() }
 }
