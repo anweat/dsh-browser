@@ -1427,7 +1427,32 @@ export class BrowserService {
 
   async read(opts: { session?: string } = {}): Promise<InteractiveState> {
     const page = await this.ensureActivePage(undefined, { session: opts.session })
-    return this.readState(page, false)
+    return this.readingNavigation(page, () => this.readState(page, false))
+  }
+
+  /**
+   * Run a read of the page. If the page navigates under it ("Execution context was destroyed"), the read is
+   * tried once more on the new document; if that fails the same way the page is still moving, which is a
+   * stale observation (TARGET_STALE), not a failed action. Nothing a read does changes the page.
+   */
+  private async readingNavigation<T>(page: any, run: () => Promise<T>): Promise<T> {
+    const destroyed = (error: unknown): boolean => /Execution context was destroyed|Cannot find context with specified id|Frame was detached|frame got detached/i.test(error instanceof Error ? error.message : String(error))
+    try {
+      return await run()
+    } catch (error) {
+      if (!destroyed(error)) throw error
+    }
+    await page.waitForLoadState?.('domcontentloaded', { timeout: 5_000 }).catch(() => {})
+    try {
+      return await run()
+    } catch (error) {
+      if (!destroyed(error)) throw error
+      const stamp = this.stamp(page)
+      throw new TargetStaleError(
+        `The page ${stamp.targetId ?? ''} navigated while it was being read (Execution context was destroyed, twice): the observation is stale and nothing was changed.`,
+        { targetId: stamp.targetId ?? '', generation: stamp.generation ?? 0 },
+      )
+    }
   }
 
   /**
@@ -1447,6 +1472,10 @@ export class BrowserService {
   } = {}): Promise<Record<string, unknown>> {
     const request = normalizeObserve(opts)
     const page = await this.ensureActivePage(undefined, { session: opts.session })
+    return this.readingNavigation(page, () => this.observeOnce(page, request, opts))
+  }
+
+  private async observeOnce(page: any, request: ReturnType<typeof normalizeObserve>, opts: { maxBytes?: number; maxItems?: number }): Promise<Record<string, unknown>> {
     const base = scopeBase(request.target)
     const structured = request.sections.some(section => section !== 'content')
     const wantsText = request.sections.includes('content')

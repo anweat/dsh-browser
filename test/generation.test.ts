@@ -111,3 +111,42 @@ test('every act action that changes or presses into the page accepts expectGener
   assert.match(validateArgs(findAction('act.click')!.params, { selector: '#a', expectGeneration: 'x' }).errors[0]!, /expected number/)
   for (const name of ['automation.run', 'automation.run_recipe']) assert.equal(findAction(name)!.params.expectGeneration, undefined, `${name}: a recipe re-binds the page on every run`)
 })
+
+test('observe.read retries once when the page navigates under it, and reports TARGET_STALE (not ACTION_FAILED) if it keeps happening', async () => {
+  const destroyed = () => new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation.')
+  const one = stubPage()
+  let calls = 0
+  one.page.evaluate = async () => { calls += 1; if (calls === 1) throw destroyed(); return { title: 'After', text: 'new document' } }
+  const { service } = serviceWith([one])
+  const read = await service.read({ session: 'session:gen' })
+  assert.equal(read.text, 'new document', 'the second attempt reads the new document')
+  assert.equal(calls, 2)
+
+  const stuck = stubPage()
+  let attempts = 0
+  stuck.page.evaluate = async () => { attempts += 1; throw destroyed() }
+  const { service: stuckService } = serviceWith([stuck])
+  const reply = await runAction('observe.read', {}, { service: stuckService, config: resolveConfig({}), session: 'session:gen', sessionId: 'gen', agent: undefined, signal: new AbortController().signal } as never, { mode: 'unrestricted', options: { modelDevelopmentEnabled: true }, enabled: true })
+  assert.equal(attempts, 2, 'exactly one retry')
+  assert.equal(reply.ok, false)
+  assert.equal(reply.error?.code, 'TARGET_STALE')
+  assert.equal(reply.error?.current?.targetId, 't1')
+  assert.equal(typeof reply.error?.current?.generation, 'number')
+
+  // Any other failure is not retried and keeps its own code.
+  const broken = stubPage()
+  let other = 0
+  broken.page.evaluate = async () => { other += 1; throw new Error('boom') }
+  const { service: brokenService } = serviceWith([broken])
+  await assert.rejects(brokenService.read({ session: 'session:gen' }), /boom/)
+  assert.equal(other, 1)
+
+  // The structured form (sections) goes through the same retry.
+  const sectioned = stubPage()
+  let scans = 0
+  sectioned.page.evaluate = async () => { scans += 1; if (scans === 1) throw destroyed(); return { title: 'T', text: 'x' } }
+  const { service: sectionService } = serviceWith([sectioned])
+  const observed = await sectionService.observe({ sections: ['content'], maxBytes: 5000, session: 'session:gen' })
+  assert.equal(observed.text, 'x')
+  assert.equal(scans, 2)
+})
