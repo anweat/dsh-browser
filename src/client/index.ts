@@ -1,6 +1,8 @@
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { Context } from './context-types.ts'
 import { BrowserSettingsController, type BrowserCardState } from './form.ts'
+import type { PromptTextFieldId } from './prompts-form.ts'
+import { PromptsStatusController, type PromptsStatusState } from './prompts-status-client.ts'
 import { SettingsCard } from './SettingsCard.tsx'
 import { en, zh } from './locales.ts'
 import { ensureStyles } from './styles.ts'
@@ -24,6 +26,15 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   resetField: (field: string) => void
   save: () => void
   discard: () => void
+  // The "prompt text" section: views of the one staged `prompts` draft.
+  editPromptText: (id: PromptTextFieldId, text: string) => void
+  setPromptSkillEnabled: (enabled: boolean) => void
+  editPromptExtras: (text: string) => void
+  resetPromptExtras: () => void
+  usePromptsStatus: <R>(selector: (snapshot: PromptsStatusState) => R) => R
+  refreshPromptsStatus: () => void
+  exportPromptDefaults: () => Promise<void>
+  hidePromptDefaults: () => void
   useAutomationAssets: <R>(selector: (snapshot: AutomationAssetsState) => R) => R
   refreshAutomationAssets: () => void
   selectAutomationAsset: (id?: string) => void
@@ -31,8 +42,22 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   summarizeAutomationCandidate: (id: string) => Promise<void>
   dismissAutomationCandidate: (id: string) => Promise<void>
   validateAutomationAsset: (id: string) => Promise<void>
-  testAutomationAsset: (id: string, url: string, inputs: Record<string, string>) => Promise<void>
-  setAutomationAssetStatus: (id: string, status: AutomationAssetStatus) => Promise<void>
+  testAutomationAsset: (id: string, url: string, inputs: Record<string, string>, expectedRevision?: number) => Promise<void>
+  setAutomationAssetStatus: (id: string, status: AutomationAssetStatus, expectedRevision?: number) => Promise<void>
+  // Editor: edits live in the controller, so every way out of them can ask first.
+  editAutomationAsset: (text: string) => void
+  setAssetTestUrl: (value: string) => void
+  setAssetTestInputs: (value: string) => void
+  requestSelectAutomationAsset: (id?: string) => void
+  requestNewAutomationAsset: (kind: AutomationAsset['kind']) => void
+  requestRefreshAutomationAssets: () => void
+  requestForkAutomationAsset: (id: string) => void
+  requestConvertAutomationAsset: (id: string) => void
+  confirmLeaveAutomationAsset: () => void
+  cancelLeaveAutomationAsset: () => void
+  saveEditedAutomationAsset: () => Promise<unknown>
+  saveAndTestAutomationAsset: () => Promise<void>
+  activateAutomationAsset: () => Promise<void>
 }
 
 export function apply(ctx: Context): void {
@@ -43,7 +68,9 @@ export function apply(ctx: Context): void {
   // schema, keyed by the loader entry id; the shared form service reads it.
   const controller = new BrowserSettingsController(ctx.configForms.get<Record<string, unknown>>(SETTINGS_NAMESPACE))
   const assets = new AutomationAssetsController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
+  const prompts = new PromptsStatusController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
   ctx.effect(() => () => controller.dispose(), 'dsh-browser: settings controller')
+  ctx.effect(() => () => prompts.dispose(), 'dsh-browser: prompts status controller')
   ctx.effect(() => () => assets.dispose(), 'dsh-browser: automation assets controller')
 
   // External bundles own their keyed configuration on the bundle's detail
@@ -55,7 +82,8 @@ export function apply(ctx: Context): void {
         inject: () => {
           const settingsProps = controller.inject()
           const assetProps = assets.inject()
-          return { ...settingsProps, ...assetProps, hooks: { ...settingsProps.hooks, ...assetProps.hooks } }
+          const promptsProps = prompts.inject()
+          return { ...settingsProps, ...assetProps, ...promptsProps, hooks: { ...settingsProps.hooks, ...assetProps.hooks, ...promptsProps.hooks } }
         },
       }, SettingsCard))), 'dsh-browser: settings page')
 }

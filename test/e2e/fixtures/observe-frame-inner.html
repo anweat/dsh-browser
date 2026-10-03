@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Frame Inner</title></head>
+<body>
+  <h2>Inner frame</h2>
+  <label for="inner-note">Inner note</label>
+  <input id="inner-note" type="text" required>
+  <button id="inner-save" type="button" data-hit="inner-save">Inner save</button>
+  <p id="inner-state">Inner idle</p>
+  <iframe id="grandchild" title="grandchild" src="/observe-frame-leaf.html"></iframe>
+  <script>
+    document.getElementById('inner-save').addEventListener('click', function () {
+      fetch('/hit?who=inner-save')
+      document.getElementById('inner-state').textContent = 'Inner saved: ' + document.getElementById('inner-note').value
+    })
+  </script>
+</body>
+</html>

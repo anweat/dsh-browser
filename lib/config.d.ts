@@ -5,12 +5,40 @@
 import z from '@deepseek-ai/schemastery';
 import type { AuthProfileConfig } from './auth-profiles.ts';
 import type { RulePackConfig } from './rule-packs.ts';
-import { type AutomationMode } from './freedom.ts';
+import { type AutomationMode, type ToolSurface } from './freedom.ts';
 import { type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts';
+import { type PromptsSource } from './prompts.ts';
 import { type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts';
 export declare const BROWSER_RUNTIMES: readonly ["playwright", "patchright"];
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number];
 export declare function resolveBrowserRuntime(value: unknown): BrowserRuntime;
+/** The `prompts` configuration (see `src/prompts.ts`). Unknown keys are tolerated at parse time and reported as diagnostics. */
+export interface PromptsInput {
+    tools?: {
+        browser_index?: {
+            description?: string;
+        };
+        browser_call?: {
+            description?: string;
+        };
+    };
+    rootGuide?: string;
+    rootNote?: string;
+    groups?: Record<string, {
+        summary?: string;
+    }>;
+    actions?: Record<string, {
+        summary?: string;
+        notes?: string;
+    }>;
+    errorHints?: Record<string, string>;
+    skill?: {
+        enabled?: boolean;
+        description?: string;
+        bodyFile?: string;
+        append?: string;
+    };
+}
 export interface Config {
     /** Whether the browser service is active. */
     enabled: boolean;
@@ -33,10 +61,21 @@ export interface Config {
     opencliEnabled: boolean;
     /** Model-facing tool exposure and approval level. */
     automationMode: AutomationMode;
+    /**
+     * How browser capabilities reach the model: `indexed` (default) exposes two
+     * small tools, `browser_index` + `browser_call`; `flat` registers one tool per
+     * action (a much larger always-on context cost).
+     */
+    toolSurface?: ToolSurface;
     /** Approval-independent traffic buffering and bounded crawl budgets. */
     usagePolicy?: UsagePolicyInput;
     /** Reusable automation capture, review, activation, and retrieval policy. */
     automationAssets?: AutomationAssetPolicyInput;
+    /**
+     * Deployment overrides of the model-facing text (tool descriptions, root guide, catalog summaries and notes,
+     * error hints, the skill). Every field is optional; the settings card button Export default text (or `prompts:dump`) shows the full structure with defaults.
+     */
+    prompts?: PromptsInput;
     /** Lazily run `playwright install chromium` when the browser is missing. */
     autoInstall: boolean;
     /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
@@ -46,6 +85,12 @@ export interface Config {
     cdpPort?: number;
     /** Additional Chromium CLI launch arguments. */
     args?: string[];
+    /**
+     * How many sessions may hold a browser context+page at once. Past this the
+     * least-recently-used session is closed. One shared browser process serves
+     * them all, so this bounds contexts, not processes.
+     */
+    maxSessions?: number;
 }
 export declare const Config: z<Config>;
 export interface ResolvedConfig {
@@ -60,13 +105,17 @@ export interface ResolvedConfig {
     executablePath?: string;
     opencliEnabled: boolean;
     automationMode: AutomationMode;
+    toolSurface: ToolSurface;
     usagePolicy: UsagePolicy;
     automationAssets: AutomationAssetPolicy;
+    /** Live view of the `prompts` overrides: `current()` reads the configuration at call time. */
+    prompts: PromptsSource;
     autoInstall: boolean;
     snapshotDir: string;
     verbose: boolean;
     cdpPort?: number;
     args: string[];
+    maxSessions: number;
 }
 export declare function defaultSnapshotDir(): string;
 export declare function resolveConfig(config: Config): ResolvedConfig;

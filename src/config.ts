@@ -8,8 +8,10 @@ import os from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import type { AuthProfileConfig } from './auth-profiles.ts'
 import type { RulePackConfig } from './rule-packs.ts'
-import { resolveAutomationMode, type AutomationMode } from './freedom.ts'
+import { resolveAutomationMode, resolveToolSurface, type AutomationMode, type ToolSurface } from './freedom.ts'
 import { resolveUsagePolicy, type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts'
+import { PROMPT_LIMITS } from './prompt-limits.ts'
+import { promptsSource, type PromptsSource } from './prompts.ts'
 import { resolveAutomationAssetPolicy, type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts'
 
 export const BROWSER_RUNTIMES = ['playwright', 'patchright'] as const
@@ -21,6 +23,17 @@ export function resolveBrowserRuntime(value: unknown): BrowserRuntime {
     throw new Error('browserRuntime must be one of: ' + BROWSER_RUNTIMES.join(', '))
   }
   return runtime as BrowserRuntime
+}
+
+/** The `prompts` configuration (see `src/prompts.ts`). Unknown keys are tolerated at parse time and reported as diagnostics. */
+export interface PromptsInput {
+  tools?: { browser_index?: { description?: string }; browser_call?: { description?: string } }
+  rootGuide?: string
+  rootNote?: string
+  groups?: Record<string, { summary?: string }>
+  actions?: Record<string, { summary?: string; notes?: string }>
+  errorHints?: Record<string, string>
+  skill?: { enabled?: boolean; description?: string; bodyFile?: string; append?: string }
 }
 
 export interface Config {
@@ -45,10 +58,21 @@ export interface Config {
   opencliEnabled: boolean
   /** Model-facing tool exposure and approval level. */
   automationMode: AutomationMode
+  /**
+   * How browser capabilities reach the model: `indexed` (default) exposes two
+   * small tools, `browser_index` + `browser_call`; `flat` registers one tool per
+   * action (a much larger always-on context cost).
+   */
+  toolSurface?: ToolSurface
   /** Approval-independent traffic buffering and bounded crawl budgets. */
   usagePolicy?: UsagePolicyInput
   /** Reusable automation capture, review, activation, and retrieval policy. */
   automationAssets?: AutomationAssetPolicyInput
+  /**
+   * Deployment overrides of the model-facing text (tool descriptions, root guide, catalog summaries and notes,
+   * error hints, the skill). Every field is optional; the settings card button Export default text (or `prompts:dump`) shows the full structure with defaults.
+   */
+  prompts?: PromptsInput
   /** Lazily run `playwright install chromium` when the browser is missing. */
   autoInstall: boolean
   /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
@@ -58,6 +82,12 @@ export interface Config {
   cdpPort?: number
   /** Additional Chromium CLI launch arguments. */
   args?: string[]
+  /**
+   * How many sessions may hold a browser context+page at once. Past this the
+   * least-recently-used session is closed. One shared browser process serves
+   * them all, so this bounds contexts, not processes.
+   */
+  maxSessions?: number
 }
 
 // The `as unknown as z<Config>` is required because a `.volatile()` field
@@ -100,6 +130,7 @@ export const Config = z.object({
   executablePath: z.string().volatile(),
   opencliEnabled: z.boolean().default(true).volatile(),
   automationMode: z.string().default('standard').volatile(),
+  toolSurface: z.string().default('indexed').volatile(),
   usagePolicy: z.object({
     minDelayMs: z.number().default(750),
     maxConcurrency: z.number().default(2),
@@ -128,12 +159,35 @@ export const Config = z.object({
     catalogTokenBudget: z.number().default(800),
     modelDevelopmentEnabled: z.boolean().default(true),
     maxModelDraftWritesPerSession: z.number().default(3),
+    maxTestCredentials: z.number().default(5),
+    minInputSetsForActivation: z.number().default(2),
   }).volatile(),
+  prompts: z.object({
+    tools: z.object({
+      browser_index: z.object({ description: z.string().description(`Replaces the browser_index tool description. At most ${PROMPT_LIMITS.description} characters. Applies after a restart (tool descriptions are fixed at registration).`) }),
+      browser_call: z.object({ description: z.string().description(`Replaces the browser_call tool description; the compliance notice is always appended. At most ${PROMPT_LIMITS.description} characters. Applies after a restart.`) }),
+    }),
+    rootGuide: z.string().description(`Replaces the compact guide the browser_index root shows when no skill is available. At most ${PROMPT_LIMITS.rootGuide} characters.`),
+    rootNote: z.string().description(`Your own advice, appended at the end of the browser_index root (also when the skill is available). At most ${PROMPT_LIMITS.rootNote} characters.`),
+    groups: z.dict(z.object({ summary: z.string().description(`Replaces the group summary. At most ${PROMPT_LIMITS.summary} characters.`) })).description('Keyed by group name (runtime, target, observe, act, inspect, script, automation, crawl, opencli). Unknown names are ignored.'),
+    actions: z.dict(z.object({
+      summary: z.string().description(`Replaces the one-line summary. At most ${PROMPT_LIMITS.summary} characters.`),
+      notes: z.string().description(`Replaces the extra guidance shown in the action detail. At most ${PROMPT_LIMITS.notes} characters (${PROMPT_LIMITS.topicText} for a detail topic, where it replaces the whole page text).`),
+    })).description('Keyed by group.action, group.action.sub (automation.develop.save) or group.action.topic (observe.read.controls). Unknown keys are ignored.'),
+    errorHints: z.dict(z.string()).description(`Keyed by error code; replaces the hint that comes with it. At most ${PROMPT_LIMITS.errorHint} characters each. Only codes with a fixed hint can be replaced; others are ignored.`),
+    skill: z.object({
+      enabled: z.boolean().default(true).description('false: the dsh-browser skill is not registered and the root shows the compact guide instead.'),
+      description: z.string().description(`Replaces the skill description. At most ${PROMPT_LIMITS.skillDescription} characters.`),
+      bodyFile: z.string().description(`Absolute path of a Markdown file replacing the SKILL.md body (at most ${PROMPT_LIMITS.skillBodyFile} characters). A missing or unreadable file falls back to the packaged body.`),
+      append: z.string().description(`Text appended to the end of the skill body. At most ${PROMPT_LIMITS.skillAppend} characters.`),
+    }),
+  }).description('Overrides of the model-facing text. The settings card button Export default text (or `pnpm prompts:dump` in a repository checkout) prints every key with its default. Values over the length limits and unknown keys are ignored and reported by runtime.status. Tool descriptions apply after a restart; everything else applies on the next call.').volatile(),
   autoInstall: z.boolean().default(false).volatile(),
   snapshotDir: z.string().volatile(),
   verbose: z.boolean().default(false).volatile(),
   cdpPort: z.number().min(1).max(65_535).step(1).description('Optional remote debugging port to expose CDP for external tools (e.g. 9222)').volatile(),
   args: z.array(z.string()).default([]).description('Additional Chromium CLI launch arguments').volatile(),
+  maxSessions: z.number().min(1).max(64).step(1).default(8).description('Sessions that may hold a browser page at once; the least-recently-used one is closed past this. One browser process is shared by all of them.').volatile(),
 }) as unknown as z<Config>
 
 export interface ResolvedConfig {
@@ -148,13 +202,17 @@ export interface ResolvedConfig {
   executablePath?: string
   opencliEnabled: boolean
   automationMode: AutomationMode
+  toolSurface: ToolSurface
   usagePolicy: UsagePolicy
   automationAssets: AutomationAssetPolicy
+  /** Live view of the `prompts` overrides: `current()` reads the configuration at call time. */
+  prompts: PromptsSource
   autoInstall: boolean
   snapshotDir: string
   verbose: boolean
   cdpPort?: number
   args: string[]
+  maxSessions: number
 }
 
 export function defaultSnapshotDir(): string {
@@ -202,9 +260,13 @@ export function resolveConfig(config: Config): ResolvedConfig {
     headless: read('headless', true),
     opencliEnabled: read('opencliEnabled', true),
     automationMode: resolveAutomationMode(optional<string>('automationMode')),
+    toolSurface: resolveToolSurface(optional<string>('toolSurface')),
     usagePolicy: resolveUsagePolicy(optional<Partial<UsagePolicyInput>>('usagePolicy')),
     automationAssets: resolveAutomationAssetPolicy(optional<Partial<AutomationAssetPolicyInput>>('automationAssets')),
+    // Kept as a live reader, not a snapshot: the volatile handle is updated in place when the setting changes.
+    prompts: promptsSource(() => plain(c.prompts)),
     autoInstall: read('autoInstall', false),
+    maxSessions: read('maxSessions', 8),
     snapshotDir,
     verbose: read('verbose', false),
     authProfiles: read('authProfiles', {}),

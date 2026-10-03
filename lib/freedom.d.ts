@@ -1,11 +1,27 @@
-/** Public automation-freedom contract and tool exposure matrix. */
+/** Public automation-freedom contract and action exposure matrix. */
+import type { ActionDef } from './actions/types.ts';
 export declare const AUTOMATION_MODES: readonly ["read-only", "standard", "autonomous", "unrestricted"];
 export type AutomationMode = typeof AUTOMATION_MODES[number];
-export declare const ALL_BROWSER_TOOL_NAMES: readonly ["browser_open", "browser_click", "browser_type", "browser_wait", "browser_press", "browser_select", "browser_check", "browser_hover", "browser_set_files", "browser_evaluate", "browser_console", "browser_requests", "browser_scroll", "browser_read", "browser_screenshot", "browser_close", "browser_status", "browser_install", "browser_script_catalog", "browser_script_validate", "browser_script_run_builtin", "browser_userscript_run", "browser_recipe_run", "browser_automation_search", "browser_automation_develop", "browser_automation_run", "browser_opencli_status", "browser_opencli_catalog", "browser_opencli_run", "browser_crawl"];
-export type BrowserToolName = typeof ALL_BROWSER_TOOL_NAMES[number];
+export declare const TOOL_SURFACES: readonly ["indexed", "flat"];
+export type ToolSurface = typeof TOOL_SURFACES[number];
+/** Every browser action name (`group.action`), straight from the registry. */
+export declare const ALL_BROWSER_ACTION_NAMES: readonly string[];
+export type BrowserActionName = string;
 export declare function resolveAutomationMode(value: unknown): AutomationMode;
-export declare function isBrowserToolExposed(name: string, mode: AutomationMode): name is BrowserToolName;
-export declare function browserToolsForMode(mode: AutomationMode): BrowserToolName[];
-export declare function configuredBrowserTools(mode: AutomationMode, options: {
+export declare function resolveToolSurface(value: unknown): ToolSurface;
+/**
+ * Whether an action name is a known browser action allowed under the mode. With `args`, an action
+ * that bundles several operations (`automation.develop`) is judged by the operation the call selects;
+ * without them, by whether any operation is usable.
+ */
+export declare function isBrowserActionExposed(name: string, mode: AutomationMode, args?: unknown): boolean;
+export declare function browserActionsForMode(mode: AutomationMode): string[];
+export interface ExposureOptions {
     modelDevelopmentEnabled: boolean;
-}, enabled?: boolean): BrowserToolName[];
+}
+/** Actions the model may use under this configuration. */
+export declare function configuredBrowserActions(mode: AutomationMode, options: ExposureOptions, enabled?: boolean): string[];
+/** Why an action cannot run now, or undefined when it can. */
+export declare function actionUnavailableReason(action: ActionDef, mode: AutomationMode, options: ExposureOptions, enabled?: boolean, args?: unknown): string | undefined;
+/** Tool names the plugin registers for a surface (empty when the service is disabled). */
+export declare function configuredBrowserTools(mode: AutomationMode, options: ExposureOptions, enabled?: boolean, surface?: ToolSurface): string[];

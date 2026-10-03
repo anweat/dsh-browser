@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Observe Many</title></head>
+<body>
+  <h1>Observe many fixture</h1>
+  <form id="big"></form>
+  <h2>Ledger</h2>
+  <table id="ledger"><caption>Ledger</caption><thead><tr><th>No</th><th>Memo</th><th>Amount</th></tr></thead><tbody id="ledger-body"></tbody></table>
+  <ul id="link-list"></ul>
+  <div id="prose"></div>
+  <script>
+    var form = document.getElementById('big')
+    for (var i = 1; i <= 300; i++) {
+      var row = document.createElement('div')
+      var label = document.createElement('label')
+      label.setAttribute('for', 'f' + i)
+      label.textContent = 'Field number ' + i
+      var input = document.createElement('input')
+      input.id = 'f' + i
+      input.type = 'text'
+      input.value = 'value ' + i
+      row.appendChild(label)
+      row.appendChild(input)
+      form.appendChild(row)
+    }
+    var body = document.getElementById('ledger-body')
+    for (var r = 1; r <= 400; r++) {
+      var tr = document.createElement('tr')
+      tr.innerHTML = '<td>' + r + '</td><td>Ledger entry with a fairly long memo text number ' + r + '</td><td>' + (r * 3.5).toFixed(2) + '</td>'
+      body.appendChild(tr)
+    }
+    var list = document.getElementById('link-list')
+    for (var k = 1; k <= 200; k++) {
+      var li = document.createElement('li')
+      li.innerHTML = '<a href="/index.html?item=' + k + '">Item link ' + k + '</a>'
+      list.appendChild(li)
+    }
+    var prose = document.getElementById('prose')
+    for (var p = 1; p <= 200; p++) {
+      var para = document.createElement('p')
+      para.textContent = 'Paragraph ' + p + ': ' + 'lorem ipsum dolor sit amet, consectetur adipiscing elit. '.repeat(4)
+      prose.appendChild(para)
+    }
+  </script>
+</body>
+</html>
