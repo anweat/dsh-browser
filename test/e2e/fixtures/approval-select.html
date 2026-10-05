@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>E2E Approval Select</title></head>
+<body>
+  <h1>Sign-up slot</h1>
+  <label for="slot">Slot</label>
+  <select id="slot" name="slot">
+    <option value="am">Morning</option>
+    <option value="pm">Afternoon</option>
+  </select>
+  <p id="chosen">Chosen: none</p>
+  <script>
+    document.getElementById('slot').addEventListener('change', function (event) {
+      document.getElementById('chosen').textContent = 'Chosen: ' + event.target.value
+      fetch('/hit?who=slot-change')
+    })
+  </script>
+</body>
+</html>
