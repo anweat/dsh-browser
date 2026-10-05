@@ -20,3 +20,10 @@ export type ResolvedBrowserCall =
     kind: 'unresolved';
 };
 export declare function resolveBrowserCall(toolName: string, rawArgs: unknown): ResolvedBrowserCall | undefined;
+/**
+ * Whether `runAction` would refuse these arguments for their shape (`INVALID_ARGS`) before running anything.
+ * It is the very check `runAction` makes (`validateActionArgs`), so the approval hook can leave such a call
+ * unasked: asking about a call that cannot run only teaches the user to click through prompts. False for a
+ * name that is not an action.
+ */
+export declare function argsRejectedByExecutor(actionName: string, args: unknown): boolean;
