@@ -15,6 +15,7 @@
 | `0.1.17` | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | peer 收口为「实测过的两条线」（上界 `<0.2.1-0`）；在 `0.2.0-rc.2` 上完成 typecheck、构建、52 项测试与真实挂载验证；补充浏览器缓存路径配置说明，并新增 peer 双解析模式检查 |
 | `0.2.0-rc.1`（预发布，历史记录） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 325 项测试、64 项真实浏览器 e2e 与真实 Web profile 验证 |
 | `0.2.0` | `dsh-v0.2.0-rc.2` | 第一个面向 DSH 桌面版 0.2.0 线的正式版，也是后续开发的基底。**只支持 `dsh-v0.2.0-rc.2` 这一条线**（peer `>=0.2.0-rc.2 <0.2.1-0`）：去掉为更旧宿主保留的兼容分支（`settings.register` 的 live scope 回退等），并去掉对 `settings` 服务的必需依赖（只声明 `inject: ['tools']`，没有 Settings 服务的组合里也能启动）；不改工具、动作、schema、文本与审批规则。在 `0.2.0-rc.2` 上完成 327 项测试、64 项真实浏览器 e2e 与 peer 双解析模式检查。旧宿主（0.1.7 线，`dsh-v0.1.7-rc.2`）继续使用 `0.1.17` |
+| `0.2.1` | `dsh-v0.2.0-rc.2`（不变） | 相对 `0.2.0` 的补丁版，DSH 基线与 peer 范围（`>=0.2.0-rc.2 <0.2.1-0`）不变，只含两项：(1) 参数无效的调用不再先弹审批：审批钩子先判断动作是否被当前 `automationMode` 禁用（禁用仍直接拒绝），再用与 `runAction` 相同的校验检查参数，无效则不询问，执行层再校验一次并返回带精简 schema 的 `INVALID_ARGS`，不执行任何页面动作；参数有效时的审批规则与理由不变。(2) “探索转草稿”（`draft_from_journal`）的指导文本补充。不改动作、参数 schema 与审批规则。在 `0.2.0-rc.2` 上完成 337 项测试与 66 项真实浏览器 e2e |
 
 `0.1.17` 把 DSH 运行时依赖由精确锁定改为范围声明（`^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.1-0`），
 使同一份包可装在 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代宿主上。`0.2.0-rc.1` 起的新功能（动作体系、skill、recipe v2、
@@ -51,7 +52,7 @@
 
 ```bash
 # 默认安装（新的 browser_index / browser_call 工具体系，面向 dsh-v0.2.0-rc.2 宿主）：
-dsh plugin --profile web add @anweat/dsh-browser@0.2.0
+dsh plugin --profile web add @anweat/dsh-browser@0.2.1
 # 宿主仍是 0.1.7 线（dsh-v0.1.7-rc.2）时，固定安装 0.1.17（旧的 browser_* 工具体系）：
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17
 # 或本地目录 / tarball：
@@ -60,13 +61,18 @@ dsh plugin --profile web add ./dsh-browser
 dsh --profile web
 ```
 
-> `0.2.0` 只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`）；范围之外的宿主版本未经验证，
+> `0.2.0` 与 `0.2.1` 只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`）；范围之外的宿主版本未经验证，
 > 旧宿主（`dsh-v0.1.7-rc.2` 线）请固定使用 `0.1.17`。预发布通道 `@next` 不再用于安装，`0.2.0-rc.1` 仅作历史记录。
 > 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
 ## 从旧版本升级
+
+### 升级到 0.2.1
+
+- 从 `0.2.0` 直接升级即可，DSH 基线、peer 范围、动作、参数 schema、面向模型的文本与审批规则都没有变化，已保存的资产、配置与提示文本覆盖照常使用。
+- 唯一的行为变化：参数无效的调用（例如 `act.select` 把 `values` 写成 `value`）不再先弹审批、等用户点“允许”之后才返回 `INVALID_ARGS`；现在直接返回 `INVALID_ARGS`（带精简 schema），页面没有任何改动，模型改对后只会询问一次。被当前 `automationMode` 禁用的动作仍直接拒绝。
 
 ### 升级到 0.2.0
 
@@ -244,7 +250,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 - `validationStatus` 为 `passed` 当且仅当所有 `assert` 和 postconditions 都成立。**没有任何 assert 或 postcondition 的 v2 资产可以保存为草稿，但测试不会记为 passed**，`testMessage` 会说明原因。
 - `automation.develop` 的 `convert` 把 v1 recipe 资产转成**新的** v2 草稿：CSS selector 变成 `{css, explicitFirst: true}`（仍取第一个匹配），全部列入 `pendingDisambiguation`，草稿记录 `sourceAssetId` / `sourceRevision`，原资产（含 active）不会被修改；未知的 extract mode 或 wait condition 会拒绝转换并说明哪一步。
 
-**审批按动作判断**：Host 的审批理由写明动作和关键参数（例如 `act.click role="button" name="Submit"`），`browser_index` 直接放行，`browser_call` 解析出动作后适用与下表相同的规则，不可用的动作在 `browser_call` 中再拒绝一次。Host 里按工具名设置的“总是允许”不会跳过插件策略。运行或回放资产（`automation.run`、`automation.develop` 的 `test`）时，审批理由写资产名称、版本和短 id，例如 `automation.run "Host check: docs search" r1 (5fdc912d)`；名称去掉换行并截断到 60 个字符。
+**审批按动作判断**：Host 的审批理由写明动作和关键参数（例如 `act.click role="button" name="Submit"`），`browser_index` 直接放行，`browser_call` 解析出动作后适用与下表相同的规则，不可用的动作在 `browser_call` 中再拒绝一次。判断顺序：先看动作是否被当前模式禁用（禁用则拒绝），再按动作的参数 schema 校验参数（与执行层是同一个校验；无效则不询问，直接交给执行层返回 `INVALID_ARGS`，不会执行任何页面动作），最后才是审批规则。Host 里按工具名设置的“总是允许”不会跳过插件策略。运行或回放资产（`automation.run`、`automation.develop` 的 `test`）时，审批理由写资产名称、版本和短 id，例如 `automation.run "Host check: docs search" r1 (5fdc912d)`；名称去掉换行并截断到 60 个字符。
 
 旧的 30 个 `browser_*` 工具名已不再注册（`flat` 形态中 `browser_<group>_<action>` 与个别旧名相同，但它们现在就是注册表里的动作，返回统一信封）。
 
