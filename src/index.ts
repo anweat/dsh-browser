@@ -14,7 +14,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { Config, resolveConfig, type ResolvedConfig } from './config.ts'
 import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
-import { browserPolicyDecision } from './approval-policy.ts'
+import { browserCallDecision, browserPolicyDecision } from './approval-policy.ts'
 import { resolveBrowserCall } from './actions/surface.ts'
 import { registerSkillWhenAvailable } from './skill.ts'
 import { installErrorHints } from './actions/errors.ts'
@@ -76,7 +76,9 @@ export function apply(ctx: Context, config: Config): void {
   // resolved to its action and arguments first, so the user is asked about
   // `act.click #submit`, not about a generic dispatcher. browser_index only
   // reads the catalog and is let through. Validation remains active even when
-  // unrestricted mode skips approvals.
+  // unrestricted mode skips approvals. A call whose arguments `runAction` would
+  // refuse (INVALID_ARGS) is let through unasked, see `browserCallDecision`: the
+  // executor validates it again and runs nothing, so there is nothing to approve.
   ctx.on('tools/pre-execute', async (exec, next) => {
     const downstream = await next()
     if (downstream.kind !== 'allow') return downstream
@@ -90,7 +92,7 @@ export function apply(ctx: Context, config: Config): void {
       const callArgs = (call.args ?? {}) as { id?: unknown; action?: unknown }
       const replaysAsset = call.action === 'automation.run' || (call.action === 'automation.develop' && callArgs.action === 'test')
       const target = replaysAsset && typeof callArgs.id === 'string' ? assets.get(callArgs.id) : undefined
-      return browserPolicyDecision(call.action, call.args, resolved.automationMode, target?.kind, call.action === 'automation.develop' ? target?.recipe : undefined, target ? { id: target.id, name: target.name, revision: target.revision } : undefined)
+      return browserCallDecision(call.action, call.args, resolved.automationMode, target?.kind, call.action === 'automation.develop' ? target?.recipe : undefined, target ? { id: target.id, name: target.name, revision: target.revision } : undefined)
     }
     return browserPolicyDecision(exec.name, exec.arguments, resolved.automationMode)
   })

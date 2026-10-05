@@ -108,7 +108,7 @@ When an exploration worked and will likely repeat, do not rewrite it by hand. Ev
 {"action":"automation.develop","args":{"action":"test","id":"draft-id","url":"https://example.com/search","inputSets":[{"keyword":"alpha"},{"keyword":"beta"}]}}
 ```
 
-`parameters` turns a typed value into an input, `extract` names the `observe.read` that is the result, `postconditions` check it; failed calls and plain observations are left out. Read `unmapped` (what a recipe cannot express: the draft is then incomplete and cannot be activated), `warnings`, `pendingDisambiguation`. `inputSets` (2 to 5) run each in a fresh context and all must pass; `PARAMETERIZATION_SUSPECT` means different inputs gave the same output. Details: `references/develop.md`.
+`parameters` turns a typed value into an input, `extract` names an `observe.read` that includes the `content` section (the default) and reads the result, `postconditions` check it; failed calls and plain observations are left out. Read `unmapped` (what a recipe cannot express: the draft is then incomplete and cannot be activated), `warnings`, `pendingDisambiguation`. `inputSets` (2 to 5) run each in a fresh context and all must pass; `PARAMETERIZATION_SUSPECT` means different inputs gave the same output. Details: `references/develop.md`.
 
 Write a recipe by hand (`save`, `validate`, `test`; schema v2 in `references/recipes.md`) only when the journal cannot cover it. `convert` turns a v1 asset into a v2 draft.
 

@@ -10,6 +10,14 @@ Each entry has the action, page `targetId`, `generationBefore` and `generationAf
 
 ## draft_from_journal
 
+Before selecting an observation for `extract`, read the result with the `content` section (or leave `sections` unset). A read of only `controls`, `links` or `tables` cannot become a recipe extract, even with `mode: "links"`; it returns `INVALID_ARGS`. For a scoped result:
+
+```json call
+{"action":"observe.read","args":{"sections":["content"],"locator":{"selector":"#results"}}}
+```
+
+Use the returned `seq` in `extract`.
+
 ```json call
 {"action":"automation.develop","args":{"action":"draft_from_journal","name":"Keyword search","fromSeq":1,"toSeq":9,"exclude":[4],"parameters":[{"seq":3,"field":"text","name":"keyword","type":"string"}],"extract":[{"seq":8,"as":"items","mode":"text","dedupe":true}],"postconditions":[{"output":"items","allowEmpty":true},{"selector":"#status"}]}}
 ```
