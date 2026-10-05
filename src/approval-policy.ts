@@ -14,6 +14,7 @@ import { READ_ONLY_ACTIONS, recipeNeedsApproval, type AnyRecipeStep } from './au
 import { validateUserscript } from './scripts.ts'
 import { isBrowserActionExposed, type AutomationMode } from './freedom.ts'
 import { findAction } from './actions/registry.ts'
+import { argsRejectedByExecutor } from './actions/surface.ts'
 
 export type BrowserPolicyDecision =
   | { kind: 'allow' }
@@ -183,4 +184,19 @@ export function browserPolicyDecision(
     if (mode === 'standard') return { kind: 'ask', reason: 'Modify Web Search Pro local state: ' + name }
   }
   return { kind: 'allow' }
+}
+
+/**
+ * The decision the Host hook returns for a resolved browser action, in this order:
+ *
+ * 1. An action the automationMode disables stays denied (`browserPolicyDecision` says so).
+ * 2. Arguments `runAction` would refuse for their shape are let through unasked: the executor validates them
+ *    again with the same check and returns `INVALID_ARGS` with the schema, and runs nothing.
+ * 3. Otherwise the approval rules of `browserPolicyDecision` apply. The rules that read the arguments themselves
+ *    (upload paths, evaluate expression, userscript source) therefore only see arguments that passed the schema.
+ */
+export function browserCallDecision(...params: Parameters<typeof browserPolicyDecision>): BrowserPolicyDecision {
+  const [name, args, mode = 'standard'] = params
+  if (findAction(name) && isBrowserActionExposed(name, mode, args ?? {}) && argsRejectedByExecutor(name, args)) return { kind: 'allow' }
+  return browserPolicyDecision(...params)
 }

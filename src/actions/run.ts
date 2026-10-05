@@ -9,9 +9,9 @@
  */
 
 import { outcomeOf, type ActionContext, type ActionEnvelope, type ActionErrorBody, type ExecutionStatus } from './types.ts'
-import { ACTIONS, findAction, traitsFor } from './registry.ts'
+import { ACTIONS, findAction, traitsFor, validateActionArgs } from './registry.ts'
 import { actionUnavailableReason, type AutomationMode, type ExposureOptions } from '../freedom.ts'
-import { compactSchema, validateArgs } from './schema.ts'
+import { compactSchema } from './schema.ts'
 import { targetOf } from './shared.ts'
 import { DeadlineError, abortedByDeadline, hintFor, mapError } from './errors.ts'
 import { effectsOf, isJournaled, isObservation, redactUrl, scrubCall, summarize, type JournalEntry, type SessionJournal } from '../journal.ts'
@@ -170,7 +170,7 @@ export async function runAction(name: unknown, rawArgs: unknown, ctx: ActionCont
   if (unavailable) {
     return failure(action.name, 'failed', { code: 'POLICY_DENIED', message: `Action ${action.name} is ${unavailable}`, hint: hintFor('POLICY_DENIED')! })
   }
-  const validation = validateArgs(action.params, rawArgs)
+  const validation = validateActionArgs(action, rawArgs)
   if (!validation.ok) {
     return failure(action.name, 'failed', {
       code: 'INVALID_ARGS',

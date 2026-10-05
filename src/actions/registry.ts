@@ -15,6 +15,7 @@ import { SCRIPT_ACTIONS } from './script.ts'
 import { AUTOMATION_ACTIONS } from './automation.ts'
 import { CRAWL_ACTIONS } from './crawl.ts'
 import { OPENCLI_ACTIONS } from './opencli.ts'
+import { validateArgs, type ValidationResult } from './schema.ts'
 
 export const ACTIONS: readonly ActionDef[] = [
   ...RUNTIME_ACTIONS, ...TARGET_ACTIONS, ...OBSERVE_ACTIONS, ...ACT_ACTIONS, ...INSPECT_ACTIONS,
@@ -77,6 +78,16 @@ export function isActionGroup(value: unknown): value is ActionGroup {
 
 export function findAction(name: unknown): ActionDef | undefined {
   return typeof name === 'string' ? BY_NAME.get(name) : undefined
+}
+
+/**
+ * The one argument check of a call. `runAction` runs it before anything executes, and the approval hook runs it
+ * before it asks, so a call whose arguments are invalid is refused the same way at both places. An action with
+ * sub-actions is checked against its whole parameter schema: `action` is required and an enum there, so a missing
+ * or unknown operation is invalid like any other bad argument.
+ */
+export function validateActionArgs(action: ActionDef, rawArgs: unknown): ValidationResult {
+  return validateArgs(action.params, rawArgs)
 }
 
 export function actionsInGroup(group: ActionGroup): ActionDef[] {

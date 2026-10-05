@@ -5,7 +5,7 @@
  * @module dsh-browser/actions/surface
  */
 
-import { CALL_TOOL, INDEX_TOOL, findAction, findActionByFlatTool } from './registry.ts'
+import { CALL_TOOL, INDEX_TOOL, findAction, findActionByFlatTool, validateActionArgs } from './registry.ts'
 
 export type ResolvedBrowserCall =
   /** `browser_index`: read-only catalog, no side effects. */
@@ -23,4 +23,15 @@ export function resolveBrowserCall(toolName: string, rawArgs: unknown): Resolved
   }
   const flat = findActionByFlatTool(toolName)
   return flat ? { kind: 'action', action: flat.name, args: rawArgs ?? {} } : undefined
+}
+
+/**
+ * Whether `runAction` would refuse these arguments for their shape (`INVALID_ARGS`) before running anything.
+ * It is the very check `runAction` makes (`validateActionArgs`), so the approval hook can leave such a call
+ * unasked: asking about a call that cannot run only teaches the user to click through prompts. False for a
+ * name that is not an action.
+ */
+export function argsRejectedByExecutor(actionName: string, args: unknown): boolean {
+  const action = findAction(actionName)
+  return action !== undefined && !validateActionArgs(action, args).ok
 }
