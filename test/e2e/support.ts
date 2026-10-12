@@ -112,12 +112,15 @@ export interface Harness {
   /** Names of every tool the plugin registered. */
   toolNames: () => string[]
   dir: string
+  /** The plugin data directory of this harness (policy overlay, auth directory). */
+  dataDir: string
   dispose: () => Promise<void>
 }
 
 /** Build the real BrowserService and the real tool layer around one headless browser. */
 export function createHarness(detection: Extract<BrowserDetection, { ok: true }>, overrides: Record<string, unknown> = {}): Harness {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-e2e-'))
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-e2e-data-'))
   const config = resolveConfig({
     enabled: true,
     headless: true,
@@ -128,7 +131,8 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     // Downloads must never land in the real DSH_HOME while a suite runs.
     downloadDir: path.join(dir, 'downloads'),
     // The policy overlay and the auth directory live under the harness's own data directory, never the real DSH_HOME.
-    browserDataDir: path.join(dir, 'data'),
+    // A sibling of `dir` (which is the snapshot directory), not inside it: the auth directory may not overlap it.
+    browserDataDir: dataDir,
     storageStatePath: undefined,
     ...detection.channel ? { channel: detection.channel } : {},
     ...detection.executablePath ? { executablePath: detection.executablePath } : {},
@@ -142,6 +146,7 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     service,
     assets,
     dir,
+    dataDir,
     toolNames: () => [...tools.keys()],
     async call(session, name, args = {}, signal) {
       const tool = tools.get(name)
@@ -163,6 +168,7 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     async dispose() {
       await service.close()
       fs.rmSync(dir, { recursive: true, force: true })
+      fs.rmSync(dataDir, { recursive: true, force: true })
     },
   }
 }
