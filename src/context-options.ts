@@ -111,7 +111,7 @@ export function checkProxyServer(value: unknown, label: string, fail: Fail): str
   if (!PROXY_SCHEMES.includes(parsed.protocol)) fail(`${label} scheme must be one of http, https, socks5, socks4 (got ${parsed.protocol.replace(':', '')})`)
   if (parsed.username || parsed.password) fail(`${label} must not contain credentials; proxy accounts are not supported`)
   if (!parsed.hostname) fail(`${label} "${raw}" has no host`)
-  if (parsed.pathname !== '/' || parsed.search || parsed.hash) fail(`${label} must be only scheme://host:port, without a path or query`)
+  if ((parsed.pathname !== '/' && parsed.pathname !== '') || parsed.search || parsed.hash) fail(`${label} must be only scheme://host:port, without a path or query`)
   return `${parsed.protocol}//${parsed.host}`
 }
 
