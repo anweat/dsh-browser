@@ -116,6 +116,8 @@ test('in standard mode a loosening that was approved says so in its risk field',
   const { run } = setup()
   const loose = await run('runtime.set_usage_policy', { maxConcurrency: 4, reason: 'user approved' }) as any
   assert.match(loose.risk.approval, /approved by the user/)
+  assert.doesNotMatch(loose.risk.note, /unrestricted/, 'an approved change does not talk about automationMode=unrestricted')
+  assert.match(loose.risk.note, /approved for this call/)
 })
 
 test('the effective policy is live: a context gets cookies only of the domains the profile allows now, and a revoked one is refused at once', async () => {

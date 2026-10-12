@@ -41,7 +41,9 @@ export function policyChangeFor(action: string, rawArgs: unknown): PolicyChange 
   }
 }
 
-const RISK_NOTE = 'This change widened what the browser may do. With automationMode=unrestricted nothing asks the user before an agent loosens a restriction; the user can review it in the settings card (policy overlay) and roll it back there.'
+// What the note says depends on who let the change through: in unrestricted nobody was asked, otherwise the user approved it.
+const RISK_NOTE_UNASKED = 'This change widened what the browser may do. With automationMode=unrestricted nothing asks the user before an agent loosens a restriction; the user can review it in the settings card (policy overlay) and roll it back there.'
+const RISK_NOTE_APPROVED = 'This change widened what the browser may do and was approved for this call. The user can review it in the settings card (policy overlay) and roll it back there.'
 
 function execute(action: string) {
   return async (args: Record<string, any>, ctx: Parameters<ActionDef['execute']>[1]) => {
@@ -66,7 +68,7 @@ function execute(action: string) {
         level: 'elevated',
         loosened: result.diff.lines,
         approval: ctx.config.automationMode === 'unrestricted' ? 'none (automationMode=unrestricted does not ask)' : 'approved by the user for this call',
-        note: RISK_NOTE,
+        note: ctx.config.automationMode === 'unrestricted' ? RISK_NOTE_UNASKED : RISK_NOTE_APPROVED,
       } } : {},
     }
   }
