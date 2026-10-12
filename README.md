@@ -69,6 +69,14 @@ dsh --profile web
 
 ## 从旧版本升级
 
+### 升级到 0.2.2（开发中，尚未发布）
+
+- 从 `0.2.1` 升级即可，DSH 基线与 peer 范围不变；不配置新键时所有行为与 `0.2.1` 相同。
+- 新增 context 创建期选项：配置键 `viewportMode` / `viewportWidth` / `viewportHeight` / `userAgent` / `locale` / `timezoneId` / `proxyServer` / `proxyBypass`，以及 `target.open` 的按次参数 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer`（见下文“浏览器上下文选项”）。
+- 新增 `target.download` 与 `inspect.downloads`，以及配置 `downloadDir`、`downloadMaxBytes`（见下文“下载落盘”）。动作总数从 34 变为 36。
+- **嵌套写法现在会报错而不是被忽略**：配置里写 `viewport: {width, height}`、`proxy: {...}`、`contextOptions`、`download(s)` 会在加载时抛出明确错误，并指出应使用哪些扁平键。
+- 带 `proxyServer` 或 `userAgent` 的 `target.open` 在 `standard` / `autonomous` 下需要审批，`read-only` 拒绝，`unrestricted` 放行；`target.download` 与 `act.upload` 同档。
+
 ### 升级到 0.2.1
 
 - 从 `0.2.0` 直接升级即可，DSH 基线、peer 范围、动作、参数 schema、面向模型的文本与审批规则都没有变化，已保存的资产、配置与提示文本覆盖照常使用。
@@ -193,6 +201,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 |---|---|
 | `target.open` / `act.*` / `script.evaluate` / `observe.*` / `target.close` | 仅调用方 session |
 | `inspect.console` / `inspect.requests` | 仅返回调用方 session 抓到的记录 |
+| `target.download` / `inspect.downloads` | 下载走调用方 session 的 context 与登录态；下载记录只在该 session 的内存里，互不可见 |
 | `runtime.status` 的 `activeUrl` | 仅报告调用方 session 的页面 |
 | `render` / `snapshot` / `searchResults` / `crawl` / OpenCLI | 每次调用自建临时 context，本就无共享状态 |
 
@@ -200,7 +209,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 `close()` 才整体拆掉所有 session 的 context 与进程。
 
 会话槽位上限由 `maxSessions`（默认 8）控制，超出后关闭最久未使用的 session。
-读取类调用（`runtime.status` / `inspect.console` / `inspect.requests`）**不会**
+读取类调用（`runtime.status` / `inspect.console` / `inspect.requests` / `inspect.downloads`）**不会**
 创建槽位，也不会触发淘汰——否则一次查询就会挤掉别人的页面。
 
 不带 `exec.agent` 的调用方（例如其他插件直接消费服务）落在共享桶里，行为与
@@ -226,7 +235,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `toolSurface` | 注册的工具 | 常驻上下文 | 用途 |
 |---|---|---|---|
 | `indexed`（默认） | `browser_index`、`browser_call` 两个 | 约 0.3k token | 渐进披露：先看目录，再按需查看单个动作的 schema |
-| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 14.5k token（34 个工具；recipe 的 v2 schema 在 `automation.develop` / `automation.run_recipe` 里内联展开） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
+| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 16k token（36 个工具；recipe 的 v2 schema 在 `automation.develop` / `automation.run_recipe` 里内联展开） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
 
 `indexed` 下：`browser_index()` 列出能力组和当前环境状态（`automationMode`、Chromium 是否已安装）；`browser_index({group})` 列出该组动作；`browser_index({action})` 给出完整参数 schema；`browser_index({query})` 按关键词检索。`browser_call({action, args})` 执行动作，服务端按 schema 校验参数，校验失败返回 `INVALID_ARGS` 并附上精简 schema。所有动作的返回值使用同一信封：
 
@@ -258,7 +267,8 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 | 动作 | 作用 |
 |---|---|
-| `target.open` | 打开 URL，返回标题/可读文本/全页截图路径；可显式启用 console/network 内存捕获 |
+| `target.open` | 打开 URL，返回标题/可读文本/全页截图路径；可显式启用 console/network 内存捕获；可选 `viewport`、`userAgent`、`locale`、`timezoneId`、`proxyServer`（context 创建期选项，见“浏览器上下文选项”） |
+| `target.download` | 把 URL 的文件保存到 `downloadDir`（带本 session 登录态），返回绝对路径、字节数、sha256；失败即报错，不留 0 字节文件 |
 | `target.close` | 关闭当前页（下次 open 全新） |
 | `target.list` | 列出本 session 的页面（自己打开的页加上弹窗），含 `id`、`url`、`title`、`active` |
 | `target.select` | 把本 session 的某个页面（`target.list` 里的 id）切换为当前页；弹窗不会自动成为当前页 |
@@ -277,6 +287,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `act.upload` | 把现有本地文件设置到 `input[type=file]`；绝对路径、数量和总大小受限 |
 | `inspect.console` | 读取本次显式捕获的脱敏 console 记录 |
 | `inspect.requests` | 读取本次显式捕获的失败及 HTTP 4xx/5xx 请求；无 body/header |
+| `inspect.downloads` | 列出本 session 的下载记录（含点击/导航触发的），只含内存记录，`clear` 只清记录不删文件 |
 | `script.evaluate` | 在当前页执行最长 20,000 字符的 JavaScript 表达式，返回最多 100,000 字符 JSON |
 | `script.catalog` | 列出内置只读脚本及其 SHA-256 |
 | `script.validate` | 解析外部 UserScript 的元数据、域名、grant、能力与哈希，不执行 |
@@ -374,11 +385,60 @@ return [...document.querySelectorAll('.result')].slice(0, 20).map(card => ({
 - `authProfile` 从配置的 `storageStatePath` 载入 Cookie、localStorage 等登录态。只有 `persistState: true` 才在 context 关闭时原子回写该文件；全局兼容路径默认不会被交互会话改写。
 - `script.evaluate` 可读取 `document.cookie`，因此能看到当前来源的非 HttpOnly Cookie；浏览器不会向页面 JavaScript 暴露 HttpOnly Cookie。除 `unrestricted` 外，每次执行都需要确认。
 - `act.upload` 只读取调用中列出的绝对路径并交给当前页面上传控件，不修改源文件，也不会遍历目录。除 `unrestricted` 外，即使在 `autonomous` 模式也需要确认。
-- `observe.screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；自定义截图名只允许普通文件名，拒绝绝对路径、目录分隔符和 `..`。持久登录态只写配置的状态文件。`script.evaluate` 触发的浏览器下载不会由该工具保存或返回，下载落盘需要后续单独设计显式目录和文件名规则。
+- `observe.screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；自定义截图名只允许普通文件名，拒绝绝对路径、目录分隔符和 `..`。持久登录态只写配置的状态文件。下载文件只写入 `downloadDir`，见下一节。`script.evaluate` 触发的浏览器下载不由该动作保存或返回：那个下载事件虽然会被同一个监听器按下面的规则落盘并出现在 `inspect.downloads`，但 `script.evaluate` 的结果里不会带路径；需要文件时直接用 `target.download`。
 - console/network 捕获必须由 `target.open.capture` 显式启用，只在内存保留最多 200 条；记录文本和 URL 查询中的常见 token/cookie/password 字段会脱敏，网络只保留方法、URL、失败原因或 4xx/5xx 状态，不保存 header/body。
 
 常见读取任务优先用内置脚本：`article-clean`、`links`、`jsonld`、`forms`。它们不返回表单当前值，
 也不触发点击或网络写操作。
+
+## 下载落盘
+
+`target.download({url, filename?, timeoutMs?})` 把一个 HTTP(S) URL 的文件保存到 `downloadDir`：
+
+- **带登录态**：使用调用方 session 自己的 context（它的 Cookie、auth profile、代理和 UA）。session 没有页面时按 `defaultAuthProfile` 规则新建 context。session 的 auth profile 只允许发往其 `allowedDomains`：URL（以及重定向落点）在域名之外会被拒绝（`POLICY_DENIED`），不会带着登录态发出去。
+- **两步**：先用 context 发 HTTP 请求取回内容；请求失败（非 2xx、网络错误、空内容）再回退为在同一 context 的临时页面里导航，捕获 attachment 下载事件。当前页面不会被导航走。
+- **失败即报错**：0 字节结果删除文件并报错，绝不当成功；两步都失败时错误里同时给出两步的原因。失败也会记入 `inspect.downloads`。
+- **调用缓冲**：与 `target.open` 一样经过 `usagePolicy`（并发、突发、429/503 退避）。
+- **审批**：与 `act.upload` 同档——`read-only` 拒绝，`unrestricted` 放行，其余模式询问，理由里写出 URL。
+
+文件名与位置：
+
+- 默认取服务器建议的名字（`Content-Disposition`，否则 URL 最后一段，否则 `download`），也可用 `filename` 指定。只取 basename：来自服务器的名字会截掉目录部分并替换不可用字符；**你指定的 `filename` 更严格**——绝对路径、含 `/` 或 `\`、`..`、空名、Windows 保留名（`CON`、`NUL`、`COM1`…）以及含 `< > : " | ? *` 都会被拒绝（`INVALID_ARGS`）。控制字符一律去掉，扩展名保留，过长的名字被截断且保留扩展名。
+- **不覆盖**：重名时自动加递增后缀（`report.pdf` → `report-1.pdf`），先写到 `downloadDir` 内的临时文件，再用硬链接/独占复制原子地占用最终名字。文件只可能落在 `downloadDir` 内。
+- `downloadDir` 默认为 `$DSH_HOME/data/browser/downloads`（与 `snapshotDir` 的默认值同级），必须是绝对路径；`downloadMaxBytes` 默认 100 MiB（上限 10 GiB），超限即中止、删除半成品并报错。
+- 返回值：`path`（最终绝对路径）、`filename`、`bytes`、`sha256`、`suggestedFilename`、`source`（`request` 或 `browser`）、`finalUrl`（重定向后与请求不同时）。
+
+`inspect.downloads({limit?, clear?})` 读取**本 session** 的下载记录，除了 `target.download`，也包含点击、导航或脚本触发的下载（浏览器的 download 事件挂在 session 的页面上，统一按同样的规则落盘）。记录只在内存里，每个 session 最多 50 条，`clear` 只清记录不删文件；一个 session 看不到另一个 session 的记录，关闭或重建 context 不会清掉记录（文件还在磁盘上）。状态放在每个 session 自己的状态桶里，不存在会泄漏到别的调用结果里的全局“最近下载”标记；`target.open` 等动作的结果不会附带下载路径。
+
+PDF：本插件不抽取 PDF 文本。用 `target.download` 落盘后取返回的 `path` 交给其他工具处理。
+
+已知限制：第一步的 HTTP 请求由 Playwright 把响应体整体读入内存后再检查大小（`Content-Length` 超限会立即拒绝，但无法在读取途中中止）；浏览器下载事件那一步是流式写盘并按 `downloadMaxBytes` 中止的。把 `downloadMaxBytes` 调得很大时请留意内存。
+
+## 浏览器上下文选项
+
+视口、User-Agent、语言区域、时区和代理只能在 context **创建时**指定，因此有两层：
+
+1. **配置默认值**（扁平键，作用于插件创建的每一个 context，包括 `render`、`snapshot`、`crawl` 的临时 context）：
+
+| 键 | 含义 |
+|---|---|
+| `viewportMode` | `window`（默认，不传 viewport，保持现状）、`720p`（1280×720）、`1080p`（1920×1080）、`custom` |
+| `viewportWidth` / `viewportHeight` | 仅 `custom`：200–7680 / 200–4320 的整数；`custom` 缺任一项会报错，其他模式下写了会在 `runtime.status` 的 `runtimeWarnings` 里提示并忽略 |
+| `userAgent` | 不带控制字符，≤512 字符 |
+| `locale` | BCP 47，如 `en-US`、`zh-CN` |
+| `timezoneId` | IANA 时区，如 `Asia/Shanghai`、`UTC` |
+| `proxyServer` | `http://host:port`、`https://…`、`socks5://…`、`socks4://…`（缺省协议按 http）；**不支持账号密码**，带用户名/密码的地址会被拒绝 |
+| `proxyBypass` | 逗号分隔的主机列表（需要先有 `proxyServer`，否则提示并忽略） |
+
+非法值在加载配置时抛出带键名的错误，不会被静默忽略。这些键在插件挂载时解析，保存后需重启 profile。
+
+2. **按次参数**：`target.open` 的 `viewport {width,height}`、`userAgent`、`locale`、`timezoneId`、`proxyServer`。语义沿用 `authProfile` / `rulePack` 的先例：
+
+- 选项属于 session 的 context，直到 `target.close`。**省略的选项保持 context 当前值**（不会因为后一次调用没写而重建）；值与 context 已应用的不同，才会关闭旧 context 并用新选项重建。重建后原页面（含弹窗）已关闭，登录态只按 auth profile 的 `persistState` 规则持久化，其余 Cookie 丢失。结果里带 `contextRebuilt: {changed, note}` 和 `contextOptions`（当前生效的选项）。要回到配置默认值，先 `target.close` 再 `target.open`。
+- 参数在创建或关闭任何东西之前就校验，无效值返回 `INVALID_ARGS` 且不动当前页面。
+- **审批**：`proxyServer` 改变出口、`userAgent` 改变浏览器指纹，所以带这两项的 `target.open` 在 `read-only` 拒绝、`unrestricted` 放行、其余模式询问（理由里写出被改的项）；`viewport`、`locale`、`timezoneId` 不需要额外审批。配置里的默认值是部署方自己的设置，不再逐次审批。
+
+**代理实测（macOS，Chromium 1243 headless shell，Playwright 1.62.1 与 Patchright 1.62.1）**：启动浏览器时不带任何全局 `proxy`，仅在 `newContext({proxy})` 里设置，页面导航和 `context.request` 都确实经过了该代理，两个运行时表现一致，所以插件**没有**设置 `proxy: { server: 'per-context' }` 这个启动选项。注意 Chromium 对回环地址（`localhost`、`127.0.0.1`）本来就不走代理，这是浏览器自己的规则，不是配置失效；Windows 与 Linux 未在本机验证——若在某平台上发现 context 级代理不生效，需要在 `args` 里加 `--proxy-server=per-context` 之类的启动参数（尚未实测，不要当成已验证的方案）。
 
 ## Playwright Recipe
 
@@ -445,6 +505,14 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
           maxTestCredentials: 5     # 每个资产保留最近 N 条测试凭据（激活只认绑定当前 revision 与内容哈希的 passed 凭据）
           minInputSetsForActivation: 2  # 声明了输入的资产，激活要求当前版本的通过凭据至少覆盖 N 组输入（1–5）；无输入的资产不受影响
         maxSessions: 8           # 同时持有 context+page 的 session 上限，超出淘汰最久未使用者
+        viewportMode: window     # window（默认）| 720p | 1080p | custom；custom 时再写 viewportWidth / viewportHeight
+        # userAgent: ''          # 留空 = 浏览器自带
+        # locale: en-US
+        # timezoneId: Asia/Shanghai
+        # proxyServer: http://127.0.0.1:7890   # 不支持账号密码
+        # proxyBypass: example.com,.internal.test
+        # downloadDir: D:/dsh/downloads        # 绝对路径；默认 $DSH_HOME/data/browser/downloads
+        downloadMaxBytes: 104857600            # 单个下载上限，默认 100 MiB
         storageStatePath: ''     # Playwright 登录态 JSON（复用已登录会话）
         authProfiles:
           forum:
@@ -465,7 +533,7 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
 
 这些字段同时进入 Host settings 命名空间和专用可视化卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`，可调整工具自由度、Playwright/Patchright、OpenCLI、`usagePolicy`、自动化资产策略与限域登录态；同一卡片包含候选提示、脚本列表、JSON 编辑器、测试、激活和归档操作。
 
-- **卡片覆盖全部公开配置字段**：`maxSessions`（会话上限）和 `args`（Chromium 启动参数，JSON 字符串数组）在“浏览器运行时”分区；`authProfiles`、`rulePacks` 结构较复杂，卡片里不提供表单，只列出名称并注明“在配置文件中编辑”。“调用缓冲 JSON”和“自动化资产策略 JSON”的提示由代码生成，列出全部可用键名。
+- **卡片覆盖全部公开配置字段**：`viewportMode` 等上下文选项在“浏览器上下文”分区，`downloadDir` / `downloadMaxBytes` 在“登录态与高级设置”分区；`maxSessions`（会话上限）和 `args`（Chromium 启动参数，JSON 字符串数组）在“浏览器运行时”分区；`authProfiles`、`rulePacks` 结构较复杂，卡片里不提供表单，只列出名称并注明“在配置文件中编辑”。“调用缓冲 JSON”和“自动化资产策略 JSON”的提示由代码生成，列出全部可用键名。
 - **测试输入 JSON** 填一个对象是在当前页面运行一次；填 2 到 5 个对象组成的数组是逐组在全新上下文中回放（等价于 `inputSets`）。卡片逐组显示结果和 `PARAMETERIZATION_SUSPECT` 警告；声明了输入的资产在通过凭据覆盖的输入组数不足 `minInputSetsForActivation` 时，“激活”按钮旁给出说明并保持禁用。
 - **新建 recipe** 从 v2 模板开始（带 `schemaVersion: 2`、locator 步骤、`inputSchema` 和 `postconditions` 占位），模板本身可以直接保存。v1 recipe 有“转换为 v2”按钮：生成新草稿并选中，显示仍取第一个匹配的步骤数（`pendingDisambiguation`），原资产不变；有未保存修改时会先确认。
 - “提示文本”分区的“导出默认文本”按钮在只读文本框里显示全部默认值（与 `pnpm prompts:dump` 相同的 JSON），复制后按需改写。

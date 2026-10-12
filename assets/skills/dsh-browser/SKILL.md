@@ -96,6 +96,8 @@ After a submit, purchase, or any irreversible step, confirm the result on the pa
 4. Page interaction: `target.open`, `observe.read`, `act.*` (`references/observe.md`).
 5. Bounded multi-step work: `automation.run_recipe` (`references/recipes.md`); `crawl.crawl` for anonymous crawls.
 
+Files: `target.download` saves a URL with this session's login state into the download directory and returns the absolute `path`, `bytes` and `sha256`; it fails rather than return an empty file, and never overwrites (a taken name gets `-1`). Downloads started by a click or navigation are saved the same way and listed by `inspect.downloads`. PDFs are not parsed here: download, then use the path.
+
 ## 6. Turning a success into an asset
 
 When an exploration worked and will likely repeat, do not rewrite it by hand. Every page-touching call you made is in a session journal (its `seq` is in each reply); build the draft from it, then test it on other inputs:
@@ -118,3 +120,4 @@ Every save is a new revision and a test vouches only for the revision it ran on.
 
 - The user's automationMode decides what is exposed and what asks for approval. Do not route around a refusal.
 - Logged-in access uses a named AuthProfile (`authProfile` on `target.open`). Respect the site's rules and the usage buffer.
+- `target.open` also takes context options: `viewport`, `locale`, `timezoneId`, `userAgent`, `proxyServer`. They belong to the session's context: an option left out keeps its value, a different one closes the old context and its pages (`contextRebuilt` in the result) and `target.close` resets them. `proxyServer` and `userAgent` change where traffic goes and how the browser presents itself, so they ask for approval; proxy accounts are not supported.
