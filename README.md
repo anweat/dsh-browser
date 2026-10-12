@@ -465,7 +465,7 @@ PDF：本插件不抽取 PDF 文本。用 `target.download` 落盘后取返回�
 | `proxyServer` | `http://host:port`、`https://…`、`socks5://…`、`socks4://…`（缺省协议按 http）；**不支持账号密码**，带用户名/密码的地址会被拒绝 |
 | `proxyBypass` | 逗号分隔的主机列表（需要先有 `proxyServer`，否则提示并忽略） |
 
-非法值**不会让插件加载失败**：该键回退到默认值，`runtime.status` 的 `runtimeWarnings` 与设置卡片顶部给出一条警告（键名、原值摘要、原因、如何修，代理地址里的账号密码会被遮蔽）。设置卡片在保存前用同一套规则校验这些字段，非法值显示字段级错误并禁用保存。这些键在插件挂载时解析，保存后需重启 profile。
+非法值**不会让插件加载失败**：该键回退到默认值，`runtime.status` 的 `runtimeWarnings` 与设置卡片顶部给出一条警告（键名、原值摘要、原因、如何修，代理地址里的账号密码会被遮蔽）。设置卡片的“默认参数”编辑区在保存前用同一套规则逐行校验，非法行显示行号与原因并禁用保存。这些键在插件挂载时解析，保存后需重启 profile。
 
 2. **按次参数**：`target.open` 的 `viewport {width,height}`、`userAgent`、`locale`、`timezoneId`、`proxyServer`。语义沿用 `authProfile` / `rulePack` 的先例：
 
@@ -567,13 +567,22 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
         verbose: false
 ```
 
-这些字段同时进入 Host settings 命名空间和专用可视化卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`，可调整工具自由度、Playwright/Patchright、OpenCLI、`usagePolicy`、自动化资产策略与限域登录态；同一卡片包含候选提示、脚本列表、JSON 编辑器、测试、激活和归档操作。
+这些字段同时进入 Host settings 命名空间和专用可视化卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`，可调整工具自由度、默认参数（Playwright/Patchright、窗口、代理、目录等）、OpenCLI、`usagePolicy`、自动化资产策略；同一卡片包含候选提示、脚本列表、JSON 编辑器、测试、激活和归档操作。
 
 - **策略覆盖层分区**：显示覆盖层版本、告警、每个 profile 与限流项的来源标记（基线 / 来自覆盖层 / 覆盖层新建）、最近 20 条审计，以及“清除覆盖 / 回滚到基线”按钮。上面的 `authProfiles` / `usagePolicy` 编辑框始终是基线；覆盖层优先，所以这里的生效值可能与框里不同。
-- **卡片覆盖全部公开配置字段**：`viewportMode` 等上下文选项在“浏览器上下文”分区，`downloadDir` / `downloadMaxBytes` 在“登录态与高级设置”分区；`maxSessions`（会话上限）和 `args`（Chromium 启动参数，JSON 字符串数组）在“浏览器运行时”分区；`authProfiles`、`rulePacks` 结构较复杂，卡片里不提供表单，只列出名称并注明“在配置文件中编辑”。“调用缓冲 JSON”和“自动化资产策略 JSON”的提示由代码生成，列出全部可用键名。
+- **默认参数（properties）编辑区**：运行时、窗口、语言、代理、目录、限额这类“默认值”不再是一堆单独的表单项，而是一个 `key = value` 文本。每个新 context 从这些默认参数起步；agent 每次操作时“复制”它们，只改任务需要改的部分（见下）。
+  - **格式**：每行 `key = value`，值是第一个 `=` 之后的全部内容（去掉首尾空白，可用一对双引号包裹以保留空白）；`#` 开头的行是注释，没有行内注释（值里的 `#` 就是 `#`）；数组写成一行 JSON，例如 `args = ["--disable-gpu"]`。值为空等同未设置。
+  - **预填**：打开时列出该插件当前全部默认参数键。已覆盖的键是 `key = 值` 的实际行；未覆盖的键是注释行，显示当前生效的值（部署值或内置默认），例如 `# viewportMode = window`、`# maxSessions = 8`。注释掉或删掉一行即恢复默认；编辑区下方“已覆盖的默认参数”列出所有覆盖项，每项有“恢复部署值”按钮。写成与当前生效值相同的值不构成覆盖（不会被保存）。
+  - **即时校验**：逐行用与服务端同一套规则校验（`src/config-rules.ts`），错误带行号和键名，例如 `line 5: proxyServer scheme must be one of http, https, socks5, socks4`；任一行非法则禁用保存。`viewportMode = custom` 缺宽或缺高也是错误（部署值里已有的算数）。**未知键、以及别处编辑的键（`enabled`、`usagePolicy`、`prompts` 等）给出行级警告并被忽略**，不会静默丢弃；同一键重复出现时以后一行为准并提示。
+  - **保存结果**：与旧的逐项表单完全一样——同样的扁平键，同样的 `set` / `unset` 操作（有测试保证同一份配置经两条路径写出相同的配置行），不改 `Config` schema，不改运行时行为。
+  - 仍是独立控件的：自动化自由度（`enabled`、`automationMode`、`toolSurface`、`opencliEnabled`）、调用缓冲与自动化资产策略 JSON 框、提示文本、策略覆盖层、资产库。`authProfiles`、`rulePacks` 结构较复杂，卡片里只列名称并注明“在配置文件中编辑”。
+
+  **默认值与每次操作的关系**：默认参数是“新 context 的起点”。`target.open` 的 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer` 是对它的按次覆盖，省略的参数沿用当前默认，只需写要改的键；结果里的 `contextOptions` 总是列出本次生效的完整参数集，`contextSources` 标明每个值来自 `call`（本次调用）、`session`（同一 context 里更早调用的覆盖）还是 `default`（配置默认）。`browser_index({action:"target.open"})` 的详情层写出当前生效的默认值摘要（`target.download` 写 `downloadDir` 与 `downloadMaxBytes`），常驻层不受影响。
 - **测试输入 JSON** 填一个对象是在当前页面运行一次；填 2 到 5 个对象组成的数组是逐组在全新上下文中回放（等价于 `inputSets`）。卡片逐组显示结果和 `PARAMETERIZATION_SUSPECT` 警告；声明了输入的资产在通过凭据覆盖的输入组数不足 `minInputSetsForActivation` 时，“激活”按钮旁给出说明并保持禁用。
 - **新建 recipe** 从 v2 模板开始（带 `schemaVersion: 2`、locator 步骤、`inputSchema` 和 `postconditions` 占位），模板本身可以直接保存。v1 recipe 有“转换为 v2”按钮：生成新草稿并选中，显示仍取第一个匹配的步骤数（`pendingDisambiguation`），原资产不变；有未保存修改时会先确认。
-- “提示文本”分区的“导出默认文本”按钮在只读文本框里显示全部默认值（与 `pnpm prompts:dump` 相同的 JSON），复制后按需改写。
+- **提示文本显示默认长什么样**：打开卡片时自动取得默认文本（不必先点“导出”）。每个输入框未覆盖时，用灰色 placeholder 显示默认文本（超过 6 行或 500 字符的截断并加 `…`，完整内容在框下的“查看完整默认文本”里展开）；框旁有“以默认文本为起点编辑”按钮，把默认文本复制进框内再改；skill 正文文件和 skill 追加文本没有默认文本，placeholder 说明“未设置”的含义；“分组 / 动作 / 错误提示覆盖 JSON”框的 placeholder 是默认的 groups / actions / errorHints 结构，按钮同样可以把完整默认 JSON 放进框里。
+- **与默认文本完全相同 = 没有覆盖**：框里的文本与默认文本相同（或 JSON 框里的某一项与默认相同）时不会被保存，只保存真正改动的部分，这样以后默认文本升级会自动跟进，不会被旧默认值冻结。更早的版本如果已经存了与默认相同的文本，卡片会标出“与默认文本相同”，点“恢复默认”即可清除。
+- “提示文本”分区底部的“导出默认文本”按钮保留：在只读文本框里显示全部默认值（与 `pnpm prompts:dump` 相同的 JSON），复制后按需改写。
 - 估算的常驻 L0 token 数与 `node scripts/measure-tool-surface.mjs` 使用同一个估算函数和同一份工具定义，两处数字一致。保存运行时配置后需要重启 profile；资产 CRUD 通过 loopback-only Host RPC 即时落盘。若没有看到卡片，先确认浏览器插件已同步升级并完整重启，而不是只刷新 Web Search Pro 页面。
 
 ### Patchright 可选内核
