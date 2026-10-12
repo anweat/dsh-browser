@@ -76,9 +76,9 @@ test('round trip: printed text parses back to the same values, whatever the valu
   assert.deepEqual([...parsed.values].map(([key, entry]) => [key, entry.value]).sort(), views.filter(view => view.overridden).map(view => [view.key, view.text]).sort())
   // The rest are comments showing the value in force, or its default.
   assert.match(text, /^# timezoneId = Asia\/Shanghai$/m)
-  assert.match(text, /^# headless = true$/m, 'no view: the plugin default is shown')
+  assert.match(text, /^# channel = chromium$/m, 'no view: the plugin default is shown')
   assert.match(text, /^# viewportMode = window$/m)
-  assert.match(text, /^# userAgent =$/m.test(text) ? /^# userAgent =$/m : /^userAgent = Mozilla/m)
+  assert.match(text, /^# executablePath =$/m, 'no default and no value: just the key')
   assert.equal(text.endsWith('\n'), true)
   // Every field appears exactly once, as a line or as a comment.
   for (const entry of PROPERTY_FIELDS) assert.equal([...text.matchAll(new RegExp(`^#? ?${entry.key} =`, 'gm'))].length, 1, entry.key)

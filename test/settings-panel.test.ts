@@ -414,3 +414,116 @@ test('the context and download text fields refuse, at save time, what the server
   assert.equal(spec('viewportMode').parse('custom') !== undefined, true)
   assert.equal(spec('viewportMode').parse('huge'), undefined)
 })
+
+// --- the default-parameters (properties) editor ---------------------------------------------------------------
+
+const { PROPERTY_FIELDS, validateProperty } = await import('../src/client/properties-form.ts')
+
+/** What the old one-control-per-field form sent for each default, as the text of that control. */
+const LEGACY_TEXTS: Record<string, string> = {
+  browserRuntime: 'patchright', channel: 'chrome', headless: 'false', autoInstall: 'true', executablePath: '/opt/chrome/chrome', cdpPort: '9222', maxSessions: '12',
+  args: '["--disable-gpu","--lang=en-US"]', viewportMode: 'custom', viewportWidth: '1280', viewportHeight: '720', userAgent: 'DSH/1.0 (a=b)', locale: 'en-US',
+  timezoneId: 'Asia/Shanghai', proxyServer: 'http://127.0.0.1:7890', proxyBypass: 'a.com,.b.test', storageStatePath: '/s/state.json', defaultAuthProfile: 'forum',
+  allowPrivateHosts: 'true', snapshotDir: '/data/snap', downloadDir: '/data/dl', downloadMaxBytes: '5000', verbose: 'true',
+}
+
+test('properties: the same configuration saved through the old per-field form and through the text writes identical config', async () => {
+  const legacy = fixture()
+  for (const [field, text] of Object.entries(LEGACY_TEXTS)) legacy.actions.edit(field, text)
+  assert.equal(legacy.controller.snapshot().invalid, false)
+  await legacy.actions.save()
+
+  const viaText = fixture()
+  const text = Object.entries(LEGACY_TEXTS).map(([field, value]) => `${field} = ${value}`).join('\n')
+  viaText.actions.editProperties(text)
+  assert.equal(viaText.controller.snapshot().invalid, false, JSON.stringify(viaText.controller.snapshot().properties.issues))
+  assert.equal(viaText.controller.snapshot().dirty, true)
+  await viaText.actions.save()
+
+  assert.deepEqual(viaText.scope.getSnapshot().user, legacy.scope.getSnapshot().user, 'same config rows')
+  assert.deepEqual(viaText.scope.writes.toSorted(), legacy.scope.writes.toSorted(), 'same set / unset operations')
+  const user = viaText.scope.getSnapshot().user as Record<string, unknown>
+  assert.equal(user.maxSessions, 12)
+  assert.equal(user.headless, false)
+  assert.deepEqual(user.args, ['--disable-gpu', '--lang=en-US'])
+  assert.deepEqual(Object.keys(user).toSorted(), Object.keys(LEGACY_TEXTS).toSorted(), 'only flat keys, nothing else')
+  // After the save the editor prints the stored values as lines, and nothing is dirty.
+  assert.equal(viaText.controller.snapshot().dirty, false)
+  const printed = viaText.controller.snapshot().properties
+  assert.match(printed.text, /^userAgent = DSH\/1\.0 \(a=b\)$/m)
+  assert.match(printed.text, /^args = \["--disable-gpu","--lang=en-US"\]$/m)
+  assert.equal(printed.overridden.length, Object.keys(LEGACY_TEXTS).length)
+  legacy.controller.dispose(); viaText.controller.dispose()
+})
+
+test('properties: removing or commenting a line goes back to the default; the reset button does the same; equal-to-default writes nothing', async () => {
+  const { scope, controller, actions } = fixture()
+  actions.editProperties('maxSessions = 12\nlocale = de-DE\nverbose = true')
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user, { maxSessions: 12, locale: 'de-DE', verbose: true })
+  // The printed text is the starting point; commenting a line unsets just that key.
+  const text = controller.snapshot().properties.text
+  actions.editProperties(text.replace('locale = de-DE', '# locale = de-DE'))
+  assert.equal(controller.snapshot().dirty, true)
+  await actions.save()
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'locale'), false)
+  assert.equal(scope.getSnapshot().user?.maxSessions, 12)
+  // Deleting the line works too, and the reset button.
+  actions.editProperties(controller.snapshot().properties.text.split('\n').filter(line => !line.startsWith('verbose =')).join('\n'))
+  await actions.save()
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'verbose'), false)
+  actions.resetProperty('maxSessions')
+  assert.match(controller.snapshot().properties.text, /^# maxSessions = /m)
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user, {})
+  // A line equal to the value already in force is not an override.
+  const before = scope.writes.length
+  actions.editProperties('browserRuntime = playwright\nchannel = chromium')
+  assert.equal(controller.snapshot().dirty, false)
+  await actions.save()
+  assert.equal(scope.writes.length, before)
+  controller.dispose()
+})
+
+test('properties: a line with a problem blocks the save and names the line; unknown keys only warn; discard drops the text', async () => {
+  const { scope, controller, actions } = fixture()
+  actions.editProperties('locale = en-US\nproxyServer = ftp://127.0.0.1:1\nbogus = 1\nviewportMode = custom')
+  const state = controller.snapshot()
+  assert.equal(state.invalid, true)
+  assert.equal(state.properties.invalid, true)
+  assert.deepEqual(state.properties.issues.map(issue => [issue.line, issue.level, issue.key]), [[2, 'error', 'proxyServer'], [3, 'warning', 'bogus'], [4, 'error', 'viewportWidth'], [4, 'error', 'viewportHeight']])
+  assert.match(state.properties.issues[0]!.message, /^line 2: proxyServer scheme must be one of/)
+  assert.equal(state.properties.text.startsWith('locale = en-US'), true, 'what was typed is kept verbatim')
+  const writes = scope.writes.length
+  await actions.save()
+  assert.equal(scope.writes.length, writes, 'nothing was written')
+  // Fix the lines: the warning stays, the save goes through.
+  actions.editProperties('locale = en-US\nproxyServer = http://127.0.0.1:1\nbogus = 1\nviewportMode = custom\nviewportWidth = 800\nviewportHeight = 600')
+  assert.equal(controller.snapshot().invalid, false)
+  assert.deepEqual(controller.snapshot().properties.issues.map(issue => issue.level), ['warning'])
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user, { locale: 'en-US', proxyServer: 'http://127.0.0.1:1', viewportMode: 'custom', viewportWidth: 800, viewportHeight: 600 })
+  // discard
+  actions.editProperties('locale = fr-FR')
+  actions.discard()
+  assert.equal(controller.snapshot().dirty, false)
+  assert.match(controller.snapshot().properties.text, /^locale = en-US$/m)
+  controller.dispose()
+})
+
+test('properties: the text rules and the old controls agree on every sample (no second rule set to drift)', () => {
+  const samples: Record<string, string[]> = {
+    browserRuntime: ['playwright', 'patchright', 'firefox'], headless: ['true', 'false', 'yes', '1'], maxSessions: ['1', '64', '0', '65', '2.5', 'x'],
+    cdpPort: ['1', '65535', '0', '65536'], args: ['["--a"]', '["--a",""]', '--a', '{"a":1}'], viewportMode: ['window', '720p', 'huge'],
+    viewportWidth: ['200', '7680', '199', '7681'], downloadMaxBytes: ['1', '104857600', '0', '-5'],
+  }
+  for (const field of PROPERTY_FIELDS) {
+    const spec = FIELD_SPECS.find(entry => entry.field === field.key) ?? JSON_FIELD_SPECS.find(entry => entry.field === field.key)
+    assert.ok(spec, `${field.key} has a field spec`)
+    for (const value of samples[field.key] ?? []) {
+      const textSays = validateProperty(field, value) === undefined
+      const controlSays = spec!.parse(value) !== undefined
+      assert.equal(textSays, controlSays, `${field.key} = ${JSON.stringify(value)}: text ${textSays ? 'accepts' : 'refuses'}, control ${controlSays ? 'accepts' : 'refuses'}`)
+    }
+  }
+})
