@@ -9,7 +9,7 @@ Browser capabilities come through two tools. `browser_index` shows what exists; 
 
 ## 1. Reuse first
 
-At the start of a task, search for an existing verified asset. If one fits, run it instead of exploring the site again.
+Search for an existing verified asset first; if one fits, run it instead of exploring.
 
 ```json call
 {"action":"automation.search","args":{"query":"search issues","domain":"github.com"}}
@@ -19,7 +19,7 @@ At the start of a task, search for an existing verified asset. If one fits, run 
 {"action":"automation.run","args":{"id":"asset-id-from-search","url":"https://github.com/search","inputs":{"query":"dsh"}}}
 ```
 
-Two calls, no schemas needed; only active assets are returned.
+Only active assets are returned.
 
 ## 2. Finding actions
 
@@ -55,7 +55,7 @@ Six calls you rarely need a schema for:
 {"action":"act.wait","args":{"locator":{"text":"Results"}}}
 ```
 
-A wrong argument returns `INVALID_ARGS` with the schema attached: fix and resend.
+A wrong argument returns `INVALID_ARGS` with the schema: fix and resend.
 
 ## 3. Locating elements
 
@@ -77,7 +77,7 @@ A wrong argument returns `INVALID_ARGS` with the schema attached: fix and resend
 | `NOT_ACTIONABLE` | hidden, disabled, or covered: wait or dismiss the overlay; nothing was done |
 | `TARGET_CLOSED` | call `target.open` again |
 | `TARGET_STALE` | the page navigated (also when a read hit a navigation twice); nothing was done: `observe.read` again, use the new `generation` |
-| `DEADLINE` | with `executionStatus: "outcome_unknown"` it may have taken effect: verify with `observe.read`, never resubmit blindly |
+| `DEADLINE` | with `outcome_unknown` it may have taken effect: verify with `observe.read`, never resubmit blindly |
 | `OUTCOME_UNKNOWN` | a page-changing step timed out mid-way: check with `observe.read` before any retry |
 | `VALIDATION_FAILED` | the steps ran but an assert or postcondition did not hold: read the page, fix the recipe; do not repeat submits |
 | `VALIDATION_MISSING` | a v2 draft has no `assert` or postcondition, so its test cannot pass: add one, save, test again |
@@ -86,7 +86,7 @@ A wrong argument returns `INVALID_ARGS` with the schema attached: fix and resend
 
 Recipe runs (`automation.run_recipe`, `automation.run`, `automation.develop` test) return the whole run in `result` even when `ok` is false: `executionStatus`, `validationStatus` (`not_checked`, `passed`, `failed`), `completedSteps`, `failedStep`, `effects` (`none`, `observed`, `unknown`), `outputs`. `completed` with `not_checked` means the steps ran, not that the result is right; nothing is rolled back (`references/recipes.md`).
 
-After a submit, purchase, or any irreversible step, confirm the result on the page (confirmation text, new URL, changed list) before telling the user it worked.
+After a submit, purchase, or other irreversible step, confirm the result on the page (confirmation text, new URL, changed list) before saying it worked.
 
 ## 5. Choosing a path (cheapest first)
 
@@ -95,8 +95,7 @@ After a submit, purchase, or any irreversible step, confirm the result on the pa
 3. Read-only extraction: `script.catalog`, `script.run_builtin`, a userscript (`references/userscripts.md`).
 4. Page interaction: `target.open`, `observe.read`, `act.*` (`references/observe.md`).
 5. Bounded multi-step work: `automation.run_recipe` (`references/recipes.md`); `crawl.crawl` for anonymous crawls.
-
-Files: `target.download` saves a URL with this session's login state into the download directory and returns the absolute `path`, `bytes` and `sha256`; it fails rather than return an empty file, and never overwrites (a taken name gets `-1`). Downloads started by a click or navigation are saved the same way and listed by `inspect.downloads`. PDFs are not parsed here: download, then use the path.
+6. A file on disk (`target.download`), or another window size, language, or proxy: `references/files.md`.
 
 ## 6. Turning a success into an asset
 
@@ -110,7 +109,7 @@ When an exploration worked and will likely repeat, do not rewrite it by hand. Ev
 {"action":"automation.develop","args":{"action":"test","id":"draft-id","url":"https://example.com/search","inputSets":[{"keyword":"alpha"},{"keyword":"beta"}]}}
 ```
 
-`parameters` turns a typed value into an input, `extract` names an `observe.read` that includes the `content` section (the default) and reads the result, `postconditions` check it; failed calls and plain observations are left out. Read `unmapped` (what a recipe cannot express: the draft is then incomplete and cannot be activated), `warnings`, `pendingDisambiguation`. `inputSets` (2 to 5) run each in a fresh context and all must pass; `PARAMETERIZATION_SUSPECT` means different inputs gave the same output. Details: `references/develop.md`.
+`parameters` turns a typed value into an input, `extract` names an `observe.read` that includes the `content` section (the default) and reads the result, `postconditions` check it; failed calls and plain observations are left out. Read `unmapped` (what a recipe cannot express: the draft is incomplete and cannot be activated), `warnings`, `pendingDisambiguation`. `inputSets` (2 to 5) run each in a fresh context and all must pass; `PARAMETERIZATION_SUSPECT` means different inputs gave the same output. Details: `references/develop.md`.
 
 Write a recipe by hand (`save`, `validate`, `test`; schema v2 in `references/recipes.md`) only when the journal cannot cover it. `convert` turns a v1 asset into a v2 draft.
 
@@ -120,4 +119,3 @@ Every save is a new revision and a test vouches only for the revision it ran on.
 
 - The user's automationMode decides what is exposed and what asks for approval. Do not route around a refusal.
 - Logged-in access uses a named AuthProfile (`authProfile` on `target.open`). Respect the site's rules and the usage buffer.
-- `target.open` also takes context options: `viewport`, `locale`, `timezoneId`, `userAgent`, `proxyServer`. They belong to the session's context: an option left out keeps its value, a different one closes the old context and its pages (`contextRebuilt` in the result) and `target.close` resets them. `proxyServer` and `userAgent` change where traffic goes and how the browser presents itself, so they ask for approval; proxy accounts are not supported.
