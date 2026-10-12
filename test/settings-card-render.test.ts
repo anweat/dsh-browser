@@ -67,7 +67,7 @@ function fieldsRendered(html: string): { controls: string[]; notes: string[] } {
   }
 }
 
-test('every public config field is a control in the rendered card, or is named with a note that says where to edit it', async (t) => {
+test('every public config field is a control, a note, or a line of the default-parameters text: none disappears into the merge', async (t) => {
   if (skip) return t.skip(skip)
   const { MISPLACED_CONFIG_KEYS } = await import('../src/config.ts')
   const publicFields = Object.keys((Config as unknown as { dict: Record<string, unknown> }).dict).filter(field => !MISPLACED_CONFIG_KEYS.includes(field))
@@ -76,17 +76,26 @@ test('every public config field is a control in the rendered card, or is named w
     const { html, missingKeys } = renderCard!({ locale })
     assert.deepEqual(missingKeys, [], `every label and hint the card asks for exists in ${locale}`)
     const { controls, notes } = fieldsRendered(html)
+    const editor = /<textarea[^>]*id="plugin-config-dsh-browser-properties"[^>]*>([\s\S]*?)<\/textarea>/.exec(html)
+    assert.ok(editor, 'the default-parameters editor is rendered')
+    const text = editor![1]!.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&')
+    const inEditor = (field: string) => new RegExp(`^#? ?${field} =`, 'm').test(text)
     for (const field of publicFields) {
       const control = field === 'prompts' ? controls.some(id => id.startsWith('prompts-')) : controls.includes(field)
       const note = notes.includes(field)
-      assert.ok(control || note, `config field "${field}" is neither a control nor a note in the ${locale} card`)
-      assert.ok(!(control && note), `config field "${field}" is both`)
+      const line = inEditor(field)
+      assert.ok(control || note || line, `config field "${field}" is neither a control, a note, nor a line of the default parameters in the ${locale} card`)
+      assert.equal([control, note, line].filter(Boolean).length, 1, `config field "${field}" is shown ${[control && 'as a control', note && 'as a note', line && 'in the properties text'].filter(Boolean).join(' and ')}`)
     }
-    // Nothing on the card points at a field the schema does not have.
-    for (const id of controls.filter(id => !id.startsWith('prompts-'))) assert.ok(publicFields.includes(id), `control ${id} is not a config field`)
+    // Nothing on the card points at a field the schema does not have (the editor itself is not a field).
+    for (const id of controls.filter(id => !id.startsWith('prompts-') && id !== 'properties')) assert.ok(publicFields.includes(id), `control ${id} is not a config field`)
     for (const id of notes) assert.ok(publicFields.includes(id), `note ${id} is not a config field`)
-    // The ones that used to go missing.
-    for (const field of ['maxSessions', 'args']) assert.ok(controls.includes(field), `${field} has a control`)
+    // The merge: these are lines now, not controls.
+    for (const field of ['maxSessions', 'args', 'viewportMode', 'proxyServer', 'downloadDir', 'headless', 'allowPrivateHosts']) {
+      assert.ok(inEditor(field) && !controls.includes(field), `${field} is a line of the default parameters`)
+    }
+    // The switches and policies stay controls.
+    for (const field of ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled', 'usagePolicy', 'automationAssets']) assert.ok(controls.includes(field), `${field} is still a control`)
     for (const field of ['authProfiles', 'rulePacks']) {
       assert.ok(notes.includes(field), `${field} has a note`)
       assert.ok(!controls.includes(field))
@@ -150,7 +159,7 @@ test('every text control of the card has an accessible name, in every state of t
       const { html, missingKeys } = renderCard!({ ...options, locale })
       assert.deepEqual(missingKeys, [], `${name}: no missing translations in ${locale}`)
       const controls = controlsOf(html)
-      assert.ok(controls.length > 20, `${name}: the card has its controls (${controls.length})`)
+      assert.ok(controls.length > 10, `${name}: the card has its controls (${controls.length})`)
       assert.deepEqual(controls.filter(control => !control.named).map(control => control.tag + '#' + (control.id ?? '(no id)')), [], `${name}/${locale}: controls without an accessible name`)
     }
   }
@@ -189,27 +198,35 @@ function controlsOf(html: string): Control[] {
   return controls.map(entry => ({ ...entry.control, named: entry.control.named || (!!entry.control.id && labels.has(entry.control.id)) }))
 }
 
-test('the card shows why a context or download value is refused, next to the field, and lists what the plugin ignored', (t) => {
+test('the default-parameters editor lists line-level problems with the line number and key, and warns about unknown keys', (t) => {
   if (skip) return t.skip(skip)
+  const text = ['# comment', '', 'viewportMode = custom', 'viewportHeight = 600', 'proxyServer = ftp://127.0.0.1:1', 'downloadDir = relative/dir', 'headless = maybe', 'bogusKey = 1', 'enabled = false', 'not a line'].join('\n')
   for (const locale of ['en', 'zh'] as const) {
-    const { html, missingKeys } = renderCard!({
-      locale,
-      fieldTexts: { viewportMode: 'custom', viewportWidth: '', viewportHeight: '600', proxyServer: 'ftp://127.0.0.1:1', downloadDir: 'relative/dir', locale: 'en-US' },
-      configWarnings: ['config proxyServer="ftp://x" was ignored: scheme must be one of http, https, socks5, socks4; no proxy is used instead. Fix: ...'],
-    })
+    const { html, missingKeys } = renderCard!({ locale, propertiesText: text, fieldTexts: { viewportMode: 'custom' } })
     assert.deepEqual(missingKeys, [], locale)
-    assert.match(html, /proxyServer scheme must be one of http, https, socks5, socks4/)
-    assert.match(html, /downloadDir must be an absolute directory path/)
-    assert.match(html, /viewportMode=custom needs viewportWidth \(200-7680\)/)
-    assert.doesNotMatch(html, /viewportMode=custom needs viewportHeight/, 'a size that is there is not flagged')
-    assert.match(html, /data-dsh-browser-config-warnings/)
-    assert.match(html, /was ignored: scheme must be one of/)
-    // The valid field carries no error.
-    const localeField = html.slice(html.indexOf('plugin-config-dsh-browser-locale'), html.indexOf('plugin-config-dsh-browser-locale') + 400)
-    assert.doesNotMatch(localeField, /aria-invalid/)
+    assert.match(html, /data-dsh-browser-properties-errors/)
+    assert.match(html, /line 5: proxyServer scheme must be one of http, https, socks5, socks4/)
+    assert.match(html, /line 6: downloadDir must be an absolute directory path/)
+    assert.match(html, /line 7: headless must be true or false/)
+    assert.match(html, /line 10: expected &quot;key = value&quot;|line 10: expected "key = value"/)
+    assert.match(html, /viewportMode=custom needs viewportWidth/)
+    assert.doesNotMatch(html, /viewportMode=custom needs viewportHeight/)
+    assert.match(html, /data-dsh-browser-properties-warnings/)
+    assert.match(html, /line 8: unknown setting &quot;bogusKey&quot; is ignored|line 8: unknown setting "bogusKey" is ignored/)
+    assert.match(html, /line 9: enabled is not a default parameter/)
+    assert.match(html, /aria-invalid="true"/)
   }
-  // Nothing wrong: no error text, no warnings block.
   const clean = renderCard!({ fieldTexts: { viewportMode: 'window', proxyServer: 'http://127.0.0.1:7890' } })
-  assert.doesNotMatch(clean.html, /data-dsh-browser-config-warnings/)
-  assert.doesNotMatch(clean.html, /must be one of http/)
+  assert.doesNotMatch(clean.html, /data-dsh-browser-properties-errors/)
+  assert.match(clean.html, /proxyServer = http:\/\/127\.0\.0\.1:7890/)
+  assert.match(clean.html, /# userAgent =/)
+  assert.match(clean.html, /data-dsh-browser-properties-overridden/)
+})
+
+test('configuration warnings of the running plugin are listed above the form', (t) => {
+  if (skip) return t.skip(skip)
+  const { html } = renderCard!({ configWarnings: ['config proxyServer="ftp://x" was ignored: scheme must be one of http, https, socks5, socks4; no proxy is used instead. Fix: ...'] })
+  assert.match(html, /data-dsh-browser-config-warnings/)
+  assert.match(html, /was ignored: scheme must be one of/)
+  assert.doesNotMatch(renderCard!().html, /data-dsh-browser-config-warnings/)
 })

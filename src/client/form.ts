@@ -15,6 +15,9 @@ import { SettingsFormModel, settingsNumberField, settingsTextField } from '@deep
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ASSET_POLICY_BOOLEAN_KEYS, ASSET_POLICY_ENUMS, ASSET_POLICY_INTEGER_RANGES, ASSET_POLICY_KEYS, ASSET_POLICY_STRING_KEYS, USAGE_POLICY_BOUNDS, type AssetPolicyKey } from '../policy-keys.ts'
 import { fieldProblem } from './field-rules.ts'
+import {
+  PROPERTY_FIELDS, checkProperties, commentOutProperty, parseProperties, serializeProperties, type LineIssue, type PropertyField,
+} from './properties-form.ts'
 import { PROMPT_TEXT_FIELDS, canonicalPrompts, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
@@ -37,6 +40,18 @@ export interface BrowserCardState extends SettingsFormShell {
   jsonFields: Record<string, CardFieldState>
   /** The "prompt text" section: views of the one staged `prompts` draft. */
   prompts: PromptsCardState
+  /** The "default parameters" editor: one properties text over the plugin-wide default fields. */
+  properties: PropertiesCardState
+}
+
+export interface PropertiesCardState {
+  /** What the editor shows: what was typed (kept verbatim while it has problems), else the text printed from the fields. */
+  text: string
+  /** Line-level problems of the text. Errors block the save. */
+  issues: LineIssue[]
+  /** The keys that carry an override right now, in display order. */
+  overridden: { key: string; value: string }[]
+  invalid: boolean
 }
 
 export interface PromptsCardState {
@@ -210,6 +225,9 @@ export class BrowserSettingsController {
   /** What the person typed in the groups/actions/errorHints box, kept verbatim while it is not valid JSON yet. */
   private extrasRaw: string | undefined
   private extrasInvalid = false
+  /** The properties text as typed; undefined shows the text printed from the staged fields. */
+  private propsRaw: string | undefined
+  private propsIssues: LineIssue[] = []
 
   constructor(private readonly scope: SettingsFormScope<Record<string, unknown>>) {
     this.form = new SettingsFormModel<Record<string, unknown>>(scope, [...ALL_FIELD_SPECS])
@@ -223,7 +241,9 @@ export class BrowserSettingsController {
       ...actions,
       // A save is refused while the groups/actions/errorHints box holds something that is not valid.
       save: () => this.save(),
-      discard: () => { this.extrasRaw = undefined; this.extrasInvalid = false; actions.discard() },
+      discard: () => { this.extrasRaw = undefined; this.extrasInvalid = false; this.propsRaw = undefined; this.propsIssues = []; actions.discard() },
+      editProperties: (text: string) => this.editProperties(text),
+      resetProperty: (key: string) => this.resetProperty(key),
       editPromptText: (id: PromptTextFieldId, text: string) => this.editPromptText(id, text),
       setPromptSkillEnabled: (enabled: boolean) => this.setPromptSkillEnabled(enabled),
       editPromptExtras: (text: string) => this.editPromptExtras(text),
@@ -232,10 +252,67 @@ export class BrowserSettingsController {
   }
 
   private async save(): Promise<void> {
-    if (this.extrasInvalid) return
+    if (this.extrasInvalid || this.propsIssues.some(issue => issue.level === 'error')) return
     await this.form.save()
     // What was typed is now the stored value, so the box shows that again. (A failed save keeps the draft and its flag.)
-    if (!this.form.shell().failed && this.extrasRaw !== undefined) { this.extrasRaw = undefined; this.refresh() }
+    if (!this.form.shell().failed && (this.extrasRaw !== undefined || this.propsRaw !== undefined)) {
+      this.extrasRaw = undefined
+      this.propsRaw = undefined
+      this.propsIssues = []
+      this.refresh()
+    }
+  }
+
+  // --- the default parameters editor: one text over the plugin-wide default fields ------------------------------
+
+  private spec(key: string): SettingsFieldSpec { return ALL_FIELD_SPECS.find(spec => spec.field === key)! }
+
+  /** The text of a field as the plugin has it now (stored, deployed, or default), ignoring anything staged. */
+  private storedText(key: string): string { return this.spec(key).format(this.scope.getSnapshot().value?.[key]) }
+
+  private isStored(key: string): boolean {
+    const user = this.scope.getSnapshot().user
+    return user !== undefined && user !== null && Object.hasOwn(user, key)
+  }
+
+  /** Print the text from the fields as they are (staged edits included). */
+  private printProperties(): string {
+    return serializeProperties(PROPERTY_FIELDS.map(field => {
+      const state = this.form.field(field.key)
+      return { key: field.key, text: state.text, overridden: state.overridden }
+    }))
+  }
+
+  /**
+   * Stage the fields to match a properties text: a key with a value is edited to it, a key without one (commented,
+   * deleted, blank) goes back to the default. The staged result is the same per-field `set` / `unset` the one-control
+   * form produced, so the saved configuration has the same flat keys and nothing else.
+   */
+  editProperties(text: string): void {
+    this.propsRaw = text
+    const parsed = parseProperties(text)
+    this.propsIssues = checkProperties(parsed, key => this.form.field(key).text)
+    const actions = this.form.actions()
+    for (const field of PROPERTY_FIELDS) {
+      const entry = parsed.values.get(field.key)
+      if (entry) actions.edit(field.key, entry.value)
+      else if (this.isStored(field.key)) actions.resetField(field.key)
+      else actions.edit(field.key, this.storedText(field.key))
+    }
+  }
+
+  /** Comment out one key's line: that parameter goes back to the default. */
+  resetProperty(key: string): void {
+    const current = this.propsRaw ?? this.printProperties()
+    const base = this.scope.getSnapshot().base?.[key]
+    this.editProperties(commentOutProperty(current, key, this.spec(key).format(base) || (PROPERTY_FIELDS.find(field => field.key === key)?.defaultText ?? '')))
+  }
+
+  private projectProperties(): PropertiesCardState {
+    const text = this.propsRaw ?? this.printProperties()
+    const parsed = parseProperties(text)
+    const overridden = PROPERTY_FIELDS.filter(field => parsed.values.has(field.key)).map((field: PropertyField) => ({ key: field.key, value: parsed.values.get(field.key)!.value }))
+    return { text, issues: this.propsIssues, overridden, invalid: this.propsIssues.some(issue => issue.level === 'error') }
   }
 
   // --- the prompt text section: one staged `prompts` draft, several views of it ----------------------------------
@@ -302,7 +379,8 @@ export class BrowserSettingsController {
     const jsonFields: Record<string, CardFieldState> = {}
     for (const spec of JSON_FIELD_SPECS) jsonFields[spec.field] = this.form.field(spec.field)
     const shell = this.form.shell()
-    return { ...shell, invalid: shell.invalid || this.extrasInvalid, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!) }
+    const properties = this.projectProperties()
+    return { ...shell, invalid: shell.invalid || this.extrasInvalid || properties.invalid, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!), properties }
   }
 
   private projectPrompts(field: CardFieldState): PromptsCardState {

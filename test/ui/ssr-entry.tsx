@@ -4,6 +4,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SettingsCard } from '../../src/client/SettingsCard.tsx'
 import { en, zh } from '../../src/client/locales.ts'
+import { PROPERTY_FIELDS, checkProperties, parseProperties, serializeProperties } from '../../src/client/properties-form.ts'
 
 const noop = () => {}
 const proxy = (value: unknown) => new Proxy({}, { get: () => value })
@@ -21,6 +22,8 @@ export interface RenderOptions {
   promptsDefaults?: string
   /** Text each single-input field holds, by field name. */
   fieldTexts?: Record<string, string>
+  /** The properties text exactly as the editor holds it (instead of printing it from fieldTexts). */
+  propertiesText?: string
   /** What the running plugin reports it ignored in its configuration. */
   configWarnings?: string[]
 }
@@ -29,7 +32,18 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
   const dictionary = (options.locale === 'zh' ? zh : en) as Record<string, string>
   const missing = new Set<string>()
   const t = (key: string) => dictionary[key] ?? (missing.add(key), key)
+  // The default-parameters editor, printed and checked by the card's own pure code from the texts the test gives.
+  const texts = options.fieldTexts ?? {}
+  const printed = options.propertiesText ?? serializeProperties(PROPERTY_FIELDS.map(field => ({ key: field.key, text: texts[field.key] ?? '', overridden: field.key in texts })))
+  const parsedProps = parseProperties(printed)
+  const issues = checkProperties(parsedProps, key => texts[key] ?? '')
+  const properties = {
+    text: printed, issues,
+    overridden: PROPERTY_FIELDS.filter(field => parsedProps.values.has(field.key)).map(field => ({ key: field.key, value: parsedProps.values.get(field.key)!.value })),
+    invalid: issues.some(issue => issue.level === 'error'),
+  }
   const settings = {
+    properties,
     available: true, writable: true, saving: false, dirty: false, invalid: false, failed: false,
     fields: new Proxy({}, { get: (_target, name) => ({ text: options.fieldTexts?.[String(name)] ?? '', invalid: false, overridden: false }) }), jsonFields: proxy({ text: '', invalid: false, overridden: false }),
     prompts: { texts: proxy({ text: '', invalid: false }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false },
@@ -60,7 +74,7 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
     useAutomationAssets: (select: (state: unknown) => unknown) => select(assets),
     usePromptsStatus: (select: (state: unknown) => unknown) => select(status),
     usePolicyStatus: (select: (state: unknown) => unknown) => select(policyState),
-    refreshPolicyStatus: noop, clearPolicyOverlay: noop,
+    refreshPolicyStatus: noop, clearPolicyOverlay: noop, editProperties: noop, resetProperty: noop,
     edit: noop, resetField: noop, save: noop, discard: noop,
     editPromptText: noop, setPromptSkillEnabled: noop, editPromptExtras: noop, resetPromptExtras: noop, refreshPromptsStatus: noop, exportPromptDefaults: noop, hidePromptDefaults: noop,
     refreshAutomationAssets: noop, selectAutomationAsset: noop, saveAutomationAsset: noop, summarizeAutomationCandidate: noop, dismissAutomationCandidate: noop,

@@ -27,6 +27,9 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   resetField: (field: string) => void
   save: () => void
   discard: () => void
+  /** The default-parameters editor (one `key = value` text over the plugin-wide defaults). */
+  editProperties: (text: string) => void
+  resetProperty: (key: string) => void
   // The "prompt text" section: views of the one staged `prompts` draft.
   editPromptText: (id: PromptTextFieldId, text: string) => void
   setPromptSkillEnabled: (enabled: boolean) => void

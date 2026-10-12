@@ -18,8 +18,7 @@ import { SettingsForm, SettingsValueField } from '@deepseek-ai/dsh-client-ui-pri
 import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BrowserSettingsCardProps } from './index.ts'
 import { ASSET_POLICY_KEYS, USAGE_POLICY_KEYS } from '../policy-keys.ts'
-import { CONFIG_FILE_ONLY_FIELDS, FIELD_SPECS, JSON_FIELDS, type SectionField } from './form.ts'
-import { CHECKED_TEXT_FIELDS, crossFieldProblems, fieldProblem } from './field-rules.ts'
+import { CONFIG_FILE_ONLY_FIELDS, FIELD_SPECS, JSON_FIELDS } from './form.ts'
 import { PROMPT_TEXT_FIELDS, type PromptTextFieldId } from './prompts-form.ts'
 import { styles as css } from './styles.ts'
 import { credentialView, identicalOutputPairs, inputSetLines, isDirty, shortHash } from './asset-editor.ts'
@@ -49,16 +48,12 @@ function formLabels(t: Translator): SettingsFormLabels {
 }
 
 /**
- * Which fields each section shows, by field name, and which public fields it only names ("edit in the config file").
- * A public config field missing from here and from the prompt/usage sections would be silently absent from the card;
- * test/settings-card-render.test.ts renders the card and checks every Config field is a control or a note.
+ * The switches and policies that stay one control each. Every plugin-wide DEFAULT (runtime, window, locale, proxy,
+ * directories, limits) is a line of the default-parameters editor instead (properties-form.ts). A public config field
+ * that is in neither place would be silently absent from the card; test/settings-card-render.test.ts renders the card
+ * and checks every Config field is a control, a note, or a line of the properties text.
  */
-const SECTION_LAYOUT: readonly { title: LabelKey; hint: LabelKey; fields: readonly string[]; notes?: readonly string[] }[] = [
-  { title: 'freedom', hint: 'freedomHint', fields: ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled'] },
-  { title: 'runtime', hint: 'runtimeHint', fields: ['browserRuntime', 'channel', 'headless', 'autoInstall', 'executablePath', 'cdpPort', 'maxSessions', 'args'] },
-  { title: 'context', hint: 'contextHint', fields: ['viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass'] },
-  { title: 'advanced', hint: 'advancedHint', fields: ['storageStatePath', 'defaultAuthProfile', 'allowPrivateHosts', 'snapshotDir', 'downloadDir', 'downloadMaxBytes', 'verbose'], notes: CONFIG_FILE_ONLY_FIELDS },
-]
+const SWITCH_FIELDS: readonly string[] = ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled']
 
 /** The usage section's JSON boxes. */
 const USAGE_FIELDS = ['usagePolicy', 'automationAssets'] as const
@@ -77,21 +72,10 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
   if (props.view === 'summary') return <>{t('description')}</>
   const disabled = !state.writable
 
-  // Single-input fields live in `state.fields`; the JSON-shaped ones are read
-  // from the model directly, because the card renders them as code editors
-  // rather than one-line inputs.
-  // Cross-field problems (custom viewport without a size) cannot be seen by one field's own parse; they are shown at
-  // the fields and block the save the same way an invalid number does.
-  const texts: Record<string, string> = {}
-  for (const name of [...SINGLE_INPUT_FIELDS]) texts[name] = state.fields[name as SectionField]?.text ?? ''
-  const cross = crossFieldProblems(texts)
-  const numeric = new Set<string>(['cdpPort', 'maxSessions', 'downloadMaxBytes', 'viewportWidth', 'viewportHeight'])
+  // The switches are single inputs (`state.fields`); the policy boxes are JSON (`state.jsonFields`).
   const field = (name: string) => {
-    const fieldState = SINGLE_INPUT_FIELDS.has(name) ? state.fields[name as SectionField] : state.jsonFields[name]
+    const fieldState = SINGLE_INPUT_FIELDS.has(name) ? state.fields[name as keyof typeof state.fields] : state.jsonFields[name]
     const policyKeys = POLICY_KEY_LISTS[name]
-    // The reason a value is refused, from the same rules the server applies; a card that only said "invalid" left
-    // people to guess (and an unchecked save used to stop the plugin from loading).
-    const problem = (CHECKED_TEXT_FIELDS.includes(name) ? fieldProblem(name, fieldState?.text ?? '') : undefined) ?? cross[name]
     return <SettingsValueField
       key={name}
       id={`plugin-config-dsh-browser-${name}`}
@@ -99,35 +83,26 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
       hint={policyKeys ? `${t(`${name}Hint` as LabelKey)} ${t('policyKeys')} ${policyKeys.join(', ')}` : t(`${name}Hint` as LabelKey)}
       overriddenLabel={t('overridden')}
       resetLabel={t('reset')}
-      numeric={numeric.has(name)}
+      invalidLabel={t(JSON_FIELDS.has(name) ? 'invalidJson' : 'invalid')}
+      numeric={false}
       disabled={disabled}
       {...fieldState}
-      invalid={fieldState?.invalid === true || problem !== undefined}
-      invalidLabel={problem !== undefined ? `${t('invalid')} ${problem}` : t(JSON_FIELDS.has(name) ? 'invalidJson' : name === 'viewportMode' || CHECKED_TEXT_FIELDS.includes(name) ? 'invalid' : 'invalidNumber')}
       onEdit={text => props.edit(name, text)}
       onReset={() => props.resetField(name)}
     />
   }
-  /** A public field with no form: its name, what it is for, and where to edit it. */
-  const configFileNote = (name: string) => <div key={name} className={css.field} data-dsh-browser-config-note={name}>
-    <div className={css.fieldHead}><span className={css.label}>{t(name as LabelKey)}</span></div>
-    <p className={css.hint}>{t(`${name}Hint` as LabelKey)} {t('configFileOnly')}</p>
-  </div>
-
   return <SettingsForm
     labels={formLabels(t)}
-    state={Object.keys(cross).length ? { ...state, invalid: true } : state}
+    state={state}
     onSave={props.save}
     onDiscard={props.discard}
   >
     <ConfigWarnings {...props} />
-    {SECTION_LAYOUT.map(section => <section key={section.title} className={css.section}>
-      <div className={css.sectionHead}><h3>{t(section.title)}</h3><p>{t(section.hint)}</p></div>
-      <div className={css.grid}>
-        {section.fields.map(name => field(name))}
-        {section.notes?.map(name => configFileNote(name))}
-      </div>
-    </section>)}
+    <section className={css.section}>
+      <div className={css.sectionHead}><h3>{t('freedom')}</h3><p>{t('freedomHint')}</p></div>
+      <div className={css.grid}>{SWITCH_FIELDS.map(name => field(name))}</div>
+    </section>
+    <PropertiesPanel {...props} />
     <section className={css.section}>
       <div className={css.sectionHead}><h3>{t('usage')}</h3><p>{t('usageHint')}</p></div>
       <div className={css.grid}>
@@ -140,6 +115,48 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
     <PromptsPanel {...props} disabled={disabled} />
     <AutomationAssetsPanel {...props} />
   </SettingsForm>
+}
+
+/** A public field with no form: its name, what it is for, and where to edit it. */
+function ConfigFileNote(props: { name: string; t: Translator }) {
+  const { name, t } = props
+  return <div className={css.field} data-dsh-browser-config-note={name}>
+    <div className={css.fieldHead}><span className={css.label}>{t(name as LabelKey)}</span></div>
+    <p className={css.hint}>{t(`${name}Hint` as LabelKey)} {t('configFileOnly')}</p>
+  </div>
+}
+
+/**
+ * The default parameters: one `key = value` text for every plugin-wide default (what a new context starts from).
+ * Overridden keys are lines, the rest are comments showing the value in force; problems are listed with their line.
+ */
+function PropertiesPanel(props: BrowserSettingsCardProps) {
+  const { t } = props
+  const state = props.useBrowserSettings(snapshot => snapshot)
+  const disabled = !state.writable
+  const view = state.properties
+  const errors = view.issues.filter(issue => issue.level === 'error')
+  const warnings = view.issues.filter(issue => issue.level === 'warning')
+  const id = 'plugin-config-dsh-browser-properties'
+  return <section className={css.section} data-dsh-browser-properties>
+    <div className={css.sectionHead}><h3>{t('properties')}</h3><p>{t('propertiesHint')}</p></div>
+    <div className={css.field}>
+      <div className={css.fieldHead}><label className={css.label} htmlFor={id}>{t('propertiesEditor')}</label></div>
+      <textarea id={id} className={`${css.input} ${css.textarea} ${css.code} ${errors.length ? css.invalidInput : ''}`} rows={30} spellCheck={false}
+        disabled={disabled} aria-invalid={errors.length > 0 || undefined} value={view.text} onChange={event => props.editProperties(event.currentTarget.value)} />
+      {errors.length ? <ul className={css.failed} role="alert" data-dsh-browser-properties-errors>{errors.map((issue, index) => <li key={index}>{issue.message}</li>)}</ul> : null}
+      {warnings.length ? <ul className={css.hint} data-dsh-browser-properties-warnings>{warnings.map((issue, index) => <li key={index}>{issue.message}</li>)}</ul> : null}
+      <p className={css.hint}>{t('propertiesFormat')}</p>
+    </div>
+    <div className={css.field} data-dsh-browser-properties-overridden>
+      <div className={css.fieldHead}><span className={css.label}>{t('propertiesOverridden')}</span></div>
+      {view.overridden.length
+        ? <ul>{view.overridden.map(entry => <li key={entry.key}><code>{entry.key} = {entry.value}</code> <span className={css.hint}>[{t('overridden')}]</span> <button type="button" className={css.reset} disabled={disabled} onClick={() => props.resetProperty(entry.key)}>{t('reset')}</button></li>)}</ul>
+        : <p className={css.hint}>{t('propertiesNoneOverridden')}</p>}
+    </div>
+    <div className={css.grid}>{CONFIG_FILE_ONLY_FIELDS.map(name => <ConfigFileNote key={name} name={name} t={t} />)}</div>
+    <p className={css.notice} role="note">{t('restart')}</p>
+  </section>
 }
 
 /** Problems the running plugin found in its configuration: values it dropped, and why. Shown above the form. */

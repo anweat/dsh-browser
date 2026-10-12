@@ -20,13 +20,13 @@ const promptsInjected = promptsController.inject()
 const policyController = new PolicyStatusController(rpc as never)
 const policyInjected = policyController.inject()
 const store = injected.hooks.automationAssets
-const settings = { available: true, writable: true, saving: false, dirty: false, fields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), jsonFields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), prompts: { texts: new Proxy({}, { get: () => ({ text: '', invalid: false }) }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false } }
+const settings = { properties: { text: '# defaults\n', issues: [], overridden: [], invalid: false }, available: true, writable: true, saving: false, dirty: false, fields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), jsonFields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), prompts: { texts: new Proxy({}, { get: () => ({ text: '', invalid: false }) }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false } }
 const noop = () => {}
 const props = {
   ...injected, ...promptsInjected, ...policyInjected, view: 'page', t: (key: string) => (en as Record<string, string>)[key] ?? key,
   useBrowserSettings: (select: (state: unknown) => unknown) => select(settings),
   useAutomationAssets: (select: (state: unknown) => unknown) => select(useSyncExternalStore(store.subscribe, store.getSnapshot)),
-  edit: noop, resetField: noop, save: noop, discard: noop,
+  edit: noop, resetField: noop, save: noop, discard: noop, editProperties: noop, resetProperty: noop,
   editPromptText: noop, setPromptSkillEnabled: noop, editPromptExtras: noop, resetPromptExtras: noop,
   usePolicyStatus: (select: (state: unknown) => unknown) => select(useSyncExternalStore(policyInjected.hooks.policyStatus.subscribe, policyInjected.hooks.policyStatus.getSnapshot)),
   usePromptsStatus: (select: (state: unknown) => unknown) => select(useSyncExternalStore(promptsInjected.hooks.promptsStatus.subscribe, promptsInjected.hooks.promptsStatus.getSnapshot)),
