@@ -1,3 +1,4 @@
+import path from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Config, resolveConfig } from '../src/config.ts'
@@ -138,4 +139,25 @@ test('options compare field by field; a per-call proxy replaces the configured o
   assert.deepEqual(merged.proxy, { server: 'http://b:2' })
   assert.deepEqual(merged.viewport, { width: 1280, height: 720 })
   assert.deepEqual(differingContextOptions(defaults, merged), ['proxyServer'])
+})
+
+test('the plugin applies and registers its tools with a configuration that used to stop it from loading', async () => {
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const { Context } = await import('@deepseek-ai/cordis')
+  const { default: plugin } = await import('../src/index.ts')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-badcfg-'))
+  const registered: string[] = []
+  const ctx = new Context()
+  ctx.provide('tools', { register(tool: { name: string }) { registered.push(tool.name); return () => {} } })
+  // Parsed by the plugin's own schema first, as the Host does.
+  const config = (Config as unknown as (value: unknown) => never)({
+    snapshotDir: path.join(dir, 'snap'), downloadDir: 'relative/dir', browserDataDir: path.join(dir, 'data'),
+    viewportMode: 'custom', proxyServer: 'ftp://127.0.0.1:1', timezoneId: 'Mars/Base', downloadMaxBytes: 0, viewportWidth: 1, proxy: { server: 'x' },
+  })
+  const fiber = ctx.plugin(plugin as never, config)
+  await new Promise(resolve => setTimeout(resolve, 60))
+  try {
+    assert.deepEqual(registered.sort(), ['browser_call', 'browser_index'])
+  } finally { fiber.dispose() }
 })

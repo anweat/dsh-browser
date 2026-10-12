@@ -305,3 +305,38 @@ describe('dsh-browser context options and downloads e2e', { skip: detection.ok ?
     }
   })
 })
+
+describe('an invalid configuration still loads, falls back and says why', { skip: detection.ok ? false : detection.reason }, () => {
+  let broken: Harness
+  let server: Fixture
+
+  before(async () => {
+    assert.ok(detection.ok)
+    server = await startDownloadServer()
+    // What a settings-card save used to be able to write: each of these made the plugin fail to load.
+    broken = createHarness(detection, {
+      viewportMode: 'custom', proxyServer: 'ftp://127.0.0.1:1', locale: 'not a locale', timezoneId: 'Mars/Base',
+      downloadMaxBytes: 0, viewport: { width: 1, height: 2 },
+    })
+  })
+
+  after(async () => {
+    await broken?.dispose()
+    await server?.close()
+  })
+
+  it('the browser works with the defaults, and runtime.status lists every ignored value with its reason', async () => {
+    const opened = await broken.result('e2e-broken-1', 'target.open', { url: server.base + '/plain' })
+    assert.equal(opened.title, 'Plain', 'no proxy was applied: the page loaded directly')
+    const status = await broken.result('e2e-broken-1', 'runtime.status')
+    const warnings: string[] = status.runtimeWarnings
+    for (const key of ['viewportMode', 'proxyServer', 'locale', 'timezoneId', 'downloadMaxBytes', '"viewport"']) {
+      assert.ok(warnings.some(warning => warning.includes(key)), `a warning names ${key}:\n${warnings.join('\n')}`)
+    }
+    assert.ok(warnings.every(warning => !warning.includes('ERR_') && warning.length < 600))
+    assert.equal(status.downloadMaxBytes, 100 * 1024 * 1024)
+    assert.deepEqual(status.contextDefaults, {})
+    const report = await broken.result('e2e-broken-1', 'inspect.policy')
+    assert.equal(report.revision, 0)
+  })
+})
