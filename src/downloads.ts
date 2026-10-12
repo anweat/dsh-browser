@@ -39,7 +39,7 @@ export interface DownloadRecord {
 /** A download was cut because it passed `downloadMaxBytes`. */
 export class DownloadLimitError extends Error {
   constructor(readonly maxBytes: number) {
-    super(`the download is larger than downloadMaxBytes (${maxBytes} bytes) and was aborted; nothing was saved`)
+    super(`the download is larger than downloadMaxBytes (${maxBytes} bytes) ; the transfer was stopped and nothing was saved`)
     this.name = 'DownloadLimitError'
   }
 }

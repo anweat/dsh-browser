@@ -256,3 +256,16 @@ test('an invalid per-call option is refused before the live page is touched', as
   assert.equal(created.length, 1)
   assert.equal(created[0]!.closed, false, 'the session kept its page')
 })
+
+test('a download over the size cap maps to ACTION_FAILED with a precise hint, never CANCELLED', async () => {
+  const { DownloadLimitError } = await import('../src/downloads.ts')
+  for (const error of [new DownloadLimitError(1000), new Error('could not download https://x.test/f: request failed (x); the download is larger than downloadMaxBytes (1000 bytes); the transfer was stopped and nothing was saved')]) {
+    const body = mapError(error, 'target.download', { signal: new AbortController().signal })
+    assert.equal(body.code, 'ACTION_FAILED')
+    assert.match(body.hint!, /not a cancellation/)
+    assert.match(body.hint!, /raise downloadMaxBytes/)
+  }
+  // The old wording would have been read as a cancellation; the message itself no longer says "aborted".
+  assert.doesNotMatch(new DownloadLimitError(1).message, /abort/)
+  assert.equal(mapError(new Error('the operation was aborted'), 'target.download').code, 'CANCELLED')
+})

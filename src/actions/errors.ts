@@ -153,6 +153,11 @@ export function mapError(error: unknown, action: string, opts: { signal?: AbortS
   if (error instanceof RecipeValidationError) return result('INVALID_RECIPE')
   if (error instanceof RecipeAssertionError) return result('VALIDATION_FAILED')
   if (abortedByDeadline(opts.signal)) return result('DEADLINE')
+  // A download over its size cap is a failure of the action, not a cancellation: nothing was cancelled by the caller
+  // (the word "aborted" in older messages used to land it in CANCELLED below).
+  if (/larger than downloadMaxBytes/.test(message)) {
+    return { code: 'ACTION_FAILED', message, hint: 'The file is larger than the downloadMaxBytes limit and nothing was saved; this is not a cancellation. The user can raise downloadMaxBytes in the settings, or choose a smaller file.' }
+  }
   if (opts.signal?.aborted || name === 'AbortError' || /\baborted\b/i.test(message)) return result('CANCELLED')
   if (CLOSED.test(message)) return result('TARGET_CLOSED')
   if (name === 'TimeoutError' || /Timeout \d+ms exceeded|timed out after/i.test(message)) {

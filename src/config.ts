@@ -93,7 +93,7 @@ export interface Config {
   allowPrivateHosts?: boolean
   /** Directory the downloads of `target.download` and browser-triggered downloads are saved to; defaults to $DSH_HOME/data/browser/downloads. */
   downloadDir?: string
-  /** Largest single download in bytes; a bigger one is aborted and removed. Default 100 MiB. */
+  /** Largest single download in bytes; a bigger one is stopped and removed. Default 100 MiB. */
   downloadMaxBytes?: number
   /**
    * Viewport of every context the plugin creates: `window` (default, Playwright's own default size),
@@ -223,7 +223,7 @@ export const Config = z.object({
   snapshotDir: z.string().volatile(),
   allowPrivateHosts: z.boolean().default(false).description('Let agent policy changes name localhost, .local/.internal names and private-network IPv4 addresses as allowed domains').volatile(),
   downloadDir: z.string().description('Absolute directory downloads are saved to; defaults to $DSH_HOME/data/browser/downloads').volatile(),
-  downloadMaxBytes: z.number().default(DEFAULT_DOWNLOAD_MAX_BYTES).description('Largest single download in bytes (default 100 MiB); a bigger one is aborted and removed').volatile(),
+  downloadMaxBytes: z.number().default(DEFAULT_DOWNLOAD_MAX_BYTES).description('Largest single download in bytes (default 100 MiB); a bigger one is stopped and removed').volatile(),
   viewportMode: z.string().default('window').description(`Viewport of every context: ${VIEWPORT_MODES.join(' | ')} (window = the browser default)`).volatile(),
   viewportWidth: z.number().description(`Custom viewport width, ${VIEWPORT_LIMITS.minWidth}-${VIEWPORT_LIMITS.maxWidth}; only with viewportMode=custom`).volatile(),
   viewportHeight: z.number().description(`Custom viewport height, ${VIEWPORT_LIMITS.minHeight}-${VIEWPORT_LIMITS.maxHeight}; only with viewportMode=custom`).volatile(),
