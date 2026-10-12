@@ -73,9 +73,10 @@ dsh --profile web
 
 - 从 `0.2.1` 升级即可，DSH 基线与 peer 范围不变；不配置新键时所有行为与 `0.2.1` 相同。
 - 新增 context 创建期选项：配置键 `viewportMode` / `viewportWidth` / `viewportHeight` / `userAgent` / `locale` / `timezoneId` / `proxyServer` / `proxyBypass`，以及 `target.open` 的按次参数 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer`（见下文“浏览器上下文选项”）。
-- 新增 `target.download` 与 `inspect.downloads`，以及配置 `downloadDir`、`downloadMaxBytes`（见下文“下载落盘”）。动作总数从 34 变为 36。
+- 新增 `target.download` 与 `inspect.downloads`，以及配置 `downloadDir`、`downloadMaxBytes`（见下文“下载落盘”）。新增 `target.download` / `inspect.downloads` 使动作总数从 34 变为 36。
 - **嵌套写法现在会报错而不是被忽略**：配置里写 `viewport: {width, height}`、`proxy: {...}`、`contextOptions`、`download(s)` 会在加载时抛出明确错误，并指出应使用哪些扁平键。
 - 带 `proxyServer` 或 `userAgent` 的 `target.open` 在 `standard` / `autonomous` 下需要审批，`read-only` 拒绝，`unrestricted` 放行；`target.download` 与 `act.upload` 同档。
+- 新增“策略覆盖层”：agent 可经 `inspect.policy` 与 `runtime.set_auth_profile` / `remove_auth_profile` / `set_usage_policy` / `reset_policy` 编辑限制类设置（authProfile 的域名、新建/删除，usagePolicy 限流项），不必用户手填。**`unrestricted` 下 agent 可自行放宽限制**，见“策略覆盖层与风险”。动作总数 36 变 41；新增配置 `allowPrivateHosts`（默认关）。
 
 ### 升级到 0.2.1
 
@@ -201,6 +202,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 |---|---|
 | `target.open` / `act.*` / `script.evaluate` / `observe.*` / `target.close` | 仅调用方 session |
 | `inspect.console` / `inspect.requests` | 仅返回调用方 session 抓到的记录 |
+| `inspect.policy` / `runtime.*_policy` / `runtime.set_auth_profile` | 策略覆盖层是全局的（所有 session 共用一份生效策略），不属于任何 session；审计里的 session id 只对产生它的 session 可见，别的 session 看到 `another session` |
 | `target.download` / `inspect.downloads` | 下载走调用方 session 的 context 与登录态；下载记录只在该 session 的内存里，互不可见 |
 | `runtime.status` 的 `activeUrl` | 仅报告调用方 session 的页面 |
 | `render` / `snapshot` / `searchResults` / `crawl` / OpenCLI | 每次调用自建临时 context，本就无共享状态 |
@@ -226,6 +228,8 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `autonomous` | 页面交互、写 Recipe、缓存清理和规则写入可直接执行 | 外部 UserScript、通用 OpenCLI、浏览器/后端安装仍强制审批 | 所有安全校验持续启用 |
 | `unrestricted` | 所有上述工具均不触发审批，适合隔离环境中的无人值守测试 | 无审批提示 | 仍执行域名、元数据、参数、大小和步骤数校验 |
 
+**策略动作**（`runtime.set_auth_profile` 等）：收紧在所有模式下直接执行，放宽在 `read-only` 拒绝、`standard` / `autonomous` 询问、`unrestricted` 直接执行（见“策略覆盖层与风险”）。
+
 `unrestricted` 会允许模型直接运行外部脚本、通用 CLI 和安装命令，只应在隔离的测试 profile 或明确授权的自动化环境中使用；日常 profile 保持 `standard`。它只取消人工确认，**不会取消 `usagePolicy` 的并发、突发、页数、深度、重试与冷却保护**。模式改变后需要重启 DSH profile，工具目录才会按新配置重新注册。
 
 ## 工具与动作
@@ -235,7 +239,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `toolSurface` | 注册的工具 | 常驻上下文 | 用途 |
 |---|---|---|---|
 | `indexed`（默认） | `browser_index`、`browser_call` 两个 | 约 0.3k token | 渐进披露：先看目录，再按需查看单个动作的 schema |
-| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 16k token（36 个工具；recipe 的 v2 schema 在 `automation.develop` / `automation.run_recipe` 里内联展开） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
+| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 17.4k token（41 个工具；recipe 的 v2 schema 在 `automation.develop` / `automation.run_recipe` 里内联展开） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
 
 `indexed` 下：`browser_index()` 列出能力组和当前环境状态（`automationMode`、Chromium 是否已安装）；`browser_index({group})` 列出该组动作；`browser_index({action})` 给出完整参数 schema；`browser_index({query})` 按关键词检索。`browser_call({action, args})` 执行动作，服务端按 schema 校验参数，校验失败返回 `INVALID_ARGS` 并附上精简 schema。所有动作的返回值使用同一信封：
 
@@ -287,6 +291,11 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `act.upload` | 把现有本地文件设置到 `input[type=file]`；绝对路径、数量和总大小受限 |
 | `inspect.console` | 读取本次显式捕获的脱敏 console 记录 |
 | `inspect.requests` | 读取本次显式捕获的失败及 HTTP 4xx/5xx 请求；无 body/header |
+| `inspect.policy` | 读生效的 authProfile 与限流项、覆盖层改了什么、最近的审计；`revision` 供写动作作乐观锁 |
+| `runtime.set_auth_profile` | 新建或修改 authProfile 的 `allowedDomains` / `persistState` / `storageStatePath`；收紧不询问，放宽按模式处理 |
+| `runtime.remove_auth_profile` | 删除 authProfile（总是允许，用到它的 session 立即关闭） |
+| `runtime.set_usage_policy` | 修改 `usagePolicy` 限流项；更严不询问，更松按模式处理 |
+| `runtime.reset_policy` | 把覆盖层回滚到基线（全部、仅限流项或某个 profile） |
 | `inspect.downloads` | 列出本 session 的下载记录（含点击/导航触发的），只含内存记录，`clear` 只清记录不删文件 |
 | `script.evaluate` | 在当前页执行最长 20,000 字符的 JavaScript 表达式，返回最多 100,000 字符 JSON |
 | `script.catalog` | 列出内置只读脚本及其 SHA-256 |
@@ -390,6 +399,32 @@ return [...document.querySelectorAll('.result')].slice(0, 20).map(card => ({
 
 常见读取任务优先用内置脚本：`article-clean`、`links`、`jsonld`、`forms`。它们不返回表单当前值，
 也不触发点击或网络写操作。
+
+## 策略覆盖层与风险
+
+“限制类”设置（authProfile 的域名与登录态文件、`usagePolicy` 限流项）现在可以由 agent 经动作编辑，用户不必手填。机制是一层受管理的**覆盖文件** `$DSH_HOME/data/browser/policy-overlay.json`（原子写、`0600`，带 `revision`、`updatedAt` 和最近 50 条审计），合并在设置面板的配置（基线）之上，**覆盖层优先**。它只能保存两类字段：`authProfiles` 和 `usagePolicy`。
+
+**动作与审批**——按方向判断，不按动作名：
+
+| 变更 | `read-only` | `standard` / `autonomous` | `unrestricted` |
+|---|---|---|---|
+| 收紧：删域名、缩小范围、删 profile、`persistState` 关闭、限流更严 | 直接执行 | 直接执行 | 直接执行 |
+| 放宽：加域名、新建 profile、`persistState` 开启（写磁盘）、换状态文件、限流更松、回滚到更宽的基线 | 拒绝 | 询问，理由里写出 diff | 直接执行，结果带 `risk` |
+
+- 每次修改必须带 `reason`（3–300 字符），返回 `before` / `after` / `changes`，并写入审计（来源、session、时间、reason、方向、变更行）。可选 `expectedRevision` 作乐观锁，过期则报错且什么都不改。
+- 变更立即生效：用到被收回登录态的 session 会被关闭（`sessionsClosed`），下一次 `target.open` 重新开始；撤销的域名在下一次调用就被拒绝，不是等到下次启动。
+- **风险与 unrestricted 行为**：`unrestricted` 不会询问，所以 agent 可以自行加域名、新建 profile、把限流放宽到配置允许的上限。放宽的结果里总带 `risk: {level: "elevated", loosened, approval, note}`，设置卡片的“策略覆盖层”分区列出生效值、每项的来源（基线 / 来自覆盖层 / 覆盖层新建）和审计。要避免 agent 自行放宽，请不要对该 profile 使用 `unrestricted`（`autonomous` 下放宽仍然询问）。
+- 面板里“清除覆盖 / 回滚到基线”按钮与每个 profile 的“回滚此项”只动覆盖层，不改基线配置，同样写审计。
+
+**校验**（agent 写入时和每次加载覆盖文件时各做一遍，任何一项不过，写入被拒；已有文件则整体被忽略）：
+
+- **域名**：规范化为小写 punycode；拒绝 `*`、裸 TLD、公共后缀（内置的小列表：`co.uk`、`com.cn`、`github.io`、`vercel.app`、`pages.dev` 等加 ccTLD 二级的结构规则，不是完整的 PSL）、IP 字面量（含 `127.1`、`2130706433` 这类写法和通配 IP）、含端口/路径/协议/凭据/空白/控制字符的输入、重复项（`*.a.com` 与 `a.com` 视为同一范围）；通配只允许 `*.example.com` 且根必须可注册；每个 profile 最多 50 个。localhost、`.local`/`.internal` 等内网名和回环/RFC1918 IPv4 只有在配置 `allowPrivateHosts: true` 时才接受；云元数据和链路本地地址（`169.254.0.0/16`）始终拒绝。
+- **profile id**：字母数字开头，只含字母数字、`_`、`-`，≤40；禁止 `__proto__`、`constructor`、`prototype` 等对象原型键。
+- **storageStatePath**：必须是绝对路径、`.json`，位于 `$DSH_HOME/data/browser/auth/` 内（拒绝 `..`、符号链接逃逸、已存在的非普通文件、`snapshotDir` / `downloadDir` 内的路径、别的 profile 正在用的文件）；auth 目录与这两个目录重叠时 agent 设置的路径一律拒绝。`persistState: false` 的新 profile 要求状态文件已存在（agent 无法创建它，需要用户放置，或开启 `persistState` 让它在登录后生成）。基线里配置的路径不受 auth 目录限制，agent 不改它就保持原样。
+- **usagePolicy**：与配置相同的整数范围（如 `maxConcurrency` 1–8、`minDelayMs` 0–60000），且不能超出；未知键拒绝。
+- **覆盖文件本身**：解析失败、校验和不符（被手工编辑过）、含被校验拒绝的值或被拒绝的未知键时，整个文件被忽略，**回退到基线**，并在 `runtime.status` 的 `runtimeWarnings` 和设置卡片里给出警告，不会半应用；此时写动作被拒绝，直到用 `runtime.reset_policy` 或面板按钮清除（坏文件改名为 `policy-overlay.json.corrupt-<时间>` 保留）。覆盖文件由插件管理，不要手工编辑。
+
+校验和只能发现意外修改，不是防止有本机文件写权限的攻击者的措施：这类攻击者能同时改文件和校验和，但仍过不了加载时对域名、路径和数值的重新校验。
 
 ## 下载落盘
 
@@ -513,6 +548,7 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
         # proxyBypass: example.com,.internal.test
         # downloadDir: D:/dsh/downloads        # 绝对路径；默认 $DSH_HOME/data/browser/downloads
         downloadMaxBytes: 104857600            # 单个下载上限，默认 100 MiB
+        allowPrivateHosts: false # true 时 agent 才能把 localhost/.internal/内网 IP 写进 allowedDomains
         storageStatePath: ''     # Playwright 登录态 JSON（复用已登录会话）
         authProfiles:
           forum:
@@ -533,6 +569,7 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
 
 这些字段同时进入 Host settings 命名空间和专用可视化卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`，可调整工具自由度、Playwright/Patchright、OpenCLI、`usagePolicy`、自动化资产策略与限域登录态；同一卡片包含候选提示、脚本列表、JSON 编辑器、测试、激活和归档操作。
 
+- **策略覆盖层分区**：显示覆盖层版本、告警、每个 profile 与限流项的来源标记（基线 / 来自覆盖层 / 覆盖层新建）、最近 20 条审计，以及“清除覆盖 / 回滚到基线”按钮。上面的 `authProfiles` / `usagePolicy` 编辑框始终是基线；覆盖层优先，所以这里的生效值可能与框里不同。
 - **卡片覆盖全部公开配置字段**：`viewportMode` 等上下文选项在“浏览器上下文”分区，`downloadDir` / `downloadMaxBytes` 在“登录态与高级设置”分区；`maxSessions`（会话上限）和 `args`（Chromium 启动参数，JSON 字符串数组）在“浏览器运行时”分区；`authProfiles`、`rulePacks` 结构较复杂，卡片里不提供表单，只列出名称并注明“在配置文件中编辑”。“调用缓冲 JSON”和“自动化资产策略 JSON”的提示由代码生成，列出全部可用键名。
 - **测试输入 JSON** 填一个对象是在当前页面运行一次；填 2 到 5 个对象组成的数组是逐组在全新上下文中回放（等价于 `inputSets`）。卡片逐组显示结果和 `PARAMETERIZATION_SUSPECT` 警告；声明了输入的资产在通过凭据覆盖的输入组数不足 `minInputSetsForActivation` 时，“激活”按钮旁给出说明并保持禁用。
 - **新建 recipe** 从 v2 模板开始（带 `schemaVersion: 2`、locator 步骤、`inputSchema` 和 `postconditions` 占位），模板本身可以直接保存。v1 recipe 有“转换为 v2”按钮：生成新草稿并选中，显示仍取第一个匹配的步骤数（`pendingDisambiguation`），原资产不变；有未保存修改时会先确认。

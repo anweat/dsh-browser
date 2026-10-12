@@ -3,6 +3,7 @@ import type { Context } from './context-types.ts';
 import { type BrowserCardState } from './form.ts';
 import type { PromptTextFieldId } from './prompts-form.ts';
 import { type PromptsStatusState } from './prompts-status-client.ts';
+import { type PolicyStatusState } from './policy-status-client.ts';
 import { SETTINGS_NAMESPACE } from './settings-namespace.ts';
 import { type AutomationAssetsState } from './automation-assets-client.ts';
 import type { AutomationAsset, AutomationAssetStatus } from '../automation-assets.ts';
@@ -26,6 +27,9 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
     refreshPromptsStatus: () => void;
     exportPromptDefaults: () => Promise<void>;
     hidePromptDefaults: () => void;
+    usePolicyStatus: <R>(selector: (snapshot: PolicyStatusState) => R) => R;
+    refreshPolicyStatus: () => void;
+    clearPolicyOverlay: (scope?: 'all' | 'usagePolicy' | 'authProfile', id?: string) => Promise<void>;
     useAutomationAssets: <R>(selector: (snapshot: AutomationAssetsState) => R) => R;
     refreshAutomationAssets: () => void;
     selectAutomationAsset: (id?: string) => void;

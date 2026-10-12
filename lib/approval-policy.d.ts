@@ -11,6 +11,15 @@
  */
 import { type AnyRecipeStep } from './automation.ts';
 import { type AutomationMode } from './freedom.ts';
+/** What `BrowserService.previewPolicyChange` reports for a policy action, so the approval prompt can show the diff. */
+export type PolicyPreview = {
+    ok: true;
+    direction: 'tighten' | 'loosen' | 'none';
+    lines: string[];
+} | {
+    ok: false;
+    message: string;
+};
 export type BrowserPolicyDecision = {
     kind: 'allow';
 } | {
@@ -47,7 +56,7 @@ export declare function recipeStepsDecision(name: string, steps: readonly AnyRec
  * @param draftSteps - for `automation.develop` test of a recipe, the steps the draft would replay.
  * @param asset - for the same two, the asset itself, so the approval prompt names it instead of showing a bare id.
  */
-export declare function browserPolicyDecision(name: string, args: unknown, mode?: AutomationMode, assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[], asset?: AssetRef): BrowserPolicyDecision;
+export declare function browserPolicyDecision(name: string, args: unknown, mode?: AutomationMode, assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[], asset?: AssetRef, policyPreview?: PolicyPreview): BrowserPolicyDecision;
 /**
  * The decision the Host hook returns for a resolved browser action, in this order:
  *

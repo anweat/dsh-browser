@@ -28,6 +28,7 @@ import { type UserscriptValidation } from './scripts.ts';
 import { type AutomationMode } from './freedom.ts';
 import { type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts';
 import { UsageGovernor } from './usage-policy.ts';
+import { type AuditEntry, type ChangeMeta, type Direction, type PolicyChange, type PolicyDiff } from './policy-overlay.ts';
 import { type BrowserTarget } from './locator.ts';
 import { SessionJournal } from './journal.ts';
 import { type ObserveRegion, type ObserveSection } from './observe.ts';
@@ -318,6 +319,8 @@ export declare class BrowserService {
     private clock;
     private readonly authProfiles;
     private readonly usageGovernor;
+    /** The managed policy overlay merged over the configured authProfiles and usagePolicy (see policy-overlay.ts). */
+    private readonly policyStore;
     private opencliCatalogCache?;
     /** Per-session exploration journals (see src/journal.ts). Released with the session, never written to disk. */
     private readonly journals;
@@ -325,6 +328,37 @@ export declare class BrowserService {
     private readonly sessionLimit;
     constructor(config: ResolvedConfig);
     available(): boolean;
+    /** Pick up an overlay file that changed on disk (another process, the panel). Cheap: one stat. */
+    private refreshPolicy;
+    private applyEffectivePolicy;
+    /** What a policy change would do, without doing it; `ok: false` carries why it is invalid. */
+    previewPolicyChange(change: PolicyChange): {
+        ok: true;
+        direction: Direction;
+        lines: string[];
+    } | {
+        ok: false;
+        message: string;
+    };
+    /**
+     * Apply a policy change: validated, written atomically with an audit entry, effective at once. Sessions whose
+     * context holds a login state this change took away are closed, so a revoked domain stops working immediately
+     * instead of at the next page load.
+     */
+    changePolicy(change: PolicyChange, meta: ChangeMeta): Promise<{
+        revision: number;
+        direction: Direction;
+        diff: PolicyDiff;
+        audit: AuditEntry;
+        sessionsClosed: number;
+        before: Record<string, unknown>;
+        after: Record<string, unknown>;
+    }>;
+    /** The effective policy, where each value comes from, and the newest audit entries. */
+    policyReport(opts?: {
+        auditLimit?: number;
+        viewerSession?: string;
+    }): Record<string, unknown>;
     /**
      * This session's exploration journal, created on first use. It outlives `target.close` (the session is
      * still the same) and is released when the session is evicted or the service closes. A session that never

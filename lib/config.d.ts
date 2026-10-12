@@ -86,6 +86,12 @@ export interface Config {
     autoInstall: boolean;
     /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
     snapshotDir?: string;
+    /**
+     * Whether a policy change made through the agent actions may name localhost, `.local`/`.internal` names and
+     * loopback or private-network IPv4 addresses as allowed domains. Off by default; cloud metadata and link-local
+     * addresses are refused regardless.
+     */
+    allowPrivateHosts?: boolean;
     /** Directory the downloads of `target.download` and browser-triggered downloads are saved to; defaults to $DSH_HOME/data/browser/downloads. */
     downloadDir?: string;
     /** Largest single download in bytes; a bigger one is aborted and removed. Default 100 MiB. */
@@ -143,6 +149,13 @@ export interface ResolvedConfig {
     snapshotDir: string;
     downloadDir: string;
     downloadMaxBytes: number;
+    allowPrivateHosts: boolean;
+    /** `$DSH_HOME/data/browser`: where the plugin keeps the policy overlay and its auth state directory. */
+    dataDir: string;
+    /** The only directory an agent-set storageStatePath may live in. */
+    authDir: string;
+    /** The managed policy overlay file (see policy-overlay.ts). */
+    policyOverlayFile: string;
     /** Context options applied to every context the plugin creates (viewport, user agent, locale, time zone, proxy). */
     contextDefaults: ContextOptions;
     /** Settings that were read but have no effect, shown in `runtime.status`. */
@@ -153,6 +166,7 @@ export interface ResolvedConfig {
     maxSessions: number;
 }
 export declare function defaultSnapshotDir(): string;
+export declare function defaultBrowserDataDir(): string;
 export declare function defaultDownloadDir(): string;
 /** `downloadDir` must be an absolute path: a relative one would depend on the host process's working directory. */
 export declare function resolveDownloadDir(value: unknown): string;

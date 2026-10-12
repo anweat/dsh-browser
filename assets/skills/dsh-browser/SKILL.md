@@ -72,11 +72,11 @@ A wrong argument returns `INVALID_ARGS` with the schema: fix and resend.
 | code | what to do |
 |---|---|
 | `INVALID_ARGS` | fix the arguments using the attached schema |
-| `LOCATOR_NOT_FOUND` | read the page, adjust the locator, `act.wait` for dynamic content; nothing was done |
+| `LOCATOR_NOT_FOUND` | adjust the locator, `act.wait` for dynamic content; nothing was done |
 | `LOCATOR_AMBIGUOUS` | several matched, nothing was done: choose from `error.candidates` |
-| `NOT_ACTIONABLE` | hidden, disabled, or covered: wait or dismiss the overlay; nothing was done |
+| `NOT_ACTIONABLE` | hidden, disabled, or covered: wait or dismiss the overlay |
 | `TARGET_CLOSED` | call `target.open` again |
-| `TARGET_STALE` | the page navigated (also when a read hit a navigation twice); nothing was done: `observe.read` again, use the new `generation` |
+| `TARGET_STALE` | the page navigated; nothing was done: `observe.read` again, use the new `generation` |
 | `DEADLINE` | with `outcome_unknown` it may have taken effect: verify with `observe.read`, never resubmit blindly |
 | `OUTCOME_UNKNOWN` | a page-changing step timed out mid-way: check with `observe.read` before any retry |
 | `VALIDATION_FAILED` | the steps ran but an assert or postcondition did not hold: read the page, fix the recipe; do not repeat submits |
@@ -84,7 +84,7 @@ A wrong argument returns `INVALID_ARGS` with the schema: fix and resend.
 | `CANCELLED` | stopped; steps that already ran stay done (see `effects`) |
 | `POLICY_DENIED` / `CAPABILITY_UNAVAILABLE` | not allowed or not set up here (Chromium missing: `runtime.install`) |
 
-Recipe runs (`automation.run_recipe`, `automation.run`, `automation.develop` test) return the whole run in `result` even when `ok` is false: `executionStatus`, `validationStatus` (`not_checked`, `passed`, `failed`), `completedSteps`, `failedStep`, `effects` (`none`, `observed`, `unknown`), `outputs`. `completed` with `not_checked` means the steps ran, not that the result is right; nothing is rolled back (`references/recipes.md`).
+Recipe runs (`automation.run_recipe`, `automation.run`, `automation.develop` test) return the whole run in `result` even if `ok` is false: `executionStatus`, `validationStatus` (`not_checked`, `passed`, `failed`), `completedSteps`, `failedStep`, `effects` (`none`, `observed`, `unknown`), `outputs`. `completed` with `not_checked` means the steps ran, not that the result is right; nothing is rolled back (`references/recipes.md`).
 
 After a submit, purchase, or other irreversible step, confirm the result on the page (confirmation text, new URL, changed list) before saying it worked.
 
@@ -95,7 +95,8 @@ After a submit, purchase, or other irreversible step, confirm the result on the 
 3. Read-only extraction: `script.catalog`, `script.run_builtin`, a userscript (`references/userscripts.md`).
 4. Page interaction: `target.open`, `observe.read`, `act.*` (`references/observe.md`).
 5. Bounded multi-step work: `automation.run_recipe` (`references/recipes.md`); `crawl.crawl` for anonymous crawls.
-6. A file on disk (`target.download`), or another window size, language, or proxy: `references/files.md`.
+6. A file on disk, or another window size, language, or proxy: `references/files.md`.
+7. A host outside the login scope, or throttling: `references/policy.md`.
 
 ## 6. Turning a success into an asset
 

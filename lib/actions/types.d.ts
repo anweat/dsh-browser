@@ -39,7 +39,7 @@ export type ParamSchema = Record<string, ParamNode>;
  * How an action is approved. The classes mirror the pre-registry rules in
  * `approval-policy.ts`; the policy interprets them per automationMode.
  */
-export type ApprovalClass = 'none' | 'interaction' | 'install' | 'upload' | 'download' | 'context-options' | 'evaluate' | 'userscript' | 'opencli' | 'recipe' | 'asset-run' | 'asset-develop';
+export type ApprovalClass = 'none' | 'interaction' | 'install' | 'upload' | 'download' | 'context-options' | 'policy' | 'evaluate' | 'userscript' | 'opencli' | 'recipe' | 'asset-run' | 'asset-develop';
 export interface ActionExample {
     args: Record<string, unknown>;
     note?: string;
