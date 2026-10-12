@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { domainToASCII } from 'node:url'
-import { ActionArgError } from './actions/types.ts'
+import { ActionArgError, ActionUnavailableError } from './actions/types.ts'
 import type { AuthProfileConfig } from './auth-profiles.ts'
 import type { UsagePolicy } from './usage-policy.ts'
 import { USAGE_POLICY_BOUNDS, USAGE_POLICY_KEYS } from './policy-keys.ts'
@@ -556,7 +556,14 @@ export class PolicyOverlayStore {
 
   /** Compute a change without writing anything. Throws {@link ActionArgError} for an invalid change. */
   plan(change: PolicyChange): PlannedChange {
-    if (this.problem && change.kind !== 'reset') throw new ActionArgError('the policy overlay file is unreadable and is being ignored; clear it with runtime.reset_policy before changing the policy', this.problem)
+    // Not INVALID_ARGS: the arguments are fine, the stored overlay is what is broken. CAPABILITY_UNAVAILABLE ("not set up
+    // here") with a hint that names the way out.
+    if (this.problem && change.kind !== 'reset') {
+      throw new ActionUnavailableError(
+        `the policy overlay file is unreadable and is being ignored (the baseline applies), so the policy cannot be changed: ${this.problem}`,
+        'Nothing was changed. Call runtime.reset_policy {scope:"all", reason:...} (or ask the user to use "Clear overlay" in the settings card) to move the bad file aside, then repeat this change.',
+      )
+    }
     const before = this.effective()
     const next: PolicyOverlay = { ...this.overlay, authProfiles: Object.assign(nullRecord<OverlayProfile | null>(), this.overlay.authProfiles), usagePolicy: { ...this.overlay.usagePolicy } }
     const env: DomainEnv = { allowPrivateHosts: this.options.allowPrivateHosts }

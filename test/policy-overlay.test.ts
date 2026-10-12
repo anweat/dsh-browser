@@ -8,6 +8,7 @@ import {
   isPublicSuffix, normalizeAllowedDomain, normalizeAllowedDomains, type Baseline, type PolicyOverlay,
 } from '../src/policy-overlay.ts'
 import { ActionArgError } from '../src/actions/types.ts'
+import { mapError } from '../src/actions/errors.ts'
 import { resolveUsagePolicy } from '../src/usage-policy.ts'
 
 const PUBLIC = { allowPrivateHosts: false }
@@ -286,7 +287,12 @@ test('a file that does not parse, was edited, or holds a forbidden value is igno
   const bad = forge(o => { o.authProfiles.forum.allowedDomains = ['com'] })
   assert.deepEqual(effectiveDomains(bad), baselineDomains, 'not fail-open: the baseline applies')
   // Changing the policy on a broken file is refused until it is cleared.
-  assert.throws(() => bad.apply({ kind: 'setUsagePolicy', values: { minDelayMs: 2000 } }, META), /unreadable/)
+  assert.throws(() => bad.apply({ kind: 'setUsagePolicy', values: { minDelayMs: 2000 } }, META), (error: Error) => {
+    assert.ok(!(error instanceof ActionArgError), 'not an argument problem')
+    assert.equal(mapError(error, 'runtime.set_usage_policy').code, 'CAPABILITY_UNAVAILABLE')
+    assert.match(mapError(error, 'runtime.set_usage_policy').hint!, /runtime\.reset_policy/)
+    return /unreadable/.test(error.message)
+  })
   const cleared = bad.apply({ kind: 'reset', scope: 'all' }, META)
   assert.equal(bad.warning, undefined)
   assert.ok(fs.readdirSync(path.dirname(file)).some(name => name.startsWith('policy-overlay.json.corrupt-')), 'the bad file is kept for inspection')
