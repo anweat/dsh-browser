@@ -200,6 +200,18 @@ export declare const zh: {
     readonly policyUnavailable: "暂时读不到覆盖层状态，请稍后刷新。";
     readonly policyUnrestrictedNote: "覆盖文件是插件管理的文件，不要手工编辑：被改动或无法解析时会被整体忽略（回退到基线）并在 runtime.status 的 runtimeWarnings 里提示。";
     readonly configWarnings: "当前生效的配置里有被忽略的值（已回退到默认）：";
+    readonly properties: "默认参数（properties）";
+    readonly propertiesHint: "运行时、窗口、语言、代理、目录与限额等“默认值”都在这里：每个新 context 从这些参数起步；agent 每次操作时复制它们，只改任务需要改的部分。";
+    readonly propertiesEditor: "默认参数（每行 key = value）";
+    readonly propertiesFormat: "格式：每行 `key = value`，值取第一个 = 之后的内容（可用一对双引号包裹）；# 开头为注释，注释行显示当前生效的值。去掉某行或把它注释掉即恢复默认；数组写成一行 JSON，例如 args = [\"--disable-gpu\"]。没有行内注释。";
+    readonly propertiesOverridden: "已覆盖的默认参数";
+    readonly propertiesNoneOverridden: "没有覆盖，全部使用部署值或内置默认。";
+    readonly promptsStartFromDefault: "以默认文本为起点编辑";
+    readonly promptsDefaultFull: "查看完整默认文本";
+    readonly promptsSameAsDefault: "与默认文本相同，等同于没有覆盖：不会被保存，以后默认文本升级时会自动跟进。";
+    readonly promptsNoBodyFile: "（未设置：使用插件内置的 SKILL.md 正文）";
+    readonly promptsNoAppend: "（未追加：skill 正文原样使用）";
+    readonly promptsDefaultLoading: "（正在读取默认文本…）";
     readonly verbose: "详细日志";
     readonly verboseHint: "输出启动和诊断信息。";
     readonly reset: "恢复部署值";

@@ -77,5 +77,9 @@ export declare function sameContextOptions(a: ContextOptions, b: ContextOptions)
 export declare function differingContextOptions(applied: ContextOptions, wanted: ContextOptions): string[];
 /** The `newContext()` arguments for a set of options: only the fields that are set, so an unset field keeps today's behaviour. */
 export declare function toPlaywrightOptions(options: ContextOptions): Record<string, unknown>;
+/** Which parameter each value of an applied set comes from: this call, an earlier call of the session (carried by its context), or the defaults. */
+export declare function contextSources(applied: ContextOptions, defaults: ContextOptions, call: ContextOptions): Record<string, 'call' | 'session' | 'default'>;
+/** One line for the action detail: the context defaults in force, so a caller changes only what it needs. */
+export declare function describeDefaultsLine(defaults: ContextOptions): string;
 /** The options as the model sees them in a result: only what was actually set. */
 export declare function describeContextOptions(options: ContextOptions): Record<string, unknown>;

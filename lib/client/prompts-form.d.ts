@@ -45,6 +45,20 @@ export declare const PROMPT_TEXT_FIELDS: readonly [{
     readonly multiline: true;
 }];
 export type PromptTextFieldId = typeof PROMPT_TEXT_FIELDS[number]['id'];
+/** The plugin's own text for the card's prompt controls, taken from the default export (`promptsDumpText`). */
+export interface PromptDefaults {
+    /** Default text by control; a control with no default text (a body file, an appended text) is absent. */
+    texts: Partial<Record<PromptTextFieldId, string>>;
+    /** The default groups, actions and errorHints, the shape the JSON box takes. */
+    extras: Json;
+}
+/** Read the default export's JSON into {@link PromptDefaults}; undefined when it is not the expected shape. */
+export declare function defaultsFromJson(json: string): PromptDefaults | undefined;
+/**
+ * `extras` without the entries that equal the plugin's default: copying the whole default into the box and changing
+ * one line must save one override, not freeze every other text at today's wording.
+ */
+export declare function pruneDefaultExtras(extras: Json, defaults: Json): Json;
 /** The members the JSON box edits; the other controls own the rest. */
 export declare const PROMPT_EXTRA_KEYS: readonly ["groups", "actions", "errorHints"];
 export declare function getAt(root: Json, path: readonly string[]): unknown;

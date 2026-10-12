@@ -81,6 +81,8 @@ export interface InteractiveState {
     closedPage?: true;
     /** target.open only: the context options in effect, when the call set any or the context was rebuilt. */
     contextOptions?: Record<string, unknown>;
+    /** target.open only: where each value of `contextOptions` comes from: `call` (this call), `session` (an earlier call kept by the context), `default` (configuration). */
+    contextSources?: Record<string, 'call' | 'session' | 'default'>;
     /** target.open only: the session's context was replaced because the call needed different options (or login state); its pages are gone. */
     contextRebuilt?: {
         changed: string[];

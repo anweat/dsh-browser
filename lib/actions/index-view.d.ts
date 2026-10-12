@@ -23,6 +23,8 @@ export interface IndexEnvironment {
     };
     /** Deployment overrides of the text (`prompts` configuration); absent means the built-in text everywhere. */
     prompts?: ResolvedPrompts;
+    /** Per-action line about the defaults in force (target.open, target.download), shown in the action detail only. */
+    defaultsLines?: Readonly<Record<string, string>>;
 }
 /** The fallback guide shown at the root when no skill service is present (kept under ~300 tokens). */
 export declare const COMPACT_GUIDE: string;
