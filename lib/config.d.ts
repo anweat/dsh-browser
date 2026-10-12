@@ -9,6 +9,12 @@ import { type AutomationMode, type ToolSurface } from './freedom.ts';
 import { type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts';
 import { type PromptsSource } from './prompts.ts';
 import { type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts';
+import { type ContextOptions, type ViewportMode } from './context-options.ts';
+/** Schema keys that are not settings (see {@link MISPLACED_KEYS}); the settings card has no control for them. */
+export declare const MISPLACED_CONFIG_KEYS: readonly string[];
+export declare const DEFAULT_DOWNLOAD_MAX_BYTES: number;
+/** Upper bound of downloadMaxBytes: 10 GiB. */
+export declare const MAX_DOWNLOAD_BYTES_LIMIT: number;
 export declare const BROWSER_RUNTIMES: readonly ["playwright", "patchright"];
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number];
 export declare function resolveBrowserRuntime(value: unknown): BrowserRuntime;
@@ -80,6 +86,29 @@ export interface Config {
     autoInstall: boolean;
     /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
     snapshotDir?: string;
+    /** Directory the downloads of `target.download` and browser-triggered downloads are saved to; defaults to $DSH_HOME/data/browser/downloads. */
+    downloadDir?: string;
+    /** Largest single download in bytes; a bigger one is aborted and removed. Default 100 MiB. */
+    downloadMaxBytes?: number;
+    /**
+     * Viewport of every context the plugin creates: `window` (default, Playwright's own default size),
+     * `720p` (1280x720), `1080p` (1920x1080) or `custom` (viewportWidth x viewportHeight).
+     */
+    viewportMode?: ViewportMode;
+    /** Custom viewport width in CSS pixels; only read with viewportMode=custom. */
+    viewportWidth?: number;
+    /** Custom viewport height in CSS pixels; only read with viewportMode=custom. */
+    viewportHeight?: number;
+    /** User agent of every context; unset keeps the browser's own. */
+    userAgent?: string;
+    /** BCP 47 locale of every context (en-US, zh-CN); unset keeps the browser's own. */
+    locale?: string;
+    /** IANA time zone of every context (Asia/Shanghai); unset keeps the machine's. */
+    timezoneId?: string;
+    /** Proxy of every context: `http://host:port`, `socks5://host:port`. No account or password is supported. */
+    proxyServer?: string;
+    /** Comma-separated hosts that skip the proxy (`example.com,.internal.test`); needs proxyServer. */
+    proxyBypass?: string;
     verbose: boolean;
     /** Optional remote debugging port to expose CDP for external tools (e.g. 9222). */
     cdpPort?: number;
@@ -112,10 +141,20 @@ export interface ResolvedConfig {
     prompts: PromptsSource;
     autoInstall: boolean;
     snapshotDir: string;
+    downloadDir: string;
+    downloadMaxBytes: number;
+    /** Context options applied to every context the plugin creates (viewport, user agent, locale, time zone, proxy). */
+    contextDefaults: ContextOptions;
+    /** Settings that were read but have no effect, shown in `runtime.status`. */
+    configWarnings: string[];
     verbose: boolean;
     cdpPort?: number;
     args: string[];
     maxSessions: number;
 }
 export declare function defaultSnapshotDir(): string;
+export declare function defaultDownloadDir(): string;
+/** `downloadDir` must be an absolute path: a relative one would depend on the host process's working directory. */
+export declare function resolveDownloadDir(value: unknown): string;
+export declare function resolveDownloadMaxBytes(value: unknown): number;
 export declare function resolveConfig(config: Config): ResolvedConfig;

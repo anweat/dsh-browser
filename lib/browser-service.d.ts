@@ -31,6 +31,8 @@ import { UsageGovernor } from './usage-policy.ts';
 import { type BrowserTarget } from './locator.ts';
 import { SessionJournal } from './journal.ts';
 import { type ObserveRegion, type ObserveSection } from './observe.ts';
+import { type CallContextInput, type ContextOptions } from './context-options.ts';
+import { type DownloadRecord } from './downloads.ts';
 export interface RenderRule {
     hostname: string;
     contentSelectors: string[];
@@ -76,6 +78,13 @@ export interface InteractiveState {
     screenshotPath?: string;
     /** The page the action ran on closed itself (a popup's own close button): url/title/text describe the page the session fell back to, or are empty. */
     closedPage?: true;
+    /** target.open only: the context options in effect, when the call set any or the context was rebuilt. */
+    contextOptions?: Record<string, unknown>;
+    /** target.open only: the session's context was replaced because the call needed different options (or login state); its pages are gone. */
+    contextRebuilt?: {
+        changed: string[];
+        note: string;
+    };
 }
 /** The page state after a recipe, plus what the run did ({@link RecipeRunResult}). */
 export interface RecipeServiceResult extends InteractiveState, RecipeRunResult {
@@ -99,6 +108,22 @@ export interface EvaluateResult {
 }
 export interface FileUploadResult extends InteractiveState {
     files: string[];
+}
+/** The outcome of `target.download`: where the file is and what it is. */
+export interface DownloadResult {
+    id: string;
+    /** The URL that was asked for. */
+    url: string;
+    /** The URL the bytes finally came from (after redirects), when it differs. */
+    finalUrl?: string;
+    /** Absolute path of the saved file, inside `downloadDir`. */
+    path: string;
+    /** The saved file's name (may carry a `-1` style suffix when the name was taken). */
+    filename: string;
+    bytes: number;
+    sha256: string;
+    suggestedFilename: string;
+    source: 'request' | 'browser';
 }
 export type { BrowserFrameSpec, BrowserLocatorSpec, BrowserTarget } from './locator.ts';
 export interface BrowserConsoleRecord {
@@ -170,6 +195,12 @@ export interface BrowserStatus {
     externalUserscriptPolicy: 'deny' | 'ask' | 'allow';
     pageEvaluatePolicy: 'deny' | 'ask' | 'allow';
     fileUploadPolicy: 'deny' | 'ask' | 'allow';
+    downloadPolicy: 'deny' | 'ask' | 'allow';
+    /** Directory downloads are saved to, and the size cap of one download. */
+    downloadDir: string;
+    downloadMaxBytes: number;
+    /** Context options applied to every context (viewport, user agent, locale, time zone, proxy server); only the ones that are set. */
+    contextDefaults: Record<string, unknown>;
     opencliRunPolicy: 'deny' | 'ask' | 'allow';
     chromiumInstalled: boolean;
     chromiumExecutablePath?: string;
@@ -222,6 +253,16 @@ interface SessionState {
     generationClock: number;
     profile?: ResolvedAuthProfile;
     rulePack?: ResolvedRulePack;
+    /** Creation options of the live context (viewport, user agent, locale, time zone, proxy); compared on the next target.open. */
+    contextOptions?: ContextOptions;
+    /** Downloads this session saved or failed to save, newest last, capped. Memory only; the files are on disk. */
+    downloads: DownloadRecord[];
+    /** Counter behind the `d1`, `d2`, ... download ids of this session. */
+    nextDownload: number;
+    /** Save jobs of browser download events, so target.download can wait for the one its navigation triggered. */
+    downloadJobs: WeakMap<object, Promise<DownloadRecord>>;
+    /** Filename a running target.download wants for the download its navigation triggers (consumed by that one event). */
+    downloadFilename?: string;
     captureConsole: boolean;
     captureNetwork: boolean;
     capturedConsole: BrowserConsoleRecord[];
@@ -342,6 +383,16 @@ export declare class BrowserService {
     /** Run `playwright install chromium` from the bundled playwright CLI. */
     installChromium(): Promise<CliResult>;
     private navigate;
+    /**
+     * `newContext()` arguments that do not depend on the login state: the configured viewport, user agent, locale,
+     * time zone and proxy (or the per-call override that replaced them), plus downloads for interactive contexts.
+     *
+     * Proxy: Playwright applies `proxy` at context level on its own. Measured on Chromium 1243 (headless shell) with
+     * Playwright 1.62 and Patchright 1.62, a context created with `proxy` and a browser launched WITHOUT any launch
+     * `proxy` sent both page navigation and `context.request` through the proxy, so no `proxy: { server: 'per-context' }`
+     * launch option is set. (Chromium bypasses the proxy for loopback hosts regardless; that is the browser's rule.)
+     */
+    private contextCreationOptions;
     private transientContext;
     private persistAndClose;
     render(url: string, rules: readonly RenderRule[], opts?: {
@@ -416,6 +467,13 @@ export declare class BrowserService {
      */
     private ensureActivePage;
     /**
+     * {@link ensureActivePage} plus what it had to do to the session's context. `context` carries the per-call creation
+     * options of `target.open`: an option the call leaves out keeps what the live context has (a context is only
+     * rebuilt for a value that is different, never because a later call said nothing), and a new context starts from
+     * the configured defaults. `rebuilt` names what differed when a live page was closed to make room for the new context.
+     */
+    private ensurePage;
+    /**
      * Add a page to the session's list and wire its capture and close handling.
      * Idempotent: the context 'page' event and the explicit call both land here.
      */
@@ -443,7 +501,7 @@ export declare class BrowserService {
         rulePack?: string;
         capture?: readonly ('console' | 'network')[];
         session?: string;
-    }): Promise<InteractiveState>;
+    } & CallContextInput): Promise<InteractiveState>;
     click(target: BrowserTarget, opts?: {
         expectGeneration?: number;
         timeoutMs?: number;
@@ -557,6 +615,38 @@ export declare class BrowserService {
         session?: string;
     }): Promise<Record<string, unknown>>;
     private observeOnce;
+    private pushDownload;
+    private failedDownload;
+    /**
+     * Save one browser download event (navigation to an attachment, a click, a script-created link) into the
+     * download directory and record the outcome in the session that owns the page. Never rejects: a failure is a
+     * `failed` record with the partial file removed, so nothing half-written is ever reported as a result.
+     */
+    private saveBrowserDownload;
+    /**
+     * `target.download`: save a URL into the download directory.
+     *
+     * First an HTTP request made through the session's own context (its cookies and login state, its proxy and
+     * user agent); if that does not produce bytes, the URL is opened in a throwaway page of the same context and the
+     * attachment download that navigation triggers is captured. A request that returns nothing is an error, never a
+     * zero-byte file. The session's own page is not navigated.
+     */
+    download(url: string, opts?: {
+        filename?: string;
+        timeoutMs?: number;
+        signal?: AbortSignal;
+        session?: string;
+    }): Promise<DownloadResult>;
+    /** `inspect.downloads`: this session's download records (newest last); reading never creates a session bucket. */
+    downloadRecords(opts?: {
+        limit?: number;
+        clear?: boolean;
+        session?: string;
+    }): {
+        downloadDir: string;
+        records: DownloadRecord[];
+        total: number;
+    };
     consoleMessages(opts?: {
         level?: string;
         limit?: number;
