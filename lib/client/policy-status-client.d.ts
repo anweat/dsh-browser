@@ -8,6 +8,8 @@ export interface PolicyReportView {
     warning?: string;
     allowPrivateHosts: boolean;
     authDir: string;
+    /** Problems the running plugin found in its configuration (values that were dropped and why). */
+    configWarnings?: string[];
     authProfiles: {
         id: string;
         origin: 'baseline' | 'overlay-changed' | 'overlay-created';

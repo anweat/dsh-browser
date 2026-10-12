@@ -10,11 +10,11 @@ import { type UsagePolicy, type UsagePolicyInput } from './usage-policy.ts';
 import { type PromptsSource } from './prompts.ts';
 import { type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts';
 import { type ContextOptions, type ViewportMode } from './context-options.ts';
+import { MAX_DOWNLOAD_BYTES_LIMIT } from './config-rules.ts';
+export { MAX_DOWNLOAD_BYTES_LIMIT };
 /** Schema keys that are not settings (see {@link MISPLACED_KEYS}); the settings card has no control for them. */
 export declare const MISPLACED_CONFIG_KEYS: readonly string[];
 export declare const DEFAULT_DOWNLOAD_MAX_BYTES: number;
-/** Upper bound of downloadMaxBytes: 10 GiB. */
-export declare const MAX_DOWNLOAD_BYTES_LIMIT: number;
 export declare const BROWSER_RUNTIMES: readonly ["playwright", "patchright"];
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number];
 export declare function resolveBrowserRuntime(value: unknown): BrowserRuntime;
@@ -94,7 +94,7 @@ export interface Config {
     allowPrivateHosts?: boolean;
     /** Directory the downloads of `target.download` and browser-triggered downloads are saved to; defaults to $DSH_HOME/data/browser/downloads. */
     downloadDir?: string;
-    /** Largest single download in bytes; a bigger one is aborted and removed. Default 100 MiB. */
+    /** Largest single download in bytes; a bigger one is stopped and removed. Default 100 MiB. */
     downloadMaxBytes?: number;
     /**
      * Viewport of every context the plugin creates: `window` (default, Playwright's own default size),
@@ -168,7 +168,16 @@ export interface ResolvedConfig {
 export declare function defaultSnapshotDir(): string;
 export declare function defaultBrowserDataDir(): string;
 export declare function defaultDownloadDir(): string;
-/** `downloadDir` must be an absolute path: a relative one would depend on the host process's working directory. */
-export declare function resolveDownloadDir(value: unknown): string;
-export declare function resolveDownloadMaxBytes(value: unknown): number;
+/**
+ * `downloadDir` must be an absolute path: a relative one would depend on the host process's working directory.
+ * A wrong value falls back to the default and is reported, never thrown: see {@link resolveConfig}.
+ */
+export declare function resolveDownloadDir(value: unknown): {
+    dir: string;
+    warning?: string;
+};
+export declare function resolveDownloadMaxBytes(value: unknown): {
+    bytes: number;
+    warning?: string;
+};
 export declare function resolveConfig(config: Config): ResolvedConfig;

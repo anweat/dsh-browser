@@ -199,6 +199,7 @@ export declare const zh: {
     readonly policyClear: "清除覆盖 / 回滚到基线";
     readonly policyUnavailable: "暂时读不到覆盖层状态，请稍后刷新。";
     readonly policyUnrestrictedNote: "覆盖文件是插件管理的文件，不要手工编辑：被改动或无法解析时会被整体忽略（回退到基线）并在 runtime.status 的 runtimeWarnings 里提示。";
+    readonly configWarnings: "当前生效的配置里有被忽略的值（已回退到默认）：";
     readonly verbose: "详细日志";
     readonly verboseHint: "输出启动和诊断信息。";
     readonly reset: "恢复部署值";

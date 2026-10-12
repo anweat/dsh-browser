@@ -11,15 +11,7 @@
  * configuration or in a tool call, and neither is a place for secrets.
  * @module dsh-browser/context-options
  */
-export declare const VIEWPORT_MODES: readonly ["window", "720p", "1080p", "custom"];
-export type ViewportMode = typeof VIEWPORT_MODES[number];
-/** Bounds of a custom viewport, in CSS pixels. */
-export declare const VIEWPORT_LIMITS: {
-    readonly minWidth: 200;
-    readonly maxWidth: 7680;
-    readonly minHeight: 200;
-    readonly maxHeight: 4320;
-};
+export { VIEWPORT_MODES, VIEWPORT_LIMITS, checkViewport, checkUserAgent, checkLocale, checkTimezone, checkProxyServer, checkProxyBypass, type ViewportMode, } from './config-rules.ts';
 /** The options a context is created with. Every field is optional; an absent field keeps Playwright's default. */
 export interface ContextOptions {
     viewport?: {
@@ -47,24 +39,15 @@ export interface ContextOptionsInput {
 }
 /** A configuration problem that is not fatal: the value is ignored and this is shown in `runtime.status`. */
 export type ConfigWarning = string;
-type Fail = (message: string) => never;
-export declare function checkViewport(width: unknown, height: unknown, label: string, fail: Fail): {
-    width: number;
-    height: number;
-};
-export declare function checkUserAgent(value: unknown, label: string, fail: Fail): string;
-export declare function checkLocale(value: unknown, label: string, fail: Fail): string;
-export declare function checkTimezone(value: unknown, label: string, fail: Fail): string;
+/** A short, safe rendering of a configured value for a warning (credentials in a proxy URL are masked). */
+export declare function summarizeValue(value: unknown): string;
+/** The warning for a configuration key whose value was refused: which key, what was there, why, what applies instead. */
+export declare function configProblem(key: string, value: unknown, reason: string, fallback: string, fix: string): ConfigWarning;
 /**
- * A proxy server address: `http://host:port`, `https://...`, `socks5://...` or `socks4://...`; a bare
- * `host:port` means http. Anything carrying credentials is refused.
- */
-export declare function checkProxyServer(value: unknown, label: string, fail: Fail): string;
-export declare function checkProxyBypass(value: unknown, label: string, fail: Fail): string;
-/**
- * Read the context defaults from the configuration. A wrong value throws a message that names the key;
- * a combination that merely has no effect (a custom size under another mode, a bypass list without a proxy)
- * is returned as a warning and ignored.
+ * Read the context defaults from the configuration. This never throws: a value that is refused is dropped, the key
+ * falls back to its default (the browser's own behaviour), and the reason is returned as a warning that names the
+ * key, the value and how to fix it. A configuration problem must not stop the plugin from loading, because a plugin
+ * that does not load also takes its settings card with it.
  */
 export declare function resolveContextDefaults(input: ContextOptionsInput): {
     options: ContextOptions;
@@ -96,4 +79,3 @@ export declare function differingContextOptions(applied: ContextOptions, wanted:
 export declare function toPlaywrightOptions(options: ContextOptions): Record<string, unknown>;
 /** The options as the model sees them in a result: only what was actually set. */
 export declare function describeContextOptions(options: ContextOptions): Record<string, unknown>;
-export {};
