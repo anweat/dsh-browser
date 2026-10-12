@@ -82,7 +82,7 @@ export const POLICY_ACTIONS: ActionDef[] = [
     approval: 'none', readOnly: true, mutating: false, concurrencySafe: true, timeoutMs: 10_000,
     examples: [{ args: {} }],
     async execute(args, ctx) {
-      return ctx.service.policyReport({ ...typeof args.auditLimit === 'number' ? { auditLimit: args.auditLimit } : {} })
+      return ctx.service.policyReport({ ...typeof args.auditLimit === 'number' ? { auditLimit: args.auditLimit } : {}, viewerSession: ctx.sessionId })
     },
   },
   {

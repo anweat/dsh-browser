@@ -127,6 +127,8 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     snapshotDir: dir,
     // Downloads must never land in the real DSH_HOME while a suite runs.
     downloadDir: path.join(dir, 'downloads'),
+    // The policy overlay and the auth directory live under the harness's own data directory, never the real DSH_HOME.
+    browserDataDir: path.join(dir, 'data'),
     storageStatePath: undefined,
     ...detection.channel ? { channel: detection.channel } : {},
     ...detection.executablePath ? { executablePath: detection.executablePath } : {},

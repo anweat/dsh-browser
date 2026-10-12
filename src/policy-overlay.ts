@@ -119,7 +119,7 @@ export function normalizeAllowedDomain(raw: unknown, env: DomainEnv): string {
   }
   if (privateSuffix(host) || host === 'metadata' || host === 'metadata.google.internal') {
     if (host === 'metadata.google.internal') return fail('cloud metadata hosts are never allowed')
-    if (wildcard && labels.length === 1) return fail('a wildcard on a bare TLD is never allowed')
+    if (wildcard && labels.length === 1 && host !== 'localhost') return fail('a wildcard on a bare TLD is never allowed')
     if (!env.allowPrivateHosts) return fail('localhost, .local, .internal and other private-network names need allowPrivateHosts=true in the configuration')
     return wildcard ? '*.' + host : host
   }

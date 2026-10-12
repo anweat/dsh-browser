@@ -573,7 +573,7 @@ export class BrowserService {
   }
 
   /** The effective policy, where each value comes from, and the newest audit entries. */
-  policyReport(opts: { auditLimit?: number } = {}): Record<string, unknown> {
+  policyReport(opts: { auditLimit?: number; viewerSession?: string } = {}): Record<string, unknown> {
     this.refreshPolicy()
     const overlay = this.policyStore.current()
     const effective = this.policyStore.effective()
@@ -601,7 +601,10 @@ export class BrowserService {
       authProfiles: profiles,
       removedByOverlay: Object.entries(overlay.authProfiles).filter(([, entry]) => entry === null).map(([id]) => id).sort(),
       usagePolicy: Object.fromEntries(Object.entries(effective.usagePolicy).map(([key, value]) => [key, { value, baseline: baseline.usagePolicy[key], overridden: Object.hasOwn(overlay.usagePolicy, key) }])),
-      audit: overlay.audit.slice(-limit),
+      // An agent sees which session made a change only for its own; the settings card (no viewer) sees all.
+      audit: overlay.audit.slice(-limit).map(entry => opts.viewerSession === undefined || entry.session === undefined || entry.session === opts.viewerSession
+        ? entry
+        : { ...entry, session: 'another session' }),
     }
   }
 
