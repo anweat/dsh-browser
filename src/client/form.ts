@@ -14,6 +14,7 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SettingsFormModel, settingsNumberField, settingsTextField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ASSET_POLICY_BOOLEAN_KEYS, ASSET_POLICY_ENUMS, ASSET_POLICY_INTEGER_RANGES, ASSET_POLICY_KEYS, ASSET_POLICY_STRING_KEYS, USAGE_POLICY_BOUNDS, type AssetPolicyKey } from '../policy-keys.ts'
+import { fieldProblem } from './field-rules.ts'
 import { PROMPT_TEXT_FIELDS, canonicalPrompts, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
@@ -51,6 +52,15 @@ export interface PromptsCardState {
 
 /** A free-text field that clears when emptied, so blanking the control resets it. */
 const textField = (field: SectionField): SettingsFieldSpec => settingsTextField(field)
+
+/**
+ * A free-text field with a value rule (`field-rules.ts`, the rules the server applies): text the rule refuses is
+ * invalid, which blocks the save, instead of being written and dropped at the next start.
+ */
+const checkedTextField = (field: SectionField): SettingsFieldSpec => {
+  const base = settingsTextField(field)
+  return { field, format: base.format, parse: text => text.trim() !== '' && fieldProblem(field, text) !== undefined ? undefined : base.parse(text) }
+}
 
 /**
  * A boolean field. The card renders a checkbox, so the conversion is explicit
@@ -159,17 +169,17 @@ export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   textField('defaultAuthProfile'),
   textField('executablePath'),
   textField('snapshotDir'),
-  textField('downloadDir'),
+  checkedTextField('downloadDir'),
   booleanField('allowPrivateHosts'),
   rangedNumberField('downloadMaxBytes', 1, 10 * 1024 * 1024 * 1024),
   enumField('viewportMode', ['window', '720p', '1080p', 'custom']),
   rangedNumberField('viewportWidth', 200, 7680),
   rangedNumberField('viewportHeight', 200, 4320),
-  textField('userAgent'),
-  textField('locale'),
-  textField('timezoneId'),
-  textField('proxyServer'),
-  textField('proxyBypass'),
+  checkedTextField('userAgent'),
+  checkedTextField('locale'),
+  checkedTextField('timezoneId'),
+  checkedTextField('proxyServer'),
+  checkedTextField('proxyBypass'),
   booleanField('verbose'),
 ] as const
 

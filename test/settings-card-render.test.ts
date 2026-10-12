@@ -188,3 +188,28 @@ function controlsOf(html: string): Control[] {
   }
   return controls.map(entry => ({ ...entry.control, named: entry.control.named || (!!entry.control.id && labels.has(entry.control.id)) }))
 }
+
+test('the card shows why a context or download value is refused, next to the field, and lists what the plugin ignored', (t) => {
+  if (skip) return t.skip(skip)
+  for (const locale of ['en', 'zh'] as const) {
+    const { html, missingKeys } = renderCard!({
+      locale,
+      fieldTexts: { viewportMode: 'custom', viewportWidth: '', viewportHeight: '600', proxyServer: 'ftp://127.0.0.1:1', downloadDir: 'relative/dir', locale: 'en-US' },
+      configWarnings: ['config proxyServer="ftp://x" was ignored: scheme must be one of http, https, socks5, socks4; no proxy is used instead. Fix: ...'],
+    })
+    assert.deepEqual(missingKeys, [], locale)
+    assert.match(html, /proxyServer scheme must be one of http, https, socks5, socks4/)
+    assert.match(html, /downloadDir must be an absolute directory path/)
+    assert.match(html, /viewportMode=custom needs viewportWidth \(200-7680\)/)
+    assert.doesNotMatch(html, /viewportMode=custom needs viewportHeight/, 'a size that is there is not flagged')
+    assert.match(html, /data-dsh-browser-config-warnings/)
+    assert.match(html, /was ignored: scheme must be one of/)
+    // The valid field carries no error.
+    const localeField = html.slice(html.indexOf('plugin-config-dsh-browser-locale'), html.indexOf('plugin-config-dsh-browser-locale') + 400)
+    assert.doesNotMatch(localeField, /aria-invalid/)
+  }
+  // Nothing wrong: no error text, no warnings block.
+  const clean = renderCard!({ fieldTexts: { viewportMode: 'window', proxyServer: 'http://127.0.0.1:7890' } })
+  assert.doesNotMatch(clean.html, /data-dsh-browser-config-warnings/)
+  assert.doesNotMatch(clean.html, /must be one of http/)
+})

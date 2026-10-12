@@ -19,6 +19,10 @@ export interface RenderOptions {
   prompts?: Record<string, unknown>
   /** The exported default text, when it has been loaded. */
   promptsDefaults?: string
+  /** Text each single-input field holds, by field name. */
+  fieldTexts?: Record<string, string>
+  /** What the running plugin reports it ignored in its configuration. */
+  configWarnings?: string[]
 }
 
 export function renderCard(options: RenderOptions = {}): { html: string; missingKeys: string[] } {
@@ -27,7 +31,7 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
   const t = (key: string) => dictionary[key] ?? (missing.add(key), key)
   const settings = {
     available: true, writable: true, saving: false, dirty: false, invalid: false, failed: false,
-    fields: proxy({ text: '', invalid: false, overridden: false }), jsonFields: proxy({ text: '', invalid: false, overridden: false }),
+    fields: new Proxy({}, { get: (_target, name) => ({ text: options.fieldTexts?.[String(name)] ?? '', invalid: false, overridden: false }) }), jsonFields: proxy({ text: '', invalid: false, overridden: false }),
     prompts: { texts: proxy({ text: '', invalid: false }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false },
   }
   const assets = {
@@ -42,6 +46,7 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
   }
   const status = { loading: false, failed: false, status: options.prompts, defaults: options.promptsDefaults }
   const policyState = { loading: false, failed: false, report: {
+    ...options.configWarnings ? { configWarnings: options.configWarnings } : {},
     revision: 3, updatedAt: '2026-01-01T00:00:00Z', overlayActive: true, allowPrivateHosts: false, authDir: '/data/browser/auth',
     authProfiles: [{ id: 'forum', origin: 'overlay-changed', allowedDomains: ['example.com'], persistState: false }, { id: 'new', origin: 'overlay-created', allowedDomains: ['a.test'], persistState: true }],
     removedByOverlay: ['old'],

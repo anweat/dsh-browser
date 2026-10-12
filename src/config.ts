@@ -14,14 +14,13 @@ import { PROMPT_LIMITS } from './prompt-limits.ts'
 import { promptsSource, type PromptsSource } from './prompts.ts'
 import { resolveAutomationAssetPolicy, type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts'
 import { VIEWPORT_LIMITS, VIEWPORT_MODES, configProblem, resolveContextDefaults, type ContextOptions, type ViewportMode } from './context-options.ts'
-import { checkAbsoluteDirectory } from './config-rules.ts'
+import { MAX_DOWNLOAD_BYTES_LIMIT, checkAbsoluteDirectory } from './config-rules.ts'
+export { MAX_DOWNLOAD_BYTES_LIMIT }
 
 /** Schema keys that are not settings (see {@link MISPLACED_KEYS}); the settings card has no control for them. */
 export const MISPLACED_CONFIG_KEYS: readonly string[] = ['viewport', 'proxy', 'contextOptions', 'download', 'downloads']
 
 export const DEFAULT_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
-/** Upper bound of downloadMaxBytes: 10 GiB. */
-export const MAX_DOWNLOAD_BYTES_LIMIT = 10 * 1024 * 1024 * 1024
 
 export const BROWSER_RUNTIMES = ['playwright', 'patchright'] as const
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number]

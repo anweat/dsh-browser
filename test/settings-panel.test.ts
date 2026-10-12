@@ -398,3 +398,19 @@ test('the prompts status controller reads the plugin report through the private 
   assert.equal(flaky.snapshot().loading, false)
   controller.dispose(); flaky.dispose()
 })
+
+test('the context and download text fields refuse, at save time, what the server would drop', () => {
+  const spec = (field: string) => FIELD_SPECS.find(entry => entry.field === field)!
+  assert.equal(spec('proxyServer').parse('ftp://127.0.0.1:1'), undefined)
+  assert.equal(spec('proxyServer').parse('http://user:pw@127.0.0.1:1'), undefined)
+  assert.deepEqual(spec('proxyServer').parse(' http://127.0.0.1:7890 '), { kind: 'set', value: 'http://127.0.0.1:7890' })
+  assert.deepEqual(spec('proxyServer').parse('  '), { kind: 'clear' })
+  assert.equal(spec('downloadDir').parse('relative/dir'), undefined)
+  assert.deepEqual(spec('downloadDir').parse('/var/dl'), { kind: 'set', value: '/var/dl' })
+  assert.equal(spec('locale').parse('not a locale'), undefined)
+  assert.equal(spec('timezoneId').parse('Mars/Base'), undefined)
+  assert.equal(spec('userAgent').parse('a\nb'), undefined)
+  assert.equal(spec('viewportWidth').parse('5'), undefined)
+  assert.equal(spec('viewportMode').parse('custom') !== undefined, true)
+  assert.equal(spec('viewportMode').parse('huge'), undefined)
+})

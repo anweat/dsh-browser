@@ -11,6 +11,9 @@ export type ViewportMode = typeof VIEWPORT_MODES[number]
 /** Bounds of a custom viewport, in CSS pixels. */
 export const VIEWPORT_LIMITS = { minWidth: 200, maxWidth: 7680, minHeight: 200, maxHeight: 4320 } as const
 
+/** Upper bound of downloadMaxBytes: 10 GiB. */
+export const MAX_DOWNLOAD_BYTES_LIMIT = 10 * 1024 * 1024 * 1024
+
 export const PRESET_VIEWPORTS: Record<'720p' | '1080p', { width: number; height: number }> = {
   '720p': { width: 1280, height: 720 },
   '1080p': { width: 1920, height: 1080 },

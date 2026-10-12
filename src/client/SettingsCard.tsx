@@ -19,6 +19,7 @@ import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BrowserSettingsCardProps } from './index.ts'
 import { ASSET_POLICY_KEYS, USAGE_POLICY_KEYS } from '../policy-keys.ts'
 import { CONFIG_FILE_ONLY_FIELDS, FIELD_SPECS, JSON_FIELDS, type SectionField } from './form.ts'
+import { CHECKED_TEXT_FIELDS, crossFieldProblems, fieldProblem } from './field-rules.ts'
 import { PROMPT_TEXT_FIELDS, type PromptTextFieldId } from './prompts-form.ts'
 import { styles as css } from './styles.ts'
 import { credentialView, identicalOutputPairs, inputSetLines, isDirty, shortHash } from './asset-editor.ts'
@@ -79,10 +80,18 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
   // Single-input fields live in `state.fields`; the JSON-shaped ones are read
   // from the model directly, because the card renders them as code editors
   // rather than one-line inputs.
+  // Cross-field problems (custom viewport without a size) cannot be seen by one field's own parse; they are shown at
+  // the fields and block the save the same way an invalid number does.
+  const texts: Record<string, string> = {}
+  for (const name of [...SINGLE_INPUT_FIELDS]) texts[name] = state.fields[name as SectionField]?.text ?? ''
+  const cross = crossFieldProblems(texts)
   const numeric = new Set<string>(['cdpPort', 'maxSessions', 'downloadMaxBytes', 'viewportWidth', 'viewportHeight'])
   const field = (name: string) => {
     const fieldState = SINGLE_INPUT_FIELDS.has(name) ? state.fields[name as SectionField] : state.jsonFields[name]
     const policyKeys = POLICY_KEY_LISTS[name]
+    // The reason a value is refused, from the same rules the server applies; a card that only said "invalid" left
+    // people to guess (and an unchecked save used to stop the plugin from loading).
+    const problem = (CHECKED_TEXT_FIELDS.includes(name) ? fieldProblem(name, fieldState?.text ?? '') : undefined) ?? cross[name]
     return <SettingsValueField
       key={name}
       id={`plugin-config-dsh-browser-${name}`}
@@ -90,10 +99,11 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
       hint={policyKeys ? `${t(`${name}Hint` as LabelKey)} ${t('policyKeys')} ${policyKeys.join(', ')}` : t(`${name}Hint` as LabelKey)}
       overriddenLabel={t('overridden')}
       resetLabel={t('reset')}
-      invalidLabel={t(JSON_FIELDS.has(name) ? 'invalidJson' : 'invalidNumber')}
       numeric={numeric.has(name)}
       disabled={disabled}
       {...fieldState}
+      invalid={fieldState?.invalid === true || problem !== undefined}
+      invalidLabel={problem !== undefined ? `${t('invalid')} ${problem}` : t(JSON_FIELDS.has(name) ? 'invalidJson' : name === 'viewportMode' || CHECKED_TEXT_FIELDS.includes(name) ? 'invalid' : 'invalidNumber')}
       onEdit={text => props.edit(name, text)}
       onReset={() => props.resetField(name)}
     />
@@ -106,10 +116,11 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
 
   return <SettingsForm
     labels={formLabels(t)}
-    state={state}
+    state={Object.keys(cross).length ? { ...state, invalid: true } : state}
     onSave={props.save}
     onDiscard={props.discard}
   >
+    <ConfigWarnings {...props} />
     {SECTION_LAYOUT.map(section => <section key={section.title} className={css.section}>
       <div className={css.sectionHead}><h3>{t(section.title)}</h3><p>{t(section.hint)}</p></div>
       <div className={css.grid}>
@@ -129,6 +140,17 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
     <PromptsPanel {...props} disabled={disabled} />
     <AutomationAssetsPanel {...props} />
   </SettingsForm>
+}
+
+/** Problems the running plugin found in its configuration: values it dropped, and why. Shown above the form. */
+function ConfigWarnings(props: BrowserSettingsCardProps) {
+  const { t } = props
+  const warnings = props.usePolicyStatus(snapshot => snapshot.report?.configWarnings)
+  if (!warnings?.length) return null
+  return <div className={css.failed} role="alert" data-dsh-browser-config-warnings>
+    <strong>{t('configWarnings')}</strong>
+    <ul>{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+  </div>
 }
 
 /**
