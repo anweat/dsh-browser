@@ -149,6 +149,23 @@ test('open sessions that lose access are closed immediately; sessions that keep 
   assert.match(narrowed.note, /closed/)
 })
 
+test('a session that already holds a context starts a new one after its profile was widened, so the new domain gets its cookies', async () => {
+  const { run, service, created } = setup({ automationMode: 'unrestricted' })
+  const ensure = (url: string) => (service as any).ensurePage(url, { session: 'session:A', authProfile: 'forum' }) as Promise<{ rebuilt?: string[] }>
+  const cookiesOf = (index: number) => (created[index]!.options.storageState?.cookies ?? []).map((cookie: any) => cookie.domain).sort()
+  assert.equal((await ensure('https://a.example.com/')).rebuilt, undefined)
+  assert.equal((await ensure('https://a.example.com/')).rebuilt, undefined, 'nothing changed: the context is reused')
+  assert.equal(created.length, 1)
+  await run('runtime.set_auth_profile', { id: 'forum', allowedDomains: ['a.example.com', 'b.example.com'], reason: 'needs b' })
+  const reopened = await ensure('https://b.example.com/')
+  assert.deepEqual(reopened.rebuilt, ['authProfileScope'])
+  assert.equal(created.length, 2)
+  assert.equal(created[0]!.closed, true)
+  assert.deepEqual(cookiesOf(1), ['a.example.com', 'b.example.com'])
+  assert.equal((await ensure('https://b.example.com/')).rebuilt, undefined, 'and the new context is reused again')
+  assert.equal(created.length, 2)
+})
+
 test('usage limits are applied to the governor and to crawl budgets at once', async () => {
   const { run, service } = setup({ automationMode: 'unrestricted' })
   await run('runtime.set_usage_policy', { maxPagesPerRun: 3, maxDepth: 0, minDelayMs: 4000, reason: 'small crawl' })

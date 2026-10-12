@@ -1242,9 +1242,16 @@ export class BrowserService {
       if (!targetUrl) return { page: state.page }
       const applied = state.contextOptions ?? this.config.contextDefaults
       wanted = { ...applied, ...opts.context }
+      // The login state a context holds was cut to the profile's domains when the context was created. A policy
+      // change that widened the profile (or moved its state file) afterwards is not in that context, so the next open
+      // starts a new one; narrowing already closed the session in changePolicy.
+      const liveProfile = state.profile ? this.authProfiles.get(state.profile.id) : undefined
+      const scopeChanged = !!state.profile && !!liveProfile
+        && (liveProfile.storageStatePath !== state.profile.storageStatePath
+          || [...liveProfile.allowedDomains ?? []].sort().join('\n') !== [...state.profile.allowedDomains ?? []].sort().join('\n'))
       const sameLogin = (opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id && opts.rulePack === state.rulePack?.id
       const changedOptions = differingContextOptions(applied, wanted)
-      if (sameLogin && changedOptions.length === 0) {
+      if (sameLogin && !scopeChanged && changedOptions.length === 0) {
         if (state.profile) this.authProfiles.resolve(state.profile.id, targetUrl)
         if (state.rulePack) resolveRulePack(this.config.rulePacks, state.rulePack.id, targetUrl)
         return { page: state.page }
@@ -1252,6 +1259,7 @@ export class BrowserService {
       rebuilt = [
         ...changedOptions,
         ...(opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id ? [] : ['authProfile'],
+        ...scopeChanged && (opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id ? ['authProfileScope'] : [],
         ...opts.rulePack === state.rulePack?.id ? [] : ['rulePack'],
       ]
       await this.closePage(state)

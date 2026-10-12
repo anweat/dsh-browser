@@ -412,7 +412,7 @@ return [...document.querySelectorAll('.result')].slice(0, 20).map(card => ({
 | 放宽：加域名、新建 profile、`persistState` 开启（写磁盘）、换状态文件、限流更松、回滚到更宽的基线 | 拒绝 | 询问，理由里写出 diff | 直接执行，结果带 `risk` |
 
 - 每次修改必须带 `reason`（3–300 字符），返回 `before` / `after` / `changes`，并写入审计（来源、session、时间、reason、方向、变更行）。可选 `expectedRevision` 作乐观锁，过期则报错且什么都不改。
-- 变更立即生效：用到被收回登录态的 session 会被关闭（`sessionsClosed`），下一次 `target.open` 重新开始；撤销的域名在下一次调用就被拒绝，不是等到下次启动。
+- 变更立即生效：用到被收回登录态的 session 会被关闭（`sessionsClosed`），下一次 `target.open` 重新开始；撤销的域名在下一次调用就被拒绝，不是等到下次启动。放宽后，已经持有该登录态 context 的 session 在下一次 `target.open` 会重建 context（`contextRebuilt.changed` 含 `authProfileScope`），新域名的 Cookie 才会注入；不重建的话旧 context 里没有那个域名的 Cookie。
 - **风险与 unrestricted 行为**：`unrestricted` 不会询问，所以 agent 可以自行加域名、新建 profile、把限流放宽到配置允许的上限。放宽的结果里总带 `risk: {level: "elevated", loosened, approval, note}`，设置卡片的“策略覆盖层”分区列出生效值、每项的来源（基线 / 来自覆盖层 / 覆盖层新建）和审计。要避免 agent 自行放宽，请不要对该 profile 使用 `unrestricted`（`autonomous` 下放宽仍然询问）。
 - 面板里“清除覆盖 / 回滚到基线”按钮与每个 profile 的“回滚此项”只动覆盖层，不改基线配置，同样写审计。
 
