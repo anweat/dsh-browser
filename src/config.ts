@@ -13,7 +13,8 @@ import { resolveUsagePolicy, type UsagePolicy, type UsagePolicyInput } from './u
 import { PROMPT_LIMITS } from './prompt-limits.ts'
 import { promptsSource, type PromptsSource } from './prompts.ts'
 import { resolveAutomationAssetPolicy, type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts'
-import { VIEWPORT_LIMITS, VIEWPORT_MODES, resolveContextDefaults, type ContextOptions, type ViewportMode } from './context-options.ts'
+import { VIEWPORT_LIMITS, VIEWPORT_MODES, configProblem, resolveContextDefaults, type ContextOptions, type ViewportMode } from './context-options.ts'
+import { checkAbsoluteDirectory } from './config-rules.ts'
 
 /** Schema keys that are not settings (see {@link MISPLACED_KEYS}); the settings card has no control for them. */
 export const MISPLACED_CONFIG_KEYS: readonly string[] = ['viewport', 'proxy', 'contextOptions', 'download', 'downloads']
@@ -223,15 +224,18 @@ export const Config = z.object({
   snapshotDir: z.string().volatile(),
   allowPrivateHosts: z.boolean().default(false).description('Let agent policy changes name localhost, .local/.internal names and private-network IPv4 addresses as allowed domains').volatile(),
   downloadDir: z.string().description('Absolute directory downloads are saved to; defaults to $DSH_HOME/data/browser/downloads').volatile(),
-  downloadMaxBytes: z.number().min(1).max(MAX_DOWNLOAD_BYTES_LIMIT).step(1).default(DEFAULT_DOWNLOAD_MAX_BYTES).description('Largest single download in bytes (default 100 MiB); a bigger one is aborted and removed').volatile(),
+  downloadMaxBytes: z.number().default(DEFAULT_DOWNLOAD_MAX_BYTES).description('Largest single download in bytes (default 100 MiB); a bigger one is aborted and removed').volatile(),
   viewportMode: z.string().default('window').description(`Viewport of every context: ${VIEWPORT_MODES.join(' | ')} (window = the browser default)`).volatile(),
-  viewportWidth: z.number().min(VIEWPORT_LIMITS.minWidth).max(VIEWPORT_LIMITS.maxWidth).step(1).description('Custom viewport width; only with viewportMode=custom').volatile(),
-  viewportHeight: z.number().min(VIEWPORT_LIMITS.minHeight).max(VIEWPORT_LIMITS.maxHeight).step(1).description('Custom viewport height; only with viewportMode=custom').volatile(),
+  viewportWidth: z.number().description(`Custom viewport width, ${VIEWPORT_LIMITS.minWidth}-${VIEWPORT_LIMITS.maxWidth}; only with viewportMode=custom`).volatile(),
+  viewportHeight: z.number().description(`Custom viewport height, ${VIEWPORT_LIMITS.minHeight}-${VIEWPORT_LIMITS.maxHeight}; only with viewportMode=custom`).volatile(),
   userAgent: z.string().description('User agent of every context; unset keeps the browser\'s own').volatile(),
   locale: z.string().description('BCP 47 locale such as en-US or zh-CN').volatile(),
   timezoneId: z.string().description('IANA time zone such as Asia/Shanghai').volatile(),
   proxyServer: z.string().description('Proxy such as http://127.0.0.1:7890 or socks5://127.0.0.1:1080; accounts and passwords are not supported').volatile(),
   proxyBypass: z.string().description('Comma-separated hosts that skip the proxy; needs proxyServer').volatile(),
+  // The ranges of the numbers above are NOT part of the schema on purpose: schema parsing rejects a value outside a
+  // range with an error that stops the plugin from loading, while `resolveConfig` reports it and falls back (the
+  // settings card enforces the same ranges before a save).
   // Not settings: these names exist so that the nested shape people expect fails loudly in `resolveConfig`
   // instead of being dropped by schema parsing, which is how a nested `viewport` was once ignored without a word.
   viewport: z.any(),
@@ -310,19 +314,25 @@ export function defaultDownloadDir(): string {
   return path.join(home, 'data', 'browser', 'downloads')
 }
 
-/** `downloadDir` must be an absolute path: a relative one would depend on the host process's working directory. */
-export function resolveDownloadDir(value: unknown): string {
-  if (value === undefined || value === null || value === '') return defaultDownloadDir()
-  if (typeof value !== 'string' || !path.isAbsolute(value)) throw new Error('dsh-browser config: downloadDir must be an absolute directory path')
-  return path.normalize(value)
+/**
+ * `downloadDir` must be an absolute path: a relative one would depend on the host process's working directory.
+ * A wrong value falls back to the default and is reported, never thrown: see {@link resolveConfig}.
+ */
+export function resolveDownloadDir(value: unknown): { dir: string; warning?: string } {
+  if (value === undefined || value === null || value === '') return { dir: defaultDownloadDir() }
+  const problem = (reason: string) => ({ dir: defaultDownloadDir(), warning: configProblem('downloadDir', value, reason, `the default ${defaultDownloadDir()} is used`, 'give an absolute directory path, or clear the field') })
+  if (typeof value !== 'string') return problem('it is not a string')
+  try { checkAbsoluteDirectory(value, 'downloadDir', message => { throw new Error(message) }) } catch (error) { return problem((error as Error).message) }
+  if (!path.isAbsolute(value)) return problem('it is not an absolute path on this system')
+  return { dir: path.normalize(value) }
 }
 
-export function resolveDownloadMaxBytes(value: unknown): number {
-  if (value === undefined || value === null) return DEFAULT_DOWNLOAD_MAX_BYTES
+export function resolveDownloadMaxBytes(value: unknown): { bytes: number; warning?: string } {
+  if (value === undefined || value === null) return { bytes: DEFAULT_DOWNLOAD_MAX_BYTES }
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > MAX_DOWNLOAD_BYTES_LIMIT) {
-    throw new Error(`dsh-browser config: downloadMaxBytes must be an integer from 1 to ${MAX_DOWNLOAD_BYTES_LIMIT}`)
+    return { bytes: DEFAULT_DOWNLOAD_MAX_BYTES, warning: configProblem('downloadMaxBytes', value, `it must be an integer from 1 to ${MAX_DOWNLOAD_BYTES_LIMIT}`, `the default ${DEFAULT_DOWNLOAD_MAX_BYTES} bytes (100 MiB) is used`, 'enter a whole number of bytes, or clear the field') }
   }
-  return value
+  return { bytes: value }
 }
 
 /**
@@ -358,9 +368,16 @@ export function resolveConfig(config: Config): ResolvedConfig {
   }
   const optional = <T>(field: string): T | undefined => plain(c[field] as T | undefined)
   const snapshotDir = optional<string>('snapshotDir') ?? defaultSnapshotDir()
+  // Nothing below throws for the settings added in 0.2.2: a plugin that fails to load takes its settings card with it,
+  // so a value that cannot be used falls back to its default and is reported through `configWarnings` instead.
+  const warnings: string[] = []
   for (const [key, instead] of Object.entries(MISPLACED_KEYS)) {
-    if (optional<unknown>(key) !== undefined) throw new Error(`dsh-browser config: "${key}" is not a setting; use ${instead}`)
+    const value = optional<unknown>(key)
+    if (value !== undefined) warnings.push(`config "${key}" is not a setting and was ignored; use ${instead}`)
   }
+  const downloadDir = resolveDownloadDir(optional('downloadDir'))
+  const downloadMax = resolveDownloadMaxBytes(optional('downloadMaxBytes'))
+  warnings.push(...[downloadDir.warning, downloadMax.warning].filter((warning): warning is string => !!warning))
   const context = resolveContextDefaults({
     viewportMode: optional('viewportMode'),
     viewportWidth: optional('viewportWidth'),
@@ -386,8 +403,8 @@ export function resolveConfig(config: Config): ResolvedConfig {
     autoInstall: read('autoInstall', false),
     maxSessions: read('maxSessions', 8),
     snapshotDir,
-    downloadDir: resolveDownloadDir(optional('downloadDir')),
-    downloadMaxBytes: resolveDownloadMaxBytes(optional('downloadMaxBytes')),
+    downloadDir: downloadDir.dir,
+    downloadMaxBytes: downloadMax.bytes,
     allowPrivateHosts: read('allowPrivateHosts', false),
     // `browserDataDir` is not a setting (the schema drops it): it is how tests and embedders that hand `resolveConfig`
     // a plain object keep the overlay out of the real DSH_HOME.
@@ -396,7 +413,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
       return { dataDir, authDir: path.join(dataDir, 'auth'), policyOverlayFile: path.join(dataDir, 'policy-overlay.json') }
     })(),
     contextDefaults: context.options,
-    configWarnings: context.warnings,
+    configWarnings: [...warnings, ...context.warnings],
     verbose: read('verbose', false),
     authProfiles: read('authProfiles', {}),
     rulePacks: read('rulePacks', {}),

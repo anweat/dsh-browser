@@ -74,7 +74,7 @@ dsh --profile web
 - 从 `0.2.1` 升级即可，DSH 基线与 peer 范围不变；不配置新键时所有行为与 `0.2.1` 相同。
 - 新增 context 创建期选项：配置键 `viewportMode` / `viewportWidth` / `viewportHeight` / `userAgent` / `locale` / `timezoneId` / `proxyServer` / `proxyBypass`，以及 `target.open` 的按次参数 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer`（见下文“浏览器上下文选项”）。
 - 新增 `target.download` 与 `inspect.downloads`，以及配置 `downloadDir`、`downloadMaxBytes`（见下文“下载落盘”）。新增 `target.download` / `inspect.downloads` 使动作总数从 34 变为 36。
-- **嵌套写法现在会报错而不是被忽略**：配置里写 `viewport: {width, height}`、`proxy: {...}`、`contextOptions`、`download(s)` 会在加载时抛出明确错误，并指出应使用哪些扁平键。
+- **嵌套写法不再被静默忽略**：配置里写 `viewport: {width, height}`、`proxy: {...}`、`contextOptions`、`download(s)` 会被忽略，并在 `runtime.status` 的 `runtimeWarnings` 里说明应使用哪些扁平键。**配置错误不会让插件加载失败**（否则设置卡片也会一起消失）：无效的值回退到默认并同样出现在 `runtimeWarnings`。
 - 带 `proxyServer` 或 `userAgent` 的 `target.open` 在 `standard` / `autonomous` 下需要审批，`read-only` 拒绝，`unrestricted` 放行；`target.download` 与 `act.upload` 同档。
 - 新增“策略覆盖层”：agent 可经 `inspect.policy` 与 `runtime.set_auth_profile` / `remove_auth_profile` / `set_usage_policy` / `reset_policy` 编辑限制类设置（authProfile 的域名、新建/删除，usagePolicy 限流项），不必用户手填。**`unrestricted` 下 agent 可自行放宽限制**，见“策略覆盖层与风险”。动作总数 36 变 41；新增配置 `allowPrivateHosts`（默认关）。
 
@@ -458,14 +458,14 @@ PDF：本插件不抽取 PDF 文本。用 `target.download` 落盘后取返回�
 | 键 | 含义 |
 |---|---|
 | `viewportMode` | `window`（默认，不传 viewport，保持现状）、`720p`（1280×720）、`1080p`（1920×1080）、`custom` |
-| `viewportWidth` / `viewportHeight` | 仅 `custom`：200–7680 / 200–4320 的整数；`custom` 缺任一项会报错，其他模式下写了会在 `runtime.status` 的 `runtimeWarnings` 里提示并忽略 |
+| `viewportWidth` / `viewportHeight` | 仅 `custom`：200–7680 / 200–4320 的整数；`custom` 缺任一项时回退为 `window` 并给出警告，其他模式下写了宽高会提示并忽略 |
 | `userAgent` | 不带控制字符，≤512 字符 |
 | `locale` | BCP 47，如 `en-US`、`zh-CN` |
 | `timezoneId` | IANA 时区，如 `Asia/Shanghai`、`UTC` |
 | `proxyServer` | `http://host:port`、`https://…`、`socks5://…`、`socks4://…`（缺省协议按 http）；**不支持账号密码**，带用户名/密码的地址会被拒绝 |
 | `proxyBypass` | 逗号分隔的主机列表（需要先有 `proxyServer`，否则提示并忽略） |
 
-非法值在加载配置时抛出带键名的错误，不会被静默忽略。这些键在插件挂载时解析，保存后需重启 profile。
+非法值**不会让插件加载失败**：该键回退到默认值，`runtime.status` 的 `runtimeWarnings` 与设置卡片顶部给出一条警告（键名、原值摘要、原因、如何修，代理地址里的账号密码会被遮蔽）。设置卡片在保存前用同一套规则校验这些字段，非法值显示字段级错误并禁用保存。这些键在插件挂载时解析，保存后需重启 profile。
 
 2. **按次参数**：`target.open` 的 `viewport {width,height}`、`userAgent`、`locale`、`timezoneId`、`proxyServer`。语义沿用 `authProfile` / `rulePack` 的先例：
 
