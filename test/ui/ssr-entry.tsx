@@ -20,6 +20,8 @@ export interface RenderOptions {
   prompts?: Record<string, unknown>
   /** The exported default text, when it has been loaded. */
   promptsDefaults?: string
+  /** The per-control default texts the card loads when it opens. */
+  promptDefaults?: { texts: Record<string, string>; extras: Record<string, unknown> }
   /** Text each single-input field holds, by field name. */
   fieldTexts?: Record<string, string>
   /** The properties text exactly as the editor holds it (instead of printing it from fieldTexts). */
@@ -58,7 +60,7 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
     selected: options.selected,
     editor: { text: options.selected ? '{"kind":"recipe","name":"x"}' : '', baseline: options.selected ? '{"kind":"recipe","name":"x"}' : '', testUrl: '', testInputs: '{}', ...options.editor },
   }
-  const status = { loading: false, failed: false, status: options.prompts, defaults: options.promptsDefaults }
+  const status = { loading: false, failed: false, status: options.prompts, defaults: options.promptsDefaults, defaultTexts: options.promptDefaults }
   const policyState = { loading: false, failed: false, report: {
     ...options.configWarnings ? { configWarnings: options.configWarnings } : {},
     revision: 3, updatedAt: '2026-01-01T00:00:00Z', overlayActive: true, allowPrivateHosts: false, authDir: '/data/browser/auth',

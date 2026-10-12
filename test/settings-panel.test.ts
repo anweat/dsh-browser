@@ -168,13 +168,13 @@ class ScopeStub implements ConfigForm<Record<string, unknown>> {
   async dispose(): Promise<void> {}
 }
 
-function fixture() {
+function fixture(promptDefaults?: () => unknown) {
   const scope = new ScopeStub({
     enabled: true, automationMode: 'standard', browserRuntime: 'playwright', channel: 'chromium', headless: true,
     opencliEnabled: true, usagePolicy: { minDelayMs: 750, maxConcurrency: 2, burst: 3, maxPagesPerRun: 20, maxDepth: 2, retryLimit: 2, backoffBaseMs: 1000, cooldownMs: 30000 },
     autoInstall: false, verbose: false,
   })
-  const controller = new BrowserSettingsController(scope)
+  const controller = new BrowserSettingsController(scope, promptDefaults as never)
   return { scope, controller, actions: controller.inject() }
 }
 
@@ -526,4 +526,66 @@ test('properties: the text rules and the old controls agree on every sample (no 
       assert.equal(textSays, controlSays, `${field.key} = ${JSON.stringify(value)}: text ${textSays ? 'accepts' : 'refuses'}, control ${controlSays ? 'accepts' : 'refuses'}`)
     }
   }
+})
+
+// --- prompt defaults: shown as placeholders, and "equal to the default" is no override ------------------------------
+
+const DEFAULTS = {
+  texts: { indexDescription: 'Browse the web: use browser_index then browser_call.', rootGuide: 'Guide: automation.search first.', skillDescription: 'Use to open web pages.' },
+  extras: {
+    groups: { act: { summary: 'click, fill, type' }, target: { summary: 'open / close' } },
+    actions: { 'act.click': { summary: 'Click an element.', notes: '' }, 'target.open': { summary: 'Open a URL.', notes: 'Each session gets its own page.' } },
+    errorHints: { DEADLINE: 'The action ran out of time.' },
+  },
+}
+
+test('prompt text equal to the default is no override: the box keeps the copy, nothing is staged or saved', async () => {
+  const { scope, controller, actions } = fixture(() => DEFAULTS)
+  actions.editPromptText('indexDescription', DEFAULTS.texts.indexDescription)
+  assert.equal(controller.snapshot().prompts.texts.indexDescription.text, DEFAULTS.texts.indexDescription, 'the box shows the copied default')
+  assert.equal(controller.snapshot().dirty, false, 'no override to save')
+  await actions.save()
+  assert.equal(scope.writes.length, 0)
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'prompts'), false)
+  // Edit the copy: now it is an override, exactly the edited text.
+  actions.editPromptText('indexDescription', DEFAULTS.texts.indexDescription + ' Be brief.')
+  assert.equal(controller.snapshot().dirty, true)
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user?.prompts, { tools: { browser_index: { description: DEFAULTS.texts.indexDescription + ' Be brief.' } } })
+  // Typing the default back removes the override instead of freezing it.
+  actions.editPromptText('indexDescription', DEFAULTS.texts.indexDescription)
+  await actions.save()
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'prompts'), false)
+  // Without loaded defaults nothing is "equal to default": the text is an override like any other.
+  const early = fixture()
+  early.actions.editPromptText('rootGuide', DEFAULTS.texts.rootGuide)
+  assert.equal(early.controller.snapshot().dirty, true)
+  early.controller.dispose(); controller.dispose()
+})
+
+test('a stored override identical to the default is flagged, and resetting it clears the field', async () => {
+  const { scope, controller, actions } = fixture(() => DEFAULTS)
+  // Written by an older card, which saved copies of the default.
+  await scope.mutate([{ op: 'set', path: ['prompts'], value: { rootGuide: DEFAULTS.texts.rootGuide } }])
+  assert.equal(controller.snapshot().prompts.texts.rootGuide.sameAsDefault, true)
+  assert.equal(controller.snapshot().prompts.texts.rootNote.sameAsDefault, false)
+  actions.editPromptText('rootGuide', '')
+  await actions.save()
+  assert.equal(Object.hasOwn(scope.getSnapshot().user ?? {}, 'prompts'), false)
+  controller.dispose()
+})
+
+test('the groups/actions/errorHints box: the whole default pasted in saves nothing; one changed entry saves only that one', async () => {
+  const { scope, controller, actions } = fixture(() => DEFAULTS)
+  actions.editPromptExtras(JSON.stringify(DEFAULTS.extras, null, 2))
+  assert.equal(controller.snapshot().invalid, false)
+  assert.equal(controller.snapshot().dirty, false)
+  assert.equal(controller.snapshot().prompts.extras.text.includes('"act.click"'), true, 'the box keeps the pasted default')
+  const edited = structuredClone(DEFAULTS.extras) as any
+  edited.actions['target.open'].notes = 'My own note.'
+  edited.errorHints.DEADLINE = 'Verify first.'
+  actions.editPromptExtras(JSON.stringify(edited, null, 2))
+  await actions.save()
+  assert.deepEqual(scope.getSnapshot().user?.prompts, { actions: { 'target.open': { notes: 'My own note.' } }, errorHints: { DEADLINE: 'Verify first.' } })
+  controller.dispose()
 })

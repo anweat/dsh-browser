@@ -230,3 +230,27 @@ test('configuration warnings of the running plugin are listed above the form', (
   assert.match(html, /was ignored: scheme must be one of/)
   assert.doesNotMatch(renderCard!().html, /data-dsh-browser-config-warnings/)
 })
+
+test('each prompt control shows the default text in the empty box and offers to start from it; a long default has a full view', (t) => {
+  if (skip) return t.skip(skip)
+  const long = Array.from({ length: 20 }, (_, i) => `line ${i + 1} of the default`).join('\n')
+  const defaults = { texts: { indexDescription: 'Browse the web with browser_index and browser_call.', rootGuide: long, skillDescription: 'Use to open pages.' }, extras: { groups: { act: { summary: 'click' } } } }
+  for (const locale of ['en', 'zh'] as const) {
+    const { html, missingKeys } = renderCard!({ locale, promptDefaults: defaults })
+    assert.deepEqual(missingKeys, [], locale)
+    assert.match(html, /placeholder="Browse the web with browser_index and browser_call\."/)
+    // A long default is cut in the placeholder and complete behind the details.
+    const guide = html.slice(html.indexOf('data-dsh-browser-prompt="rootGuide"'), html.indexOf('data-dsh-browser-prompt="rootNote"'))
+    assert.match(guide, /placeholder="line 1 of the default\nline 2[^"]*line 6 of the default …"/)
+    assert.doesNotMatch(guide.slice(0, guide.indexOf('<details')), /line 7 of the default/)
+    assert.match(guide, /<details data-dsh-browser-prompt-full="true">[\s\S]*line 20 of the default/)
+    assert.match(html, /data-dsh-browser-prompt-start/, 'the start-from-default button is there')
+    // The extras box shows the default structure as its placeholder.
+    assert.match(html, /id="plugin-config-dsh-browser-prompts-extras"[^>]*placeholder="\{\n  &quot;groups&quot;/)
+    // Controls without a default text say what "not set" means.
+    assert.match(html, locale === 'zh' ? /未设置：使用插件内置的 SKILL\.md 正文/ : /not set: the packaged SKILL\.md body is used/)
+  }
+  // Defaults not loaded yet: a neutral placeholder, no start button for the texts.
+  const early = renderCard!({}).html
+  assert.match(early, /loading the default text/)
+})

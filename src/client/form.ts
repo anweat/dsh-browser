@@ -18,7 +18,7 @@ import { fieldProblem } from './field-rules.ts'
 import {
   PROPERTY_FIELDS, checkProperties, commentOutProperty, parseProperties, serializeProperties, type LineIssue, type PropertyField,
 } from './properties-form.ts'
-import { PROMPT_TEXT_FIELDS, canonicalPrompts, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
+import { PROMPT_TEXT_FIELDS, canonicalPrompts, pruneDefaultExtras, type PromptDefaults, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
   | 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
@@ -55,7 +55,7 @@ export interface PropertiesCardState {
 }
 
 export interface PromptsCardState {
-  texts: Record<PromptTextFieldId, { text: string; invalid: boolean }>
+  texts: Record<PromptTextFieldId, { text: string; invalid: boolean; /** The stored override is exactly the default text, so it changes nothing. */ sameAsDefault: boolean }>
   skillEnabled: boolean
   /** The JSON box for groups, actions and errorHints. */
   extras: { text: string; invalid: boolean }
@@ -228,8 +228,14 @@ export class BrowserSettingsController {
   /** The properties text as typed; undefined shows the text printed from the staged fields. */
   private propsRaw: string | undefined
   private propsIssues: LineIssue[] = []
+  /** What was typed in each prompt control while it differs from what is staged (a text equal to the default stages nothing). */
+  private readonly promptRaw: Partial<Record<PromptTextFieldId, string>> = {}
 
-  constructor(private readonly scope: SettingsFormScope<Record<string, unknown>>) {
+  /** `promptDefaults` reads the plugin's own prompt texts once they are loaded; until then nothing is "equal to default". */
+  constructor(
+    private readonly scope: SettingsFormScope<Record<string, unknown>>,
+    private readonly promptDefaults: () => PromptDefaults | undefined = () => undefined,
+  ) {
     this.form = new SettingsFormModel<Record<string, unknown>>(scope, [...ALL_FIELD_SPECS])
     this.store = this.form.bind(() => this.project())
   }
@@ -241,7 +247,7 @@ export class BrowserSettingsController {
       ...actions,
       // A save is refused while the groups/actions/errorHints box holds something that is not valid.
       save: () => this.save(),
-      discard: () => { this.extrasRaw = undefined; this.extrasInvalid = false; this.propsRaw = undefined; this.propsIssues = []; actions.discard() },
+      discard: () => { this.extrasRaw = undefined; this.extrasInvalid = false; this.propsRaw = undefined; this.propsIssues = []; this.clearPromptRaw(); actions.discard() },
       editProperties: (text: string) => this.editProperties(text),
       resetProperty: (key: string) => this.resetProperty(key),
       editPromptText: (id: PromptTextFieldId, text: string) => this.editPromptText(id, text),
@@ -255,10 +261,11 @@ export class BrowserSettingsController {
     if (this.extrasInvalid || this.propsIssues.some(issue => issue.level === 'error')) return
     await this.form.save()
     // What was typed is now the stored value, so the box shows that again. (A failed save keeps the draft and its flag.)
-    if (!this.form.shell().failed && (this.extrasRaw !== undefined || this.propsRaw !== undefined)) {
+    if (!this.form.shell().failed && (this.extrasRaw !== undefined || this.propsRaw !== undefined || Object.keys(this.promptRaw).length)) {
       this.extrasRaw = undefined
       this.propsRaw = undefined
       this.propsIssues = []
+      this.clearPromptRaw()
       this.refresh()
     }
   }
@@ -338,9 +345,19 @@ export class BrowserSettingsController {
 
   private refresh(): void { this.form.actions().edit('prompts', this.form.field('prompts').text) }
 
+  private clearPromptRaw(): void { for (const key of Object.keys(this.promptRaw)) delete this.promptRaw[key as PromptTextFieldId] }
+
+  /**
+   * A prompt text: blank, or exactly the plugin's default text, is NO override. Saving the default as an override
+   * would freeze today's wording and hide every later improvement, so the box keeps what was typed (an author may
+   * have copied the default to edit it) while nothing is staged for it.
+   */
   editPromptText(id: PromptTextFieldId, text: string): void {
     const field = PROMPT_TEXT_FIELDS.find(entry => entry.id === id)!
-    this.stagePrompts(setAt(this.promptsDraft(), field.path, text.trim() === '' ? undefined : text))
+    const base = this.promptDefaults()?.texts[id]
+    const none = text.trim() === '' || (base !== undefined && text === base)
+    if (text === '' || !none) delete this.promptRaw[id]; else this.promptRaw[id] = text
+    this.stagePrompts(setAt(this.promptsDraft(), field.path, none ? undefined : text))
   }
 
   setPromptSkillEnabled(enabled: boolean): void {
@@ -354,7 +371,10 @@ export class BrowserSettingsController {
     try {
       const value = JSON.parse(text) as unknown
       if (value && typeof value === 'object' && !Array.isArray(value) && validExtras(value as Record<string, unknown>)) {
-        this.stagePrompts(withExtras(this.promptsDraft(), value as Record<string, unknown>))
+        // Entries equal to the plugin's own text are not overrides (see editPromptText).
+        const defaults = this.promptDefaults()?.extras
+        const effective = defaults ? pruneDefaultExtras(value as Record<string, unknown>, defaults) : value as Record<string, unknown>
+        this.stagePrompts(withExtras(this.promptsDraft(), effective))
         return
       }
     } catch { /* reported below */ }
@@ -388,8 +408,10 @@ export class BrowserSettingsController {
     const texts = {} as PromptsCardState['texts']
     for (const entry of PROMPT_TEXT_FIELDS) {
       const value = getAt(draft, entry.path)
-      const text = typeof value === 'string' ? value : ''
-      texts[entry.id] = { text, invalid: text.length > entry.limit }
+      const stored = typeof value === 'string' ? value : ''
+      const text = this.promptRaw[entry.id] ?? stored
+      const base = this.promptDefaults()?.texts[entry.id]
+      texts[entry.id] = { text, invalid: text.length > entry.limit, sameAsDefault: stored !== '' && stored === base }
     }
     return {
       texts,

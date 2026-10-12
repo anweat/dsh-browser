@@ -73,9 +73,11 @@ export function apply(ctx: Context): void {
 
   // The Host derives the settings page from the plugin entry's own Config
   // schema, keyed by the loader entry id; the shared form service reads it.
-  const controller = new BrowserSettingsController(ctx.configForms.get<Record<string, unknown>>(SETTINGS_NAMESPACE))
-  const assets = new AutomationAssetsController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
-  const prompts = new PromptsStatusController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
+  const rpc = (ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc
+  const assets = new AutomationAssetsController(rpc)
+  const prompts = new PromptsStatusController(rpc)
+  // The form compares prompt text with the plugin's own default text, which the prompts controller loads.
+  const controller = new BrowserSettingsController(ctx.configForms.get<Record<string, unknown>>(SETTINGS_NAMESPACE), () => prompts.promptDefaults())
   const policy = new PolicyStatusController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
   ctx.effect(() => () => controller.dispose(), 'dsh-browser: settings controller')
   ctx.effect(() => () => prompts.dispose(), 'dsh-browser: prompts status controller')

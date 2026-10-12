@@ -219,6 +219,16 @@ function PolicyPanel(props: BrowserSettingsCardProps) {
   </section>
 }
 
+/** How much of a default text the placeholder shows; the rest is behind "view the full default text". */
+const PREVIEW_LINES = 6
+const PREVIEW_CHARS = 500
+
+function previewText(text: string): string {
+  const lines = text.split('\n')
+  const cut = lines.length > PREVIEW_LINES || text.length > PREVIEW_CHARS
+  return (lines.slice(0, PREVIEW_LINES).join('\n').slice(0, PREVIEW_CHARS)) + (cut ? ' …' : '')
+}
+
 /** Label and hint keys of each text control, by field id. */
 const PROMPT_LABELS: Record<PromptTextFieldId, { label: LabelKey; hint: LabelKey }> = {
   indexDescription: { label: 'promptsIndexDescription', hint: 'promptsIndexDescriptionHint' },
@@ -243,23 +253,34 @@ function PromptsPanel(props: BrowserSettingsCardProps & { disabled: boolean }) {
   useEffect(() => { if (!settings.saving) refreshPromptsStatus() }, [settings.saving, refreshPromptsStatus])
   const prompts = settings.prompts
   const report = status.status
+  const defaults = status.defaultTexts
   const text = (id: PromptTextFieldId) => {
     const spec = PROMPT_TEXT_FIELDS.find(entry => entry.id === id)!
     const state = prompts.texts[id]
     const labels = PROMPT_LABELS[id]
     const inputId = `plugin-config-dsh-browser-prompts-${id}`
-    const common = { id: inputId, className: `${css.input} ${state.invalid ? css.invalidInput : ''}`, value: state.text, disabled, 'aria-invalid': state.invalid || undefined, onChange: (value: string) => props.editPromptText(id, value) }
-    return <div key={id} className={css.field}>
+    // The default shows in the empty box (grey), so what the text looks like is visible without exporting anything.
+    const base = defaults?.texts[id]
+    const placeholder = base !== undefined ? previewText(base) : t(id === 'skillBodyFile' ? 'promptsNoBodyFile' : id === 'skillAppend' ? 'promptsNoAppend' : 'promptsDefaultLoading')
+    const common = { id: inputId, className: `${css.input} ${state.invalid ? css.invalidInput : ''}`, value: state.text, placeholder, disabled, 'aria-invalid': state.invalid || undefined, onChange: (value: string) => props.editPromptText(id, value) }
+    return <div key={id} className={css.field} data-dsh-browser-prompt={id}>
       <div className={css.fieldHead}>
         <label className={css.label} htmlFor={inputId}>{t(labels.label)}</label>
-        {state.text ? <button type="button" className={css.reset} disabled={disabled} onClick={() => props.editPromptText(id, '')}>{t('promptsReset')}</button> : null}
+        <span className={css.actions}>
+          {base !== undefined && state.text === '' ? <button type="button" className={css.reset} disabled={disabled} onClick={() => props.editPromptText(id, base)} data-dsh-browser-prompt-start>{t('promptsStartFromDefault')}</button> : null}
+          {state.text ? <button type="button" className={css.reset} disabled={disabled} onClick={() => props.editPromptText(id, '')}>{t('promptsReset')}</button> : null}
+        </span>
       </div>
       {spec.multiline
         ? <textarea {...common} className={`${common.className} ${css.textarea}`} rows={id === 'rootNote' ? 3 : 5} spellCheck={false} onChange={event => common.onChange(event.currentTarget.value)} />
         : <input {...common} type="text" onChange={event => common.onChange(event.currentTarget.value)} />}
-      <p className={state.invalid ? css.failed : css.hint}>{state.invalid ? t('promptsTooLong') : t(labels.hint)}{spec.limit > 1024 || state.text ? ` (${state.text.length}/${spec.limit})` : ''}</p>
+      <p className={state.invalid ? css.failed : css.hint}>{state.invalid ? t('promptsTooLong') : state.sameAsDefault || (base !== undefined && state.text === base) ? t('promptsSameAsDefault') : t(labels.hint)}{spec.limit > 1024 || state.text ? ` (${state.text.length}/${spec.limit})` : ''}</p>
+      {base !== undefined && base.split('\n').length > PREVIEW_LINES || (base?.length ?? 0) > PREVIEW_CHARS
+        ? <details data-dsh-browser-prompt-full><summary>{t('promptsDefaultFull')}</summary><pre className={css.code}>{base}</pre></details>
+        : null}
     </div>
   }
+  const extrasPlaceholder = defaults ? previewText(JSON.stringify(defaults.extras, null, 2)) : '{"groups":{"act":{"summary":"…"}},"actions":{"act.click":{"summary":"…","notes":"…"}},"errorHints":{"DEADLINE":"…"}}'
   const budgetLine = report ? `${t('promptsL0')}: ~${report.budget.l0Tokens} ${t('promptsTokens')} (${t('promptsBudget')} ${report.budget.l0Budget}) · ${t('promptsLargest')}: ${report.budget.largestLayer.name} ~${report.budget.largestLayer.tokens} (${t('promptsBudget')} ${report.budget.layerBudget})` : ''
   return <section className={css.section} data-dsh-browser-prompts>
     <div className={css.sectionHead}><h3>{t('prompts')}</h3><p>{t('promptsHint')}</p></div>
@@ -283,9 +304,12 @@ function PromptsPanel(props: BrowserSettingsCardProps & { disabled: boolean }) {
     <div className={css.field}>
       <div className={css.fieldHead}>
         <label className={css.label} htmlFor="plugin-config-dsh-browser-prompts-extras">{t('promptsExtras')}</label>
-        {prompts.extras.text ? <button type="button" className={css.reset} disabled={disabled} onClick={props.resetPromptExtras}>{t('promptsExtrasReset')}</button> : null}
+        <span className={css.actions}>
+          {defaults && prompts.extras.text === '' ? <button type="button" className={css.reset} disabled={disabled} onClick={() => props.editPromptExtras(JSON.stringify(defaults.extras, null, 2))} data-dsh-browser-prompt-start>{t('promptsStartFromDefault')}</button> : null}
+          {prompts.extras.text ? <button type="button" className={css.reset} disabled={disabled} onClick={props.resetPromptExtras}>{t('promptsExtrasReset')}</button> : null}
+        </span>
       </div>
-      <textarea id="plugin-config-dsh-browser-prompts-extras" className={`${css.input} ${css.textarea} ${css.code} ${prompts.extras.invalid ? css.invalidInput : ''}`} rows={10} spellCheck={false} disabled={disabled} aria-invalid={prompts.extras.invalid || undefined} value={prompts.extras.text} onChange={event => props.editPromptExtras(event.currentTarget.value)} />
+      <textarea id="plugin-config-dsh-browser-prompts-extras" className={`${css.input} ${css.textarea} ${css.code} ${prompts.extras.invalid ? css.invalidInput : ''}`} rows={10} spellCheck={false} disabled={disabled} aria-invalid={prompts.extras.invalid || undefined} value={prompts.extras.text} placeholder={extrasPlaceholder} onChange={event => props.editPromptExtras(event.currentTarget.value)} />
       <p className={prompts.extras.invalid ? css.failed : css.hint} role={prompts.extras.invalid ? 'alert' : undefined}>{prompts.extras.invalid ? t('promptsExtrasInvalid') : t('promptsExtrasHint')}</p>
     </div>
     <div className={css.notice} role="status" data-dsh-browser-prompts-status>
