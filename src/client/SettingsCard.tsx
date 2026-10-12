@@ -55,7 +55,8 @@ function formLabels(t: Translator): SettingsFormLabels {
 const SECTION_LAYOUT: readonly { title: LabelKey; hint: LabelKey; fields: readonly string[]; notes?: readonly string[] }[] = [
   { title: 'freedom', hint: 'freedomHint', fields: ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled'] },
   { title: 'runtime', hint: 'runtimeHint', fields: ['browserRuntime', 'channel', 'headless', 'autoInstall', 'executablePath', 'cdpPort', 'maxSessions', 'args'] },
-  { title: 'advanced', hint: 'advancedHint', fields: ['storageStatePath', 'defaultAuthProfile', 'snapshotDir', 'verbose'], notes: CONFIG_FILE_ONLY_FIELDS },
+  { title: 'context', hint: 'contextHint', fields: ['viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass'] },
+  { title: 'advanced', hint: 'advancedHint', fields: ['storageStatePath', 'defaultAuthProfile', 'snapshotDir', 'downloadDir', 'downloadMaxBytes', 'verbose'], notes: CONFIG_FILE_ONLY_FIELDS },
 ]
 
 /** The usage section's JSON boxes. */
@@ -78,7 +79,7 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
   // Single-input fields live in `state.fields`; the JSON-shaped ones are read
   // from the model directly, because the card renders them as code editors
   // rather than one-line inputs.
-  const numeric = new Set<string>(['cdpPort', 'maxSessions'])
+  const numeric = new Set<string>(['cdpPort', 'maxSessions', 'downloadMaxBytes', 'viewportWidth', 'viewportHeight'])
   const field = (name: string) => {
     const fieldState = SINGLE_INPUT_FIELDS.has(name) ? state.fields[name as SectionField] : state.jsonFields[name]
     const policyKeys = POLICY_KEY_LISTS[name]

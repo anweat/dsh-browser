@@ -20,6 +20,8 @@ export type SectionField =
   | 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
   | 'autoInstall' | 'storageStatePath' | 'defaultAuthProfile'
   | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'maxSessions'
+  | 'downloadDir' | 'downloadMaxBytes'
+  | 'viewportMode' | 'viewportWidth' | 'viewportHeight' | 'userAgent' | 'locale' | 'timezoneId' | 'proxyServer' | 'proxyBypass'
 
 /** Retained name for callers that predate the section/JSON split. */
 export type SettingField = SectionField
@@ -157,6 +159,16 @@ export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   textField('defaultAuthProfile'),
   textField('executablePath'),
   textField('snapshotDir'),
+  textField('downloadDir'),
+  rangedNumberField('downloadMaxBytes', 1, 10 * 1024 * 1024 * 1024),
+  enumField('viewportMode', ['window', '720p', '1080p', 'custom']),
+  rangedNumberField('viewportWidth', 200, 7680),
+  rangedNumberField('viewportHeight', 200, 4320),
+  textField('userAgent'),
+  textField('locale'),
+  textField('timezoneId'),
+  textField('proxyServer'),
+  textField('proxyBypass'),
   booleanField('verbose'),
 ] as const
 
