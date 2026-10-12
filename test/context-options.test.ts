@@ -150,11 +150,11 @@ test('the plugin applies and registers its tools with a configuration that used 
   const registered: string[] = []
   const ctx = new Context()
   ctx.provide('tools', { register(tool: { name: string }) { registered.push(tool.name); return () => {} } })
-  // Parsed by the plugin's own schema first, as the Host does.
-  const config = (Config as unknown as (value: unknown) => never)({
+  // The raw object: cordis parses it with the plugin's own schema, as the Host does.
+  const config = ({
     snapshotDir: path.join(dir, 'snap'), downloadDir: 'relative/dir', browserDataDir: path.join(dir, 'data'),
     viewportMode: 'custom', proxyServer: 'ftp://127.0.0.1:1', timezoneId: 'Mars/Base', downloadMaxBytes: 0, viewportWidth: 1, proxy: { server: 'x' },
-  })
+  }) as never
   const fiber = ctx.plugin(plugin as never, config)
   await new Promise(resolve => setTimeout(resolve, 60))
   try {
