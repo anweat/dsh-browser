@@ -27,6 +27,7 @@ Load this when you need a file on disk, or the page must be opened with another 
 
 - An option you leave out keeps the context's current value. A different value closes the old context (its pages and any popups are gone, cookies outside an AuthProfile are dropped) and opens the page in a new one; the result says `contextRebuilt` and lists `changed`.
 - `target.close` returns the session to the configured defaults.
+- Every `target.open` result lists the whole parameter set in effect (`contextOptions`) and where each value comes from (`contextSources`: `call`, `session` for an earlier call kept by the context, `default`). A parameter you leave out uses that default, so copy nothing: give only the keys you change.
 - `proxyServer` and `userAgent` ask for approval (denied in `read-only`). Proxy accounts and passwords are not supported: never put credentials in `proxyServer`.
 - Invalid values return `INVALID_ARGS` and leave the current page alone.
 

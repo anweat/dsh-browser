@@ -37,7 +37,7 @@ import { installDialogGuard } from './dialogs.ts'
 import { TargetStaleError, resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
 import { SENSITIVE_NAME, SessionJournal } from './journal.ts'
 import { describeScan, fitObservation, normalizeObserve, scanPage, scopeBase, type ObserveRegion, type ObserveSection } from './observe.ts'
-import { describeContextOptions, differingContextOptions, effectiveContextOptions, resolveCallOptions, sameContextOptions, toPlaywrightOptions, type CallContextInput, type ContextOptions } from './context-options.ts'
+import { contextSources, describeContextOptions, differingContextOptions, effectiveContextOptions, resolveCallOptions, sameContextOptions, toPlaywrightOptions, type CallContextInput, type ContextOptions } from './context-options.ts'
 import {
   DOWNLOAD_HISTORY_LIMIT, DownloadLimitError, claimDownloadPath, contentDispositionFilename, removeQuietly, resolveDownloadFilename, sanitizeDownloadName,
   streamToFile, temporaryDownloadPath, writeBufferToFile, type DownloadRecord,
@@ -102,6 +102,8 @@ export interface InteractiveState {
   closedPage?: true
   /** target.open only: the context options in effect, when the call set any or the context was rebuilt. */
   contextOptions?: Record<string, unknown>
+  /** target.open only: where each value of `contextOptions` comes from: `call` (this call), `session` (an earlier call kept by the context), `default` (configuration). */
+  contextSources?: Record<string, 'call' | 'session' | 'default'>
   /** target.open only: the session's context was replaced because the call needed different options (or login state); its pages are gone. */
   contextRebuilt?: { changed: string[]; note: string }
 }
@@ -1463,7 +1465,10 @@ export class BrowserService {
     const applied = describeContextOptions(state.contextOptions ?? {})
     return {
       ...result,
-      ...Object.keys(wanted).length > 0 || rebuilt ? { contextOptions: applied } : {},
+      // The whole parameter set in effect, always: the configured defaults with what this call (or the context from an
+      // earlier call) changed, each value tagged with where it came from.
+      contextOptions: applied,
+      contextSources: contextSources(state.contextOptions ?? {}, this.config.contextDefaults, wanted),
       ...rebuilt ? { contextRebuilt: {
         changed: rebuilt,
         note: 'The session\'s previous context was closed and a new one created because ' + rebuilt.join(', ') + ' changed; its pages (popups included) are gone and cookies not kept in an auth profile were dropped.',

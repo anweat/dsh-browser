@@ -196,6 +196,32 @@ export function toPlaywrightOptions(options: ContextOptions): Record<string, unk
   }
 }
 
+/** Which parameter each value of an applied set comes from: this call, an earlier call of the session (carried by its context), or the defaults. */
+export function contextSources(applied: ContextOptions, defaults: ContextOptions, call: ContextOptions): Record<string, 'call' | 'session' | 'default'> {
+  const sources: Record<string, 'call' | 'session' | 'default'> = {}
+  const decide = (key: string, present: boolean, inCall: boolean, same: boolean): void => {
+    if (present) sources[key] = inCall ? 'call' : same ? 'default' : 'session'
+  }
+  const sameAs = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+  decide('viewport', !!applied.viewport, !!call.viewport, sameAs(applied.viewport, defaults.viewport))
+  decide('userAgent', !!applied.userAgent, !!call.userAgent, applied.userAgent === defaults.userAgent)
+  decide('locale', !!applied.locale, !!call.locale, applied.locale === defaults.locale)
+  decide('timezoneId', !!applied.timezoneId, !!call.timezoneId, applied.timezoneId === defaults.timezoneId)
+  decide('proxyServer', !!applied.proxy, !!call.proxy, applied.proxy?.server === defaults.proxy?.server && applied.proxy?.bypass === defaults.proxy?.bypass)
+  return sources
+}
+
+/** One line for the action detail: the context defaults in force, so a caller changes only what it needs. */
+export function describeDefaultsLine(defaults: ContextOptions): string {
+  const view = describeContextOptions(defaults) as { viewport?: { width: number; height: number }; userAgent?: string; locale?: string; timezoneId?: string; proxyServer?: string }
+  const shown = (value: string | undefined, none: string) => value ?? none
+  return 'Current defaults (a parameter you leave out uses them; give only the keys you change): '
+    + `viewport ${view.viewport ? `${view.viewport.width}x${view.viewport.height}` : 'window default'}, `
+    + `userAgent ${shown(view.userAgent && JSON.stringify(view.userAgent.length > 60 ? view.userAgent.slice(0, 57) + '...' : view.userAgent), "browser's own")}, `
+    + `locale ${shown(view.locale, "browser's own")}, timezoneId ${shown(view.timezoneId, "machine's")}, proxyServer ${shown(view.proxyServer, 'none')}. `
+    + 'This session\'s own context may carry earlier overrides; the result of target.open lists the full set in effect.'
+}
+
 /** The options as the model sees them in a result: only what was actually set. */
 export function describeContextOptions(options: ContextOptions): Record<string, unknown> {
   return {

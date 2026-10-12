@@ -23,6 +23,8 @@ export interface IndexEnvironment {
   runtime?: { chromiumInstalled?: boolean; opencliInstalled?: boolean; opencliEnabled?: boolean }
   /** Deployment overrides of the text (`prompts` configuration); absent means the built-in text everywhere. */
   prompts?: ResolvedPrompts
+  /** Per-action line about the defaults in force (target.open, target.download), shown in the action detail only. */
+  defaultsLines?: Readonly<Record<string, string>>
 }
 
 // The text of a catalog entry: the configured override, else the one in the registry.
@@ -228,6 +230,7 @@ export function renderAction(name: string, env: IndexEnvironment): string {
     `${action.name} - ${summaryOf(action, env)}`,
     `group ${action.group} | ${action.mutating ? 'changes state' : 'read/observe'} | ${reason ? `UNAVAILABLE: ${reason}` : note ? `approval: ${note}` : 'no approval needed'}`,
     ...notesOf(action, env) ? [notesOf(action, env)!] : [],
+    ...env.defaultsLines?.[action.name] ? [env.defaultsLines[action.name]!] : [],
     'args:',
     ...describeParams(action.params),
     ...exampleLine(action),

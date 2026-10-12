@@ -174,7 +174,7 @@ function fakeBrowser() {
         on() {},
         async addInitScript() {},
         async newPage() {
-          return { on() {}, isClosed: () => entry.closed, async close() {}, mainFrame: () => ({}), url: () => 'about:blank' }
+          return { on() {}, isClosed: () => entry.closed, async close() {}, mainFrame: () => ({}), url: () => 'about:blank', setDefaultTimeout() {}, async waitForLoadState() {}, async waitForTimeout() {} }
         },
         async close() { entry.closed = true },
         async storageState() { return {} },
@@ -268,4 +268,41 @@ test('a download over the size cap maps to ACTION_FAILED with a precise hint, ne
   // The old wording would have been read as a cancellation; the message itself no longer says "aborted".
   assert.doesNotMatch(new DownloadLimitError(1).message, /abort/)
   assert.equal(mapError(new Error('the operation was aborted'), 'target.download').code, 'CANCELLED')
+})
+
+test('target.open always echoes the full parameter set in effect, tagged with where each value comes from', async () => {
+  const { svc } = service({ viewportMode: '720p', locale: 'de-DE' })
+  const { browser } = fakeBrowser()
+  ;(svc as any).browser = browser
+  // navigation and page reads need a real page; stub them so open() runs its own logic on the fake.
+  ;(svc as any).navigate = async () => ({})
+  ;(svc as any).readState = async () => ({ url: 'https://e.test/', title: 't', text: '' })
+  const first = await svc.open('https://e.test/', { session: 'S' }) as any
+  assert.deepEqual(first.contextOptions, { viewport: { width: 1280, height: 720 }, locale: 'de-DE' })
+  assert.deepEqual(first.contextSources, { viewport: 'default', locale: 'default' })
+  const second = await svc.open('https://e.test/', { session: 'S', viewport: { width: 390, height: 844 }, userAgent: 'Mobile/1' } as never) as any
+  assert.deepEqual(second.contextOptions, { viewport: { width: 390, height: 844 }, locale: 'de-DE', userAgent: 'Mobile/1' })
+  assert.deepEqual(second.contextSources, { viewport: 'call', locale: 'default', userAgent: 'call' })
+  assert.deepEqual(second.contextRebuilt.changed, ['viewport', 'userAgent'])
+  // A later call that says nothing keeps the context's values and says they came from the earlier call.
+  const third = await svc.open('https://e.test/', { session: 'S' }) as any
+  assert.deepEqual(third.contextSources, { viewport: 'session', locale: 'default', userAgent: 'session' })
+  assert.equal(third.contextRebuilt, undefined)
+})
+
+test('the target.open and target.download details name the defaults in force; the always-on layers do not grow', async () => {
+  const config = resolveConfig({ viewportMode: 'custom', viewportWidth: 1024, viewportHeight: 768, proxyServer: 'socks5://127.0.0.1:1080', downloadDir: process.platform === 'win32' ? 'C:\\dl' : '/var/dl', downloadMaxBytes: 5000, automationMode: 'unrestricted' } as never)
+  const { registerTools } = await import('../src/tools.ts')
+  const tools = new Map<string, any>()
+  registerTools({ tools: { register: (tool: any) => tools.set(tool.name, tool) } } as never, config, {} as never, undefined)
+  const index = (args: Record<string, unknown>) => tools.get('browser_index').execute(args, { signal: new AbortController().signal }).then((value: any) => value.text as string)
+  const open = await index({ action: 'target.open' })
+  assert.match(open, /Current defaults \(a parameter you leave out uses them; give only the keys you change\): viewport 1024x768/)
+  assert.match(open, /proxyServer socks5:\/\/127\.0\.0\.1:1080/)
+  assert.ok(open.length < 3500, `the detail layer stays inside its budget (${open.length} characters)`)
+  const download = await index({ action: 'target.download' })
+  assert.match(download, /Defaults in force: downloadDir .*dl, downloadMaxBytes 5000/)
+  // Other actions and the group listing are unchanged.
+  assert.doesNotMatch(await index({ action: 'act.click' }), /Current defaults/)
+  assert.doesNotMatch(await index({ group: 'target' }), /Current defaults|Defaults in force/)
 })

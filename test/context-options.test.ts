@@ -161,3 +161,19 @@ test('the plugin applies and registers its tools with a configuration that used 
     assert.deepEqual(registered.sort(), ['browser_call', 'browser_index'])
   } finally { fiber.dispose() }
 })
+
+test('contextSources tags each value of the applied set with where it came from', async () => {
+  const { contextSources, describeDefaultsLine } = await import('../src/context-options.ts')
+  const defaults = { viewport: { width: 1280, height: 720 }, locale: 'en-US', proxy: { server: 'http://p:1' } }
+  const applied = { viewport: { width: 390, height: 844 }, locale: 'en-US', userAgent: 'Mobile/1', proxy: { server: 'http://p:1' }, timezoneId: 'UTC' }
+  assert.deepEqual(contextSources(applied, defaults, { viewport: { width: 390, height: 844 } }), { viewport: 'call', locale: 'default', userAgent: 'session', proxyServer: 'default', timezoneId: 'session' })
+  assert.deepEqual(contextSources(defaults, defaults, {}), { viewport: 'default', locale: 'default', proxyServer: 'default' })
+  assert.deepEqual(contextSources({}, defaults, {}), {})
+  const line = describeDefaultsLine(defaults)
+  assert.match(line, /viewport 1280x720/)
+  assert.match(line, /locale en-US/)
+  assert.match(line, /proxyServer http:\/\/p:1/)
+  assert.match(line, /userAgent browser's own/)
+  assert.match(line, /give only the keys you change/)
+  assert.match(describeDefaultsLine({ userAgent: 'x'.repeat(200) }), /userAgent "x{57}\.\.\."/)
+})

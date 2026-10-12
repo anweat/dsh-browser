@@ -25,6 +25,7 @@ import { AutomationDevelopmentService } from './automation-development.ts'
 import { ACTIONS, CALL_TOOL, INDEX_TOOL, flatToolName, traitsFor } from './actions/registry.ts'
 import { expandParams } from './actions/schema.ts'
 import { renderIndex, type IndexEnvironment } from './actions/index-view.ts'
+import { describeDefaultsLine } from './context-options.ts'
 import { runAction, type RunEnvironment } from './actions/run.ts'
 import { COMPLIANCE_NOTICE } from './actions/shared.ts'
 import { CALL_PARAMETERS, INDEX_PARAMETERS, callDescription, indexDescription } from './tool-defs.ts'
@@ -133,6 +134,13 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
         mode: config.automationMode, options: config.automationAssets, enabled: config.enabled,
         skillAvailable: runtime.skillAvailable?.() ?? false,
         ...prompts ? { prompts } : {},
+      }
+      // The defaults in force go in the detail of the two actions that copy them, never in the always-on layers.
+      if (args.action === 'target.open' || args.action === 'target.download') {
+        env.defaultsLines = {
+          'target.open': describeDefaultsLine(config.contextDefaults),
+          'target.download': `Defaults in force: downloadDir ${config.downloadDir}, downloadMaxBytes ${config.downloadMaxBytes}. The request is made from this session's context (its login state, proxy and user agent); leave out filename to use the server's name.`,
+        }
       }
       if (!args.group && !args.action && !args.query) {
         try {
