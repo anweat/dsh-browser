@@ -14,6 +14,8 @@ export interface RenderOptions {
   selected?: Record<string, unknown>
   editor?: Record<string, unknown>
   policy?: Record<string, unknown>
+  /** Fields merged over the policy overlay report (for example a `warning` and `overlayActive: false`). */
+  policyReport?: Record<string, unknown>
   prompts?: Record<string, unknown>
   /** The exported default text, when it has been loaded. */
   promptsDefaults?: string
@@ -45,6 +47,7 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
     removedByOverlay: ['old'],
     usagePolicy: { minDelayMs: { value: 2000, baseline: 750, overridden: true } },
     audit: [{ revision: 3, at: '2026-01-01T00:00:00Z', source: 'agent', session: 'session:x', action: 'runtime.set_usage_policy', reason: 'rate limited', direction: 'tighten', changes: ['usagePolicy.minDelayMs: 750 -> 2000 (stricter)'] }],
+    ...options.policyReport,
   } }
   const props = {
     view: 'page', t,

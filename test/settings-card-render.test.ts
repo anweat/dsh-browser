@@ -110,6 +110,22 @@ test('the policy boxes list every key the code accepts, in both locales (maxTest
   }
 })
 
+test('the policy overlay clear button is usable while a corrupt overlay file is being ignored (the warning tells people to use it)', (t) => {
+  if (skip) return t.skip(skip)
+  const clear = (html: string) => html.match(/<button[^>]*data-dsh-browser-policy-clear[^>]*>/)?.[0] ?? ''
+  const disabled = (html: string) => /\sdisabled(=|\s|>)/.test(clear(html))
+  for (const locale of ['en', 'zh'] as const) {
+    assert.ok(clear(renderCard!({ locale }).html), 'the card has the clear button')
+    assert.equal(disabled(renderCard!({ locale }).html), false, 'enabled while an overlay is active')
+    // Nothing to clear: no overlay and no warning.
+    assert.equal(disabled(renderCard!({ locale, policyReport: { overlayActive: false } }).html), true, 'disabled when there is nothing to clear')
+    // The overlay file was edited outside the plugin: it is ignored, the report says so, and clearing is the way out.
+    const ignored = renderCard!({ locale, policyReport: { overlayActive: false, warning: 'policy overlay was ignored: the checksum does not match' } }).html
+    assert.equal(disabled(ignored), false, 'enabled while the overlay file is ignored with a warning')
+    assert.ok(ignored.includes('data-dsh-browser-policy-warning'))
+  }
+})
+
 test('the prompt section offers "Export default text" and no longer asks anyone to run pnpm', (t) => {
   if (skip) return t.skip(skip)
   for (const locale of ['en', 'zh'] as const) {

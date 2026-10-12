@@ -172,7 +172,7 @@ function PolicyPanel(props: BrowserSettingsCardProps) {
         </li>)}</ul> : <p className={css.hint}>{t('policyNoAudit')}</p>}
         {state.error ? <p className={css.failed} role="alert">{state.error}</p> : null}
         <div className={css.actions}>
-          <button type="button" className={css.secondary} disabled={state.busy || !report.overlayActive} onClick={() => void props.clearPolicyOverlay('all')} data-dsh-browser-policy-clear>{t('policyClear')}</button>
+          <button type="button" className={css.secondary} disabled={state.busy || (!report.overlayActive && !report.warning)} onClick={() => void props.clearPolicyOverlay('all')} data-dsh-browser-policy-clear>{t('policyClear')}</button>
         </div>
         <p className={css.hint}>{t('policyUnrestrictedNote')}</p>
       </> : null}
