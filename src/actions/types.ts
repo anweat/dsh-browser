@@ -50,6 +50,8 @@ export type ApprovalClass =
   | 'interaction'
   | 'install'
   | 'upload'
+  | 'download'
+  | 'context-options'
   | 'evaluate'
   | 'userscript'
   | 'opencli'

@@ -13,6 +13,14 @@ import { resolveUsagePolicy, type UsagePolicy, type UsagePolicyInput } from './u
 import { PROMPT_LIMITS } from './prompt-limits.ts'
 import { promptsSource, type PromptsSource } from './prompts.ts'
 import { resolveAutomationAssetPolicy, type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts'
+import { VIEWPORT_LIMITS, VIEWPORT_MODES, resolveContextDefaults, type ContextOptions, type ViewportMode } from './context-options.ts'
+
+/** Schema keys that are not settings (see {@link MISPLACED_KEYS}); the settings card has no control for them. */
+export const MISPLACED_CONFIG_KEYS: readonly string[] = ['viewport', 'proxy', 'contextOptions', 'download', 'downloads']
+
+export const DEFAULT_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
+/** Upper bound of downloadMaxBytes: 10 GiB. */
+export const MAX_DOWNLOAD_BYTES_LIMIT = 10 * 1024 * 1024 * 1024
 
 export const BROWSER_RUNTIMES = ['playwright', 'patchright'] as const
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number]
@@ -77,6 +85,29 @@ export interface Config {
   autoInstall: boolean
   /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
   snapshotDir?: string
+  /** Directory the downloads of `target.download` and browser-triggered downloads are saved to; defaults to $DSH_HOME/data/browser/downloads. */
+  downloadDir?: string
+  /** Largest single download in bytes; a bigger one is aborted and removed. Default 100 MiB. */
+  downloadMaxBytes?: number
+  /**
+   * Viewport of every context the plugin creates: `window` (default, Playwright's own default size),
+   * `720p` (1280x720), `1080p` (1920x1080) or `custom` (viewportWidth x viewportHeight).
+   */
+  viewportMode?: ViewportMode
+  /** Custom viewport width in CSS pixels; only read with viewportMode=custom. */
+  viewportWidth?: number
+  /** Custom viewport height in CSS pixels; only read with viewportMode=custom. */
+  viewportHeight?: number
+  /** User agent of every context; unset keeps the browser's own. */
+  userAgent?: string
+  /** BCP 47 locale of every context (en-US, zh-CN); unset keeps the browser's own. */
+  locale?: string
+  /** IANA time zone of every context (Asia/Shanghai); unset keeps the machine's. */
+  timezoneId?: string
+  /** Proxy of every context: `http://host:port`, `socks5://host:port`. No account or password is supported. */
+  proxyServer?: string
+  /** Comma-separated hosts that skip the proxy (`example.com,.internal.test`); needs proxyServer. */
+  proxyBypass?: string
   verbose: boolean
   /** Optional remote debugging port to expose CDP for external tools (e.g. 9222). */
   cdpPort?: number
@@ -184,6 +215,23 @@ export const Config = z.object({
   }).description('Overrides of the model-facing text. The settings card button Export default text (or `pnpm prompts:dump` in a repository checkout) prints every key with its default. Values over the length limits and unknown keys are ignored and reported by runtime.status. Tool descriptions apply after a restart; everything else applies on the next call.').volatile(),
   autoInstall: z.boolean().default(false).volatile(),
   snapshotDir: z.string().volatile(),
+  downloadDir: z.string().description('Absolute directory downloads are saved to; defaults to $DSH_HOME/data/browser/downloads').volatile(),
+  downloadMaxBytes: z.number().min(1).max(MAX_DOWNLOAD_BYTES_LIMIT).step(1).default(DEFAULT_DOWNLOAD_MAX_BYTES).description('Largest single download in bytes (default 100 MiB); a bigger one is aborted and removed').volatile(),
+  viewportMode: z.string().default('window').description(`Viewport of every context: ${VIEWPORT_MODES.join(' | ')} (window = the browser default)`).volatile(),
+  viewportWidth: z.number().min(VIEWPORT_LIMITS.minWidth).max(VIEWPORT_LIMITS.maxWidth).step(1).description('Custom viewport width; only with viewportMode=custom').volatile(),
+  viewportHeight: z.number().min(VIEWPORT_LIMITS.minHeight).max(VIEWPORT_LIMITS.maxHeight).step(1).description('Custom viewport height; only with viewportMode=custom').volatile(),
+  userAgent: z.string().description('User agent of every context; unset keeps the browser\'s own').volatile(),
+  locale: z.string().description('BCP 47 locale such as en-US or zh-CN').volatile(),
+  timezoneId: z.string().description('IANA time zone such as Asia/Shanghai').volatile(),
+  proxyServer: z.string().description('Proxy such as http://127.0.0.1:7890 or socks5://127.0.0.1:1080; accounts and passwords are not supported').volatile(),
+  proxyBypass: z.string().description('Comma-separated hosts that skip the proxy; needs proxyServer').volatile(),
+  // Not settings: these names exist so that the nested shape people expect fails loudly in `resolveConfig`
+  // instead of being dropped by schema parsing, which is how a nested `viewport` was once ignored without a word.
+  viewport: z.any(),
+  proxy: z.any(),
+  contextOptions: z.any(),
+  download: z.any(),
+  downloads: z.any(),
   verbose: z.boolean().default(false).volatile(),
   cdpPort: z.number().min(1).max(65_535).step(1).description('Optional remote debugging port to expose CDP for external tools (e.g. 9222)').volatile(),
   args: z.array(z.string()).default([]).description('Additional Chromium CLI launch arguments').volatile(),
@@ -209,15 +257,53 @@ export interface ResolvedConfig {
   prompts: PromptsSource
   autoInstall: boolean
   snapshotDir: string
+  downloadDir: string
+  downloadMaxBytes: number
+  /** Context options applied to every context the plugin creates (viewport, user agent, locale, time zone, proxy). */
+  contextDefaults: ContextOptions
+  /** Settings that were read but have no effect, shown in `runtime.status`. */
+  configWarnings: string[]
   verbose: boolean
   cdpPort?: number
   args: string[]
   maxSessions: number
 }
 
+/**
+ * Where each nested spelling people try belongs, for the error that replaces silently ignoring it. These names are
+ * in the schema only so schema parsing keeps them long enough for `resolveConfig` to refuse them; they are not settings.
+ */
+const MISPLACED_KEYS: Record<string, string> = {
+  viewport: 'viewportMode (window | 720p | 1080p | custom), viewportWidth and viewportHeight',
+  proxy: 'proxyServer and proxyBypass (flat keys; proxy accounts are not supported)',
+  contextOptions: 'the flat keys viewportMode, viewportWidth, viewportHeight, userAgent, locale, timezoneId, proxyServer, proxyBypass',
+  download: 'downloadDir and downloadMaxBytes',
+  downloads: 'downloadDir and downloadMaxBytes',
+}
+
 export function defaultSnapshotDir(): string {
   const home = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
   return path.join(home, 'data', 'browser', 'snapshots')
+}
+
+export function defaultDownloadDir(): string {
+  const home = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
+  return path.join(home, 'data', 'browser', 'downloads')
+}
+
+/** `downloadDir` must be an absolute path: a relative one would depend on the host process's working directory. */
+export function resolveDownloadDir(value: unknown): string {
+  if (value === undefined || value === null || value === '') return defaultDownloadDir()
+  if (typeof value !== 'string' || !path.isAbsolute(value)) throw new Error('dsh-browser config: downloadDir must be an absolute directory path')
+  return path.normalize(value)
+}
+
+export function resolveDownloadMaxBytes(value: unknown): number {
+  if (value === undefined || value === null) return DEFAULT_DOWNLOAD_MAX_BYTES
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > MAX_DOWNLOAD_BYTES_LIMIT) {
+    throw new Error(`dsh-browser config: downloadMaxBytes must be an integer from 1 to ${MAX_DOWNLOAD_BYTES_LIMIT}`)
+  }
+  return value
 }
 
 /**
@@ -253,6 +339,19 @@ export function resolveConfig(config: Config): ResolvedConfig {
   }
   const optional = <T>(field: string): T | undefined => plain(c[field] as T | undefined)
   const snapshotDir = optional<string>('snapshotDir') ?? defaultSnapshotDir()
+  for (const [key, instead] of Object.entries(MISPLACED_KEYS)) {
+    if (optional<unknown>(key) !== undefined) throw new Error(`dsh-browser config: "${key}" is not a setting; use ${instead}`)
+  }
+  const context = resolveContextDefaults({
+    viewportMode: optional('viewportMode'),
+    viewportWidth: optional('viewportWidth'),
+    viewportHeight: optional('viewportHeight'),
+    userAgent: optional('userAgent'),
+    locale: optional('locale'),
+    timezoneId: optional('timezoneId'),
+    proxyServer: optional('proxyServer'),
+    proxyBypass: optional('proxyBypass'),
+  })
   return {
     enabled: read('enabled', true),
     channel: read('channel', 'chromium'),
@@ -268,6 +367,10 @@ export function resolveConfig(config: Config): ResolvedConfig {
     autoInstall: read('autoInstall', false),
     maxSessions: read('maxSessions', 8),
     snapshotDir,
+    downloadDir: resolveDownloadDir(optional('downloadDir')),
+    downloadMaxBytes: resolveDownloadMaxBytes(optional('downloadMaxBytes')),
+    contextDefaults: context.options,
+    configWarnings: context.warnings,
     verbose: read('verbose', false),
     authProfiles: read('authProfiles', {}),
     rulePacks: read('rulePacks', {}),

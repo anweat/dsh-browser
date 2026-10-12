@@ -36,6 +36,11 @@ import { installDialogGuard } from './dialogs.ts'
 import { TargetStaleError, resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
 import { SENSITIVE_NAME, SessionJournal } from './journal.ts'
 import { describeScan, fitObservation, normalizeObserve, scanPage, scopeBase, type ObserveRegion, type ObserveSection } from './observe.ts'
+import { describeContextOptions, differingContextOptions, effectiveContextOptions, resolveCallOptions, sameContextOptions, toPlaywrightOptions, type CallContextInput, type ContextOptions } from './context-options.ts'
+import {
+  DOWNLOAD_HISTORY_LIMIT, DownloadLimitError, claimDownloadPath, contentDispositionFilename, removeQuietly, resolveDownloadFilename, sanitizeDownloadName,
+  streamToFile, temporaryDownloadPath, writeBufferToFile, type DownloadRecord,
+} from './downloads.ts'
 
 /**
  * How many sessions may hold a browser context+page at once. Past this, the
@@ -94,6 +99,10 @@ export interface InteractiveState {
   screenshotPath?: string
   /** The page the action ran on closed itself (a popup's own close button): url/title/text describe the page the session fell back to, or are empty. */
   closedPage?: true
+  /** target.open only: the context options in effect, when the call set any or the context was rebuilt. */
+  contextOptions?: Record<string, unknown>
+  /** target.open only: the session's context was replaced because the call needed different options (or login state); its pages are gone. */
+  contextRebuilt?: { changed: string[]; note: string }
 }
 
 /** The page state after a recipe, plus what the run did ({@link RecipeRunResult}). */
@@ -121,6 +130,37 @@ export interface EvaluateResult {
 
 export interface FileUploadResult extends InteractiveState {
   files: string[]
+}
+
+/** The outcome of `target.download`: where the file is and what it is. */
+export interface DownloadResult {
+  id: string
+  /** The URL that was asked for. */
+  url: string
+  /** The URL the bytes finally came from (after redirects), when it differs. */
+  finalUrl?: string
+  /** Absolute path of the saved file, inside `downloadDir`. */
+  path: string
+  /** The saved file's name (may carry a `-1` style suffix when the name was taken). */
+  filename: string
+  bytes: number
+  sha256: string
+  suggestedFilename: string
+  source: 'request' | 'browser'
+}
+
+function downloadResult(record: DownloadRecord, requestedUrl: string): DownloadResult {
+  return {
+    id: record.id,
+    url: requestedUrl,
+    ...record.url !== redactCaptureUrl(requestedUrl) ? { finalUrl: record.url } : {},
+    path: record.path!,
+    filename: path.basename(record.path!),
+    bytes: record.bytes!,
+    sha256: record.sha256!,
+    suggestedFilename: record.suggestedFilename,
+    source: record.source,
+  }
 }
 
 export type { BrowserFrameSpec, BrowserLocatorSpec, BrowserTarget } from './locator.ts'
@@ -183,6 +223,12 @@ export interface BrowserStatus {
   externalUserscriptPolicy: 'deny' | 'ask' | 'allow'
   pageEvaluatePolicy: 'deny' | 'ask' | 'allow'
   fileUploadPolicy: 'deny' | 'ask' | 'allow'
+  downloadPolicy: 'deny' | 'ask' | 'allow'
+  /** Directory downloads are saved to, and the size cap of one download. */
+  downloadDir: string
+  downloadMaxBytes: number
+  /** Context options applied to every context (viewport, user agent, locale, time zone, proxy server); only the ones that are set. */
+  contextDefaults: Record<string, unknown>
   opencliRunPolicy: 'deny' | 'ask' | 'allow'
   chromiumInstalled: boolean
   chromiumExecutablePath?: string
@@ -353,6 +399,16 @@ interface SessionState {
   generationClock: number
   profile?: ResolvedAuthProfile
   rulePack?: ResolvedRulePack
+  /** Creation options of the live context (viewport, user agent, locale, time zone, proxy); compared on the next target.open. */
+  contextOptions?: ContextOptions
+  /** Downloads this session saved or failed to save, newest last, capped. Memory only; the files are on disk. */
+  downloads: DownloadRecord[]
+  /** Counter behind the `d1`, `d2`, ... download ids of this session. */
+  nextDownload: number
+  /** Save jobs of browser download events, so target.download can wait for the one its navigation triggered. */
+  downloadJobs: WeakMap<object, Promise<DownloadRecord>>
+  /** Filename a running target.download wants for the download its navigation triggers (consumed by that one event). */
+  downloadFilename?: string
   captureConsole: boolean
   captureNetwork: boolean
   capturedConsole: BrowserConsoleRecord[]
@@ -373,6 +429,9 @@ function newSessionState(): SessionState {
     pages: [],
     nextTarget: 1,
     generationClock: 0,
+    downloads: [],
+    nextDownload: 1,
+    downloadJobs: new WeakMap(),
     captureConsole: false,
     captureNetwork: false,
     capturedConsole: [],
@@ -572,6 +631,8 @@ export class BrowserService {
     state.context = undefined
     state.profile = undefined
     state.rulePack = undefined
+    state.contextOptions = undefined
+    state.downloads = []
     state.capturedConsole = []
     state.capturedRequests = []
     state.captureConsole = false
@@ -668,7 +729,20 @@ export class BrowserService {
     return response
   }
 
-  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack }> {
+  /**
+   * `newContext()` arguments that do not depend on the login state: the configured viewport, user agent, locale,
+   * time zone and proxy (or the per-call override that replaced them), plus downloads for interactive contexts.
+   *
+   * Proxy: Playwright applies `proxy` at context level on its own. Measured on Chromium 1243 (headless shell) with
+   * Playwright 1.62 and Patchright 1.62, a context created with `proxy` and a browser launched WITHOUT any launch
+   * `proxy` sent both page navigation and `context.request` through the proxy, so no `proxy: { server: 'per-context' }`
+   * launch option is set. (Chromium bypasses the proxy for loopback hosts regardless; that is the browser's rule.)
+   */
+  private contextCreationOptions(options: ContextOptions, interactive: boolean): Record<string, unknown> {
+    return { ...toPlaywrightOptions(options), ...interactive ? { acceptDownloads: true } : {} }
+  }
+
+  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean; context?: ContextOptions; interactive?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack; contextOptions: ContextOptions }> {
     if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
     const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
@@ -684,7 +758,8 @@ export class BrowserService {
         origins: (state.origins ?? []).filter((origin: { origin: string }) => hostAllowed(new URL(origin.origin).hostname, profile.allowedDomains)),
       }
     }
-    const contextOptions = { ...stateOptions, ...(scopedState ? { storageState: scopedState } : {}) }
+    const applied = opts.context ?? this.config.contextDefaults
+    const contextOptions = { ...stateOptions, ...(scopedState ? { storageState: scopedState } : {}), ...this.contextCreationOptions(applied, opts.interactive === true) }
     let context: any
     for (let attempt = 0; attempt < 2; attempt++) {
       const browser = await this.ensure()
@@ -703,7 +778,7 @@ export class BrowserService {
       await context.close().catch(() => {})
       throw error
     }
-    return { context, ...profile ? { profile } : {}, ...rulePack ? { rulePack } : {} }
+    return { context, contextOptions: applied, ...profile ? { profile } : {}, ...rulePack ? { rulePack } : {} }
   }
 
   private async persistAndClose(session: { context: any; profile?: ResolvedAuthProfile }): Promise<void> {
@@ -1041,33 +1116,59 @@ export class BrowserService {
    * is confined to that bucket, which is what stops one session from observing
    * or mutating another's page, cookies, console or network log.
    */
-  private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string; session?: string } = {}): Promise<any> {
+  private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string; session?: string; context?: ContextOptions } = {}): Promise<any> {
+    return (await this.ensurePage(targetUrl, opts)).page
+  }
+
+  /**
+   * {@link ensureActivePage} plus what it had to do to the session's context. `context` carries the per-call creation
+   * options of `target.open`: an option the call leaves out keeps what the live context has (a context is only
+   * rebuilt for a value that is different, never because a later call said nothing), and a new context starts from
+   * the configured defaults. `rebuilt` names what differed when a live page was closed to make room for the new context.
+   */
+  private async ensurePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string; session?: string; context?: ContextOptions } = {}): Promise<{ page: any; rebuilt?: string[] }> {
     if (targetUrl && !['http:', 'https:'].includes(new URL(targetUrl).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
     const state = this.state(opts.session)
     if (state.page && (state.page.isClosed() || !this.browserConnected())) await this.closePage(state)
+    let rebuilt: string[] | undefined
+    let wanted = effectiveContextOptions(this.config.contextDefaults, opts.context)
     if (state.page && !state.page.isClosed()) {
-      if (!targetUrl) return state.page
-      if ((opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id && opts.rulePack === state.rulePack?.id) {
+      if (!targetUrl) return { page: state.page }
+      const applied = state.contextOptions ?? this.config.contextDefaults
+      wanted = { ...applied, ...opts.context }
+      const sameLogin = (opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id && opts.rulePack === state.rulePack?.id
+      const changedOptions = differingContextOptions(applied, wanted)
+      if (sameLogin && changedOptions.length === 0) {
         if (state.profile) this.authProfiles.resolve(state.profile.id, targetUrl)
         if (state.rulePack) resolveRulePack(this.config.rulePacks, state.rulePack.id, targetUrl)
-        return state.page
+        return { page: state.page }
       }
+      rebuilt = [
+        ...changedOptions,
+        ...(opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id ? [] : ['authProfile'],
+        ...opts.rulePack === state.rulePack?.id ? [] : ['rulePack'],
+      ]
       await this.closePage(state)
     }
     if (targetUrl) {
-      const session = await this.transientContext(targetUrl, opts)
+      const session = await this.transientContext(targetUrl, { ...opts, context: wanted, interactive: true })
       state.context = session.context
       state.profile = session.profile
       state.rulePack = session.rulePack
+      state.contextOptions = session.contextOptions
     } else {
       const browser = await this.ensure()
-      state.context = await browser.newContext(storageStateOptions(this.config.storageStatePath, 'global'))
+      state.context = await browser.newContext({
+        ...storageStateOptions(this.config.storageStatePath, 'global'),
+        ...this.contextCreationOptions(wanted, true),
+      })
+      state.contextOptions = wanted
     }
     // A popup (window.open, target=_blank) joins this session's page list; it never takes over the active page by itself.
     state.context.on('page', (opened: any) => { if (state.context) this.trackPage(state, opened) })
     state.page = await state.context.newPage()
     this.trackPage(state, state.page)
-    return state.page
+    return { page: state.page, ...rebuilt ? { rebuilt } : {} }
   }
 
   /**
@@ -1097,10 +1198,13 @@ export class BrowserService {
       state.context = undefined
       state.profile = undefined
       state.rulePack = undefined
+      state.contextOptions = undefined
       if (context) void this.persistAndClose({ context, ...profile ? { profile } : {} }).catch(() => {})
     }
     page.on('close', gone)
     page.on('crash', gone)
+    // The listener lives and dies with the page (and so with the context); the record goes to this session's own list.
+    page.on('download', (download: any) => { state.downloadJobs.set(download, this.saveBrowserDownload(state, download)) })
     page.on('console', (message: any) => {
       if (!state.captureConsole) return
       const location = message.location?.() as { url?: string } | undefined
@@ -1229,8 +1333,10 @@ export class BrowserService {
     return state
   }
 
-  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string; capture?: readonly ('console' | 'network')[]; session?: string } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage(url, opts)
+  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string; capture?: readonly ('console' | 'network')[]; session?: string } & CallContextInput = {}): Promise<InteractiveState> {
+    // Checked before anything is created or closed: a bad option must not cost the session its page.
+    const wanted = resolveCallOptions(opts)
+    const { page, rebuilt } = await this.ensurePage(url, { ...opts, context: wanted })
     const state = this.state(opts.session)
     this.resetCapture(state, opts.capture)
     page.setDefaultTimeout(30_000)
@@ -1238,7 +1344,16 @@ export class BrowserService {
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
     await applyRuleSteps(page, state.rulePack)
     if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
-    return this.readState(page, true)
+    const result = await this.readState(page, true)
+    const applied = describeContextOptions(state.contextOptions ?? {})
+    return {
+      ...result,
+      ...Object.keys(wanted).length > 0 || rebuilt ? { contextOptions: applied } : {},
+      ...rebuilt ? { contextRebuilt: {
+        changed: rebuilt,
+        note: 'The session\'s previous context was closed and a new one created because ' + rebuilt.join(', ') + ' changed; its pages (popups included) are gone and cookies not kept in an auth profile were dropped.',
+      } } : {},
+    }
   }
 
   async click(target: BrowserTarget, opts: { expectGeneration?: number; timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
@@ -1532,6 +1647,186 @@ export class BrowserService {
     return { ...fitted.record, ...fitted.truncation ? { truncation: fitted.truncation } : {} }
   }
 
+  // ── downloads (state is per session; files go only to config.downloadDir) ─────────────────
+
+  private pushDownload(state: SessionState, record: DownloadRecord): DownloadRecord {
+    state.downloads.push(record)
+    if (state.downloads.length > DOWNLOAD_HISTORY_LIMIT) state.downloads.splice(0, state.downloads.length - DOWNLOAD_HISTORY_LIMIT)
+    return record
+  }
+
+  private failedDownload(state: SessionState, url: string, suggestedFilename: string, source: DownloadRecord['source'], error: unknown): DownloadRecord {
+    return this.pushDownload(state, {
+      id: 'd' + state.nextDownload++, url: redactCaptureUrl(url), status: 'failed', source, suggestedFilename,
+      error: redactCaptureText(String(error instanceof Error ? error.message : error), 500), timestamp: new Date().toISOString(),
+    })
+  }
+
+  /**
+   * Save one browser download event (navigation to an attachment, a click, a script-created link) into the
+   * download directory and record the outcome in the session that owns the page. Never rejects: a failure is a
+   * `failed` record with the partial file removed, so nothing half-written is ever reported as a result.
+   */
+  private async saveBrowserDownload(state: SessionState, download: any): Promise<DownloadRecord> {
+    const requested = state.downloadFilename
+    state.downloadFilename = undefined
+    const url = String(download.url?.() ?? '')
+    const suggested = String(download.suggestedFilename?.() ?? '')
+    const dir = this.config.downloadDir
+    let temporary: string | undefined
+    try {
+      fs.mkdirSync(dir, { recursive: true })
+      const name = resolveDownloadFilename({ ...requested !== undefined ? { requested } : {}, suggested, url })
+      temporary = temporaryDownloadPath(dir)
+      const source = await download.createReadStream()
+      if (!source) throw new Error('the browser did not provide the downloaded bytes: ' + String(await download.failure?.() ?? 'unknown reason'))
+      const { bytes, sha256 } = await streamToFile(source, temporary, this.config.downloadMaxBytes)
+      const failure = await download.failure?.()
+      if (failure) throw new Error('the download failed: ' + String(failure))
+      if (bytes === 0) throw new Error('the download produced zero bytes; nothing was saved')
+      const saved = claimDownloadPath(dir, name, temporary)
+      temporary = undefined
+      return this.pushDownload(state, {
+        id: 'd' + state.nextDownload++, url: redactCaptureUrl(url), status: 'saved', source: 'browser', suggestedFilename: suggested || name,
+        path: saved, bytes, sha256, timestamp: new Date().toISOString(),
+      })
+    } catch (error) {
+      removeQuietly(temporary)
+      if (error instanceof DownloadLimitError) await download.cancel?.().catch(() => {})
+      return this.failedDownload(state, url, suggested, 'browser', error)
+    }
+  }
+
+  /**
+   * `target.download`: save a URL into the download directory.
+   *
+   * First an HTTP request made through the session's own context (its cookies and login state, its proxy and
+   * user agent); if that does not produce bytes, the URL is opened in a throwaway page of the same context and the
+   * attachment download that navigation triggers is captured. A request that returns nothing is an error, never a
+   * zero-byte file. The session's own page is not navigated.
+   */
+  async download(url: string, opts: { filename?: string; timeoutMs?: number; signal?: AbortSignal; session?: string } = {}): Promise<DownloadResult> {
+    this.assertEnabled()
+    let parsed: URL
+    try { parsed = new URL(url) } catch { throw new Error('target.download requires an HTTP(S) URL') }
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('target.download requires an HTTP(S) URL')
+    // Both are checked before anything is fetched or created.
+    const requested = opts.filename !== undefined ? sanitizeDownloadName(opts.filename, true) : undefined
+    const timeoutMs = opts.timeoutMs ?? 60_000
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 150_000) throw new Error('target.download timeoutMs must be between 1,000 and 150,000 ms')
+    const maxBytes = this.config.downloadMaxBytes
+    const dir = this.config.downloadDir
+    const state = this.state(opts.session)
+    if (state.page && (state.page.isClosed() || !this.browserConnected())) await this.closePage(state)
+    if (state.page && !state.page.isClosed()) {
+      // The session's login state may only be sent where its auth profile is allowed to go; open() applies the same rule.
+      if (state.profile) this.authProfiles.resolve(state.profile.id, url)
+    } else {
+      await this.ensureActivePage(url, { session: opts.session })
+    }
+    const context = state.context
+    if (!context) throw new Error('dsh-browser: no browser context is available for the download')
+    const deadline = Date.now() + timeoutMs
+    const signal = opts.signal
+    let requestFailure = ''
+    fs.mkdirSync(dir, { recursive: true })
+
+    // 1. A request with the session's cookies.
+    let temporary: string | undefined
+    try {
+      const response: any = await this.usageGovernor.run(url, () => context.request.get(url, { timeout: timeoutMs, failOnStatusCode: false }), signal)
+      const status = Number(response.status?.() ?? 0)
+      if (status >= 200 && status < 400) this.usageGovernor.noteResponse(url, status)
+      else if ([429, 502, 503, 504].includes(status)) {
+        const retryAfter = String(response.headers?.()?.['retry-after'] ?? '')
+        this.usageGovernor.noteResponse(url, status, /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : undefined)
+      }
+      if (!response.ok()) throw new Error(`the server answered HTTP ${status}`)
+      const finalUrl = String(response.url?.() ?? url)
+      const final = new URL(finalUrl)
+      if (!['http:', 'https:'].includes(final.protocol)) throw new Error('the request ended on a non-HTTP(S) URL')
+      if (state.profile) this.authProfiles.resolve(state.profile.id, finalUrl)
+      const headers = response.headers?.() ?? {}
+      const declared = Number(headers['content-length'])
+      if (Number.isFinite(declared) && declared > maxBytes) throw new DownloadLimitError(maxBytes)
+      const body: Buffer = await response.body()
+      if (body.length === 0) throw new Error('the response body was empty (zero bytes)')
+      const suggested = contentDispositionFilename(headers['content-disposition'])
+      const name = resolveDownloadFilename({ ...requested !== undefined ? { requested } : {}, suggested, url: finalUrl })
+      temporary = temporaryDownloadPath(dir)
+      const { bytes, sha256 } = writeBufferToFile(body, temporary, maxBytes)
+      const saved = claimDownloadPath(dir, name, temporary)
+      temporary = undefined
+      const record = this.pushDownload(state, {
+        id: 'd' + state.nextDownload++, url: redactCaptureUrl(finalUrl), status: 'saved', source: 'request',
+        suggestedFilename: suggested || name, path: saved, bytes, sha256, timestamp: new Date().toISOString(),
+      })
+      return downloadResult(record, url)
+    } catch (error) {
+      removeQuietly(temporary)
+      if (signal?.aborted) throw error
+      // A size or policy failure is final: another route would meet the same limit or send the login state where it must not go.
+      if (error instanceof DownloadLimitError) {
+        this.failedDownload(state, url, '', 'request', error)
+        throw error
+      }
+      if (/auth profile .* is not allowed/.test(String(error))) {
+        this.failedDownload(state, url, '', 'request', error)
+        throw error
+      }
+      requestFailure = String(error instanceof Error ? error.message : error).split('\n')[0]!.slice(0, 300)
+    }
+
+    // 2. Navigation: the attachment download the URL triggers, captured from a page of the same context.
+    const remaining = Math.max(deadline - Date.now(), 5_000)
+    const page = await context.newPage()
+    this.trackPage(state, page)
+    state.downloadFilename = requested
+    let recorded = false
+    try {
+      page.setDefaultTimeout(remaining)
+      const waiting = page.waitForEvent('download', { timeout: remaining }).then((value: any) => value, () => undefined)
+      let navigation: { response?: any; error?: unknown } = {}
+      const navigated = this.usageGovernor.run(url, () => page.goto(url, { waitUntil: 'commit', timeout: remaining }), signal)
+        .then((response: any) => { navigation = { response } }, (error: unknown) => { navigation = { error } })
+      // A download makes goto fail with "Download is starting"; a page that simply loaded leaves a short grace for the event.
+      const download = await Promise.race([
+        waiting,
+        navigated.then(() => Promise.race([waiting, new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 1_500))])),
+      ])
+      if (signal?.aborted) throw new Error('target.download aborted')
+      if (!download) {
+        const reason = navigation.error
+          ? 'navigation failed: ' + String((navigation.error as Error)?.message ?? navigation.error).split('\n')[0]!.slice(0, 200)
+          : `the URL loaded as a page (HTTP ${Number(navigation.response?.status?.() ?? 0)}) and did not start a download`
+        throw new Error(`could not download ${redactCaptureUrl(url)}: request failed (${requestFailure}); ${reason}`)
+      }
+      const job = state.downloadJobs.get(download)
+      const record = job ? await job : undefined
+      // The download listener records what it saw, failures included; only a failure it never saw is recorded below.
+      recorded = !!record
+      if (!record) throw new Error(`could not download ${redactCaptureUrl(url)}: the browser download was not captured`)
+      if (record.status !== 'saved') throw new Error(`could not download ${redactCaptureUrl(url)}: request failed (${requestFailure}); ${record.error ?? 'download failed'}`)
+      return downloadResult(record, url)
+    } catch (error) {
+      if (!recorded) this.failedDownload(state, url, '', 'request', error)
+      throw error
+    } finally {
+      state.downloadFilename = undefined
+      await page.close().catch(() => {})
+    }
+  }
+
+  /** `inspect.downloads`: this session's download records (newest last); reading never creates a session bucket. */
+  downloadRecords(opts: { limit?: number; clear?: boolean; session?: string } = {}): { downloadDir: string; records: DownloadRecord[]; total: number } {
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20), 1), DOWNLOAD_HISTORY_LIMIT)
+    const state = this.peek(opts.session)
+    const all = state?.downloads ?? []
+    const records = all.slice(-limit).map(record => ({ ...record }))
+    if (opts.clear && state) state.downloads = []
+    return { downloadDir: this.config.downloadDir, records, total: all.length }
+  }
+
   consoleMessages(opts: { level?: string; limit?: number; clear?: boolean; session?: string } = {}): { enabled: boolean; records: BrowserConsoleRecord[] } {
     const severities = ['debug', 'log', 'info', 'warning', 'error']
     const threshold = opts.level ? severities.indexOf(opts.level) : 0
@@ -1663,6 +1958,7 @@ export class BrowserService {
     session.context = undefined
     session.profile = undefined
     session.rulePack = undefined
+    session.contextOptions = undefined
     session.capturedConsole = []
     session.capturedRequests = []
     if (page) await page.close().catch(() => {})
@@ -1698,6 +1994,7 @@ export class BrowserService {
       runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath}. Run runtime.install for ${this.config.browserRuntime}.`)
     }
     if (this.config.opencliEnabled && !opencliInstalled) runtimeWarnings.push('OpenCLI is enabled but its package entry is not installed.')
+    runtimeWarnings.push(...this.config.configWarnings)
     return {
       enabled: this.config.enabled,
       channel: this.config.channel,
@@ -1715,6 +2012,10 @@ export class BrowserService {
       externalUserscriptPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       pageEvaluatePolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       fileUploadPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      downloadPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      downloadDir: this.config.downloadDir,
+      downloadMaxBytes: this.config.downloadMaxBytes,
+      contextDefaults: describeContextOptions(this.config.contextDefaults),
       opencliRunPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
       ...chromiumExecutablePath ? { chromiumExecutablePath } : {},

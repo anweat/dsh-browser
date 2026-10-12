@@ -50,6 +50,8 @@ function approvalNote(action: ActionDef, mode: AutomationMode): string {
     interaction: m => m === 'standard' ? 'asks' : '',
     install: m => m === 'unrestricted' ? '' : 'asks',
     upload: m => m === 'unrestricted' ? '' : 'asks',
+    download: m => m === 'unrestricted' ? '' : 'asks',
+    'context-options': m => m === 'unrestricted' ? '' : 'asks for proxy/userAgent',
     evaluate: m => m === 'unrestricted' ? '' : 'asks',
     userscript: m => m === 'unrestricted' ? '' : 'asks',
     opencli: m => m === 'unrestricted' ? '' : 'asks',

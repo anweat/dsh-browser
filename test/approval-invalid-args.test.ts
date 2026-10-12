@@ -35,6 +35,8 @@ const VALID: Record<string, Record<string, unknown>> = {
   'act.hover': { selector: '#menu' },
   'act.scroll': { deltaY: 300 },
   'act.upload': { selector: '#file', files: ['/tmp/report.txt'] },
+  'target.open': { url: 'https://example.com/', proxyServer: 'http://127.0.0.1:7890' },
+  'target.download': { url: 'https://example.com/report.pdf' },
   'script.evaluate': { expression: 'document.title' },
   'script.run_userscript': { url: 'https://example.com/', source: SCRIPT },
   'automation.develop': { action: 'save', kind: 'recipe', name: 'Draft' },

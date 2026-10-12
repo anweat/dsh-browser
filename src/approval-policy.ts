@@ -113,6 +113,27 @@ export function browserPolicyDecision(
         if (mode === 'unrestricted') return { kind: 'allow' }
         return { kind: 'ask', reason: `${name} ${targetLabel(args)}: Read local files and expose them to the current website upload control: ` + files.slice(0, 5).join(', ') }
       }
+      case 'download': {
+        const url = (args as { url?: unknown })?.url
+        if (typeof url !== 'string' || !url.trim()) return { kind: 'deny', reason: `${name} requires a URL` }
+        if (mode === 'read-only') return { kind: 'deny', reason: `File download is disabled by automationMode=${mode}` }
+        if (mode === 'unrestricted') return { kind: 'allow' }
+        const filename = (args as { filename?: unknown })?.filename
+        return { kind: 'ask', reason: `${name} ${clip(url, 160)}: Fetch this URL with the session's login state and save it to the local download directory` + (typeof filename === 'string' ? ` as ${clip(filename, 80)}` : '') }
+      }
+      case 'context-options': {
+        // Viewport, locale and time zone only change what the page sees of the window; a proxy changes where the traffic
+        // goes and a user agent changes how the browser presents itself, so only those two are approved.
+        const input = (args ?? {}) as { url?: unknown; proxyServer?: unknown; userAgent?: unknown }
+        const changed = [
+          ...typeof input.proxyServer === 'string' ? [`proxyServer=${clip(input.proxyServer, 80)} (all traffic of the new context goes through this proxy)`] : [],
+          ...typeof input.userAgent === 'string' ? [`userAgent=${JSON.stringify(clip(input.userAgent, 80))} (the browser presents itself differently)`] : [],
+        ]
+        if (changed.length === 0) return { kind: 'allow' }
+        if (mode === 'read-only') return { kind: 'deny', reason: `Changing the network egress or browser fingerprint is disabled by automationMode=${mode}: ${changed.join('; ')}` }
+        if (mode === 'unrestricted') return { kind: 'allow' }
+        return { kind: 'ask', reason: `${name} ${typeof input.url === 'string' ? clip(input.url, 120) : ''}: Open a new browser context with changed ` + changed.join('; ') }
+      }
       case 'evaluate': {
         const expression = (args as { expression?: unknown })?.expression
         if (typeof expression !== 'string' || !expression.trim()) return { kind: 'deny', reason: `${name} requires a JavaScript expression` }
