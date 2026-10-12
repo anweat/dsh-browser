@@ -19,7 +19,12 @@ export function hostAllowed(hostname: string, domains: readonly string[]): boole
 }
 
 export class AuthProfileStore {
-  constructor(private readonly profiles: Record<string, AuthProfileConfig> = {}) {}
+  constructor(private profiles: Record<string, AuthProfileConfig> = {}) {}
+
+  /** Swap in the effective profiles (baseline plus policy overlay); sessions resolve against them from the next call on. */
+  replace(profiles: Record<string, AuthProfileConfig>): void { this.profiles = profiles }
+
+  get(id: string): AuthProfileConfig | undefined { return this.profiles[id] }
 
   resolve(id: string, targetUrl: string): ResolvedAuthProfile {
     const profile = this.profiles[id]

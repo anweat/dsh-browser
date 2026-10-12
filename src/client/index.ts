@@ -3,6 +3,7 @@ import type { Context } from './context-types.ts'
 import { BrowserSettingsController, type BrowserCardState } from './form.ts'
 import type { PromptTextFieldId } from './prompts-form.ts'
 import { PromptsStatusController, type PromptsStatusState } from './prompts-status-client.ts'
+import { PolicyStatusController, type PolicyStatusState } from './policy-status-client.ts'
 import { SettingsCard } from './SettingsCard.tsx'
 import { en, zh } from './locales.ts'
 import { ensureStyles } from './styles.ts'
@@ -35,6 +36,9 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   refreshPromptsStatus: () => void
   exportPromptDefaults: () => Promise<void>
   hidePromptDefaults: () => void
+  usePolicyStatus: <R>(selector: (snapshot: PolicyStatusState) => R) => R
+  refreshPolicyStatus: () => void
+  clearPolicyOverlay: (scope?: 'all' | 'usagePolicy' | 'authProfile', id?: string) => Promise<void>
   useAutomationAssets: <R>(selector: (snapshot: AutomationAssetsState) => R) => R
   refreshAutomationAssets: () => void
   selectAutomationAsset: (id?: string) => void
@@ -69,8 +73,10 @@ export function apply(ctx: Context): void {
   const controller = new BrowserSettingsController(ctx.configForms.get<Record<string, unknown>>(SETTINGS_NAMESPACE))
   const assets = new AutomationAssetsController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
   const prompts = new PromptsStatusController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
+  const policy = new PolicyStatusController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
   ctx.effect(() => () => controller.dispose(), 'dsh-browser: settings controller')
   ctx.effect(() => () => prompts.dispose(), 'dsh-browser: prompts status controller')
+  ctx.effect(() => () => policy.dispose(), 'dsh-browser: policy status controller')
   ctx.effect(() => () => assets.dispose(), 'dsh-browser: automation assets controller')
 
   // External bundles own their keyed configuration on the bundle's detail
@@ -83,7 +89,8 @@ export function apply(ctx: Context): void {
           const settingsProps = controller.inject()
           const assetProps = assets.inject()
           const promptsProps = prompts.inject()
-          return { ...settingsProps, ...assetProps, ...promptsProps, hooks: { ...settingsProps.hooks, ...assetProps.hooks, ...promptsProps.hooks } }
+          const policyProps = policy.inject()
+          return { ...settingsProps, ...assetProps, ...promptsProps, ...policyProps, hooks: { ...settingsProps.hooks, ...assetProps.hooks, ...promptsProps.hooks, ...policyProps.hooks } }
         },
       }, SettingsCard))), 'dsh-browser: settings page')
 }

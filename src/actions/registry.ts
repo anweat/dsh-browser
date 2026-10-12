@@ -15,21 +15,22 @@ import { SCRIPT_ACTIONS } from './script.ts'
 import { AUTOMATION_ACTIONS } from './automation.ts'
 import { CRAWL_ACTIONS } from './crawl.ts'
 import { OPENCLI_ACTIONS } from './opencli.ts'
+import { POLICY_ACTIONS } from './policy.ts'
 import { validateArgs, type ValidationResult } from './schema.ts'
 
 export const ACTIONS: readonly ActionDef[] = [
   ...RUNTIME_ACTIONS, ...TARGET_ACTIONS, ...OBSERVE_ACTIONS, ...ACT_ACTIONS, ...INSPECT_ACTIONS,
-  ...SCRIPT_ACTIONS, ...AUTOMATION_ACTIONS, ...CRAWL_ACTIONS, ...OPENCLI_ACTIONS,
+  ...SCRIPT_ACTIONS, ...AUTOMATION_ACTIONS, ...CRAWL_ACTIONS, ...OPENCLI_ACTIONS, ...POLICY_ACTIONS,
 ]
 
 const BY_NAME = new Map(ACTIONS.map(action => [action.name, action]))
 
 export const GROUP_SUMMARIES: Record<ActionGroup, string> = {
-  runtime: 'runtime status and Chromium install',
+  runtime: 'runtime status, Chromium install, auth-profile and usage-limit policy',
   target: 'open / close / list this session\'s page, download a file',
   observe: 'read page text, screenshots',
   act: 'click, fill, type, clear, press, select, check, hover, scroll, upload, wait',
-  inspect: 'captured console and failed-request records, downloads',
+  inspect: 'captured console and failed-request records, downloads, effective policy',
   script: 'page JavaScript, built-in scripts, userscripts',
   automation: 'search/run reusable assets, develop drafts, inline recipes',
   crawl: 'bounded multi-page crawl',

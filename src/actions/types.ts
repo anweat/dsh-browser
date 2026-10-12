@@ -52,6 +52,7 @@ export type ApprovalClass =
   | 'upload'
   | 'download'
   | 'context-options'
+  | 'policy'
   | 'evaluate'
   | 'userscript'
   | 'opencli'

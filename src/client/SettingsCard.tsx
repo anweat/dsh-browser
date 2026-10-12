@@ -56,7 +56,7 @@ const SECTION_LAYOUT: readonly { title: LabelKey; hint: LabelKey; fields: readon
   { title: 'freedom', hint: 'freedomHint', fields: ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled'] },
   { title: 'runtime', hint: 'runtimeHint', fields: ['browserRuntime', 'channel', 'headless', 'autoInstall', 'executablePath', 'cdpPort', 'maxSessions', 'args'] },
   { title: 'context', hint: 'contextHint', fields: ['viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass'] },
-  { title: 'advanced', hint: 'advancedHint', fields: ['storageStatePath', 'defaultAuthProfile', 'snapshotDir', 'downloadDir', 'downloadMaxBytes', 'verbose'], notes: CONFIG_FILE_ONLY_FIELDS },
+  { title: 'advanced', hint: 'advancedHint', fields: ['storageStatePath', 'defaultAuthProfile', 'allowPrivateHosts', 'snapshotDir', 'downloadDir', 'downloadMaxBytes', 'verbose'], notes: CONFIG_FILE_ONLY_FIELDS },
 ]
 
 /** The usage section's JSON boxes. */
@@ -125,9 +125,59 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
       </div>
       <p className={css.notice} role="note">{t('restart')}</p>
     </section>
+    <PolicyPanel {...props} />
     <PromptsPanel {...props} disabled={disabled} />
     <AutomationAssetsPanel {...props} />
   </SettingsForm>
+}
+
+/**
+ * The policy overlay: what agents changed on top of the configured auth profiles and usage limits, with the audit
+ * trail and the way back to the baseline. Read-only except for the clear buttons.
+ */
+function PolicyPanel(props: BrowserSettingsCardProps) {
+  const { t } = props
+  const state = props.usePolicyStatus(snapshot => snapshot)
+  const { refreshPolicyStatus } = props
+  const settings = props.useBrowserSettings(snapshot => snapshot)
+  useEffect(() => { if (!settings.saving) refreshPolicyStatus() }, [settings.saving, refreshPolicyStatus])
+  const report = state.report
+  const origin = (value: 'baseline' | 'overlay-changed' | 'overlay-created') => t(({ baseline: 'policyOriginBaseline', 'overlay-changed': 'policyOriginChanged', 'overlay-created': 'policyOriginCreated' } as const)[value])
+  const direction = (value: 'tighten' | 'loosen' | 'none') => t(({ tighten: 'policyTightened', loosen: 'policyLoosened', none: 'policyUnchanged' } as const)[value])
+  const usage = report ? Object.entries(report.usagePolicy) : []
+  return <section className={css.section} data-dsh-browser-policy>
+    <div className={css.sectionHead}><h3>{t('policyOverlay')}</h3><p>{t('policyOverlayHint')}</p></div>
+    <div className={css.notice} role="status">
+      <button type="button" className={css.reset} onClick={refreshPolicyStatus}>{t('promptsRefresh')}</button>
+      {state.loading && !report ? <p>{t('promptsLoading')}</p> : null}
+      {state.failed ? <p>{t('policyUnavailable')}</p> : null}
+      {report ? <>
+        <p data-dsh-browser-policy-revision>{t('policyRevision')} {report.revision}{report.updatedAt ? ` · ${new Date(report.updatedAt).toLocaleString()}` : ''} · {report.overlayActive ? t('policyActive') : t('policyInactive')}</p>
+        {report.warning ? <p className={css.failed} role="alert" data-dsh-browser-policy-warning>{report.warning}</p> : null}
+        <p className={css.hint}>{t('policyAuthDir')}: <code>{report.authDir}</code> · allowPrivateHosts: {String(report.allowPrivateHosts)}</p>
+        <h4>{t('policyProfiles')}</h4>
+        {report.authProfiles.length ? <ul data-dsh-browser-policy-profiles>{report.authProfiles.map(profile => <li key={profile.id} data-dsh-browser-policy-origin={profile.origin}>
+          <strong>{profile.id}</strong> <span className={css.hint}>[{origin(profile.origin)}]</span> {profile.allowedDomains.join(', ')} · persistState={String(profile.persistState)}
+          {profile.origin !== 'baseline' ? <> <button type="button" className={css.reset} disabled={state.busy} onClick={() => void props.clearPolicyOverlay('authProfile', profile.id)}>{t('policyRevert')}</button></> : null}
+        </li>)}</ul> : <p className={css.hint}>{t('policyNoProfiles')}</p>}
+        {report.removedByOverlay.length ? <p data-dsh-browser-policy-removed>{t('policyRemoved')}: {report.removedByOverlay.join(', ')}</p> : null}
+        <h4>{t('policyUsage')}</h4>
+        <ul data-dsh-browser-policy-usage>{usage.map(([key, entry]) => <li key={key} data-dsh-browser-policy-overridden={entry.overridden ? 'true' : 'false'}>
+          {key}: {entry.value}{entry.overridden ? <> <span className={css.hint}>[{t('policyOriginChanged')}; {t('policyBaselineWas')} {entry.baseline}]</span></> : null}
+        </li>)}</ul>
+        <h4>{t('policyAudit')}</h4>
+        {report.audit.length ? <ul data-dsh-browser-policy-audit>{[...report.audit].reverse().map(entry => <li key={entry.revision}>
+          r{entry.revision} · {new Date(entry.at).toLocaleString()} · {entry.source}{entry.session ? ` ${entry.session}` : ''} · {entry.action} · <em>{direction(entry.direction)}</em> · {entry.reason}
+          {entry.changes.length ? <small> — {entry.changes.join('; ')}</small> : null}
+        </li>)}</ul> : <p className={css.hint}>{t('policyNoAudit')}</p>}
+        {state.error ? <p className={css.failed} role="alert">{state.error}</p> : null}
+        <div className={css.actions}>
+          <button type="button" className={css.secondary} disabled={state.busy || !report.overlayActive} onClick={() => void props.clearPolicyOverlay('all')} data-dsh-browser-policy-clear>{t('policyClear')}</button>
+        </div>
+        <p className={css.hint}>{t('policyUnrestrictedNote')}</p>
+      </> : null}
+    </div>
+  </section>
 }
 
 /** Label and hint keys of each text control, by field id. */

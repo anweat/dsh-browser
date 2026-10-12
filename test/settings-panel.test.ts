@@ -120,7 +120,7 @@ test('browser settings panel covers every public browser configuration field', (
     'enabled', 'automationMode', 'toolSurface', 'browserRuntime', 'channel', 'headless', 'opencliEnabled',
     'autoInstall', 'storageStatePath', 'defaultAuthProfile',
     'executablePath', 'snapshotDir', 'verbose', 'cdpPort', 'maxSessions',
-    'downloadDir', 'downloadMaxBytes', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass',
+    'downloadDir', 'downloadMaxBytes', 'allowPrivateHosts', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass',
   ]
   assert.deepEqual(FIELD_SPECS.map(spec => spec.field).toSorted(), fields.toSorted())
   assert.deepEqual(JSON_FIELD_SPECS.map(spec => spec.field).toSorted(), ['args', 'automationAssets', 'prompts', 'usagePolicy'])

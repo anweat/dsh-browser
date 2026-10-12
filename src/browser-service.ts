@@ -32,6 +32,7 @@ import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, 
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
+import { PolicyOverlayStore, domainBase, type AuditEntry, type ChangeMeta, type Direction, type PolicyChange, type PolicyDiff } from './policy-overlay.ts'
 import { installDialogGuard } from './dialogs.ts'
 import { TargetStaleError, resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
 import { SENSITIVE_NAME, SessionJournal } from './journal.ts'
@@ -490,6 +491,8 @@ export class BrowserService {
   private clock = 0
   private readonly authProfiles: AuthProfileStore
   private readonly usageGovernor: UsageGovernor
+  /** The managed policy overlay merged over the configured authProfiles and usagePolicy (see policy-overlay.ts). */
+  private readonly policyStore: PolicyOverlayStore
   private opencliCatalogCache?: OpencliCatalogItem[]
   /** Per-session exploration journals (see src/journal.ts). Released with the session, never written to disk. */
   private readonly journals = new Map<string, SessionJournal>()
@@ -497,13 +500,109 @@ export class BrowserService {
   private readonly sessionLimit: number
 
   constructor(private readonly config: ResolvedConfig) {
-    this.authProfiles = new AuthProfileStore(config.authProfiles)
-    this.usageGovernor = new UsageGovernor(config.usagePolicy)
+    this.policyStore = new PolicyOverlayStore({
+      file: config.policyOverlayFile,
+      authDir: config.authDir,
+      snapshotDir: config.snapshotDir,
+      downloadDir: config.downloadDir,
+      allowPrivateHosts: config.allowPrivateHosts,
+      baseline: { authProfiles: config.authProfiles, usagePolicy: config.usagePolicy },
+    })
+    const effective = this.policyStore.effective()
+    this.authProfiles = new AuthProfileStore(effective.authProfiles)
+    this.usageGovernor = new UsageGovernor(effective.usagePolicy)
     this.sessionLimit = Math.max(1, Number.isInteger(config.maxSessions) ? config.maxSessions : DEFAULT_MAX_SESSIONS)
   }
 
   available(): boolean {
     return this.config.enabled
+  }
+
+  // -- policy overlay: restriction settings an agent may edit ---------------------------------
+
+  /** Pick up an overlay file that changed on disk (another process, the panel). Cheap: one stat. */
+  private refreshPolicy(): void {
+    if (this.policyStore.refresh()) this.applyEffectivePolicy()
+  }
+
+  private applyEffectivePolicy(): void {
+    const effective = this.policyStore.effective()
+    this.authProfiles.replace(effective.authProfiles)
+    this.usageGovernor.setPolicy(effective.usagePolicy)
+  }
+
+  /** What a policy change would do, without doing it; `ok: false` carries why it is invalid. */
+  previewPolicyChange(change: PolicyChange): { ok: true; direction: Direction; lines: string[] } | { ok: false; message: string } {
+    try {
+      this.refreshPolicy()
+      const planned = this.policyStore.plan(change)
+      return { ok: true, direction: planned.diff.direction, lines: planned.diff.lines }
+    } catch (error) {
+      return { ok: false, message: String(error instanceof Error ? error.message : error) }
+    }
+  }
+
+  /**
+   * Apply a policy change: validated, written atomically with an audit entry, effective at once. Sessions whose
+   * context holds a login state this change took away are closed, so a revoked domain stops working immediately
+   * instead of at the next page load.
+   */
+  async changePolicy(change: PolicyChange, meta: ChangeMeta): Promise<{
+    revision: number; direction: Direction; diff: PolicyDiff; audit: AuditEntry; sessionsClosed: number
+    before: Record<string, unknown>; after: Record<string, unknown>
+  }> {
+    this.assertEnabled()
+    this.refreshPolicy()
+    const applied = this.policyStore.apply(change, meta)
+    this.applyEffectivePolicy()
+    let closed = 0
+    for (const state of [...this.sessions.values()]) {
+      const profile = state.profile
+      if (!profile) continue
+      const now = this.authProfiles.get(profile.id)
+      const lost = !now
+        || now.storageStatePath !== profile.storageStatePath
+        || profile.allowedDomains.some(domain => !hostAllowed(domainBase(domain), now.allowedDomains))
+      if (lost) { await this.closePage(state).catch(() => {}); closed++ }
+    }
+    const summary = (policy: typeof applied.before) => ({
+      authProfiles: Object.fromEntries(applied.diff.profiles.map(entry => [entry.id, policy.authProfiles[entry.id] ? { allowedDomains: policy.authProfiles[entry.id]!.allowedDomains, persistState: policy.authProfiles[entry.id]!.persistState ?? false } : null])),
+      usagePolicy: Object.fromEntries(applied.diff.usage.map(entry => [entry.key, policy.usagePolicy[entry.key]])),
+    })
+    return { revision: applied.revision, direction: applied.diff.direction, diff: applied.diff, audit: applied.audit, sessionsClosed: closed, before: summary(applied.before), after: summary(applied.after) }
+  }
+
+  /** The effective policy, where each value comes from, and the newest audit entries. */
+  policyReport(opts: { auditLimit?: number } = {}): Record<string, unknown> {
+    this.refreshPolicy()
+    const overlay = this.policyStore.current()
+    const effective = this.policyStore.effective()
+    const baseline = this.policyStore.baseline
+    const profiles = Object.entries(effective.authProfiles).sort(([a], [b]) => a.localeCompare(b)).map(([id, profile]) => {
+      const entry = overlay.authProfiles[id]
+      const origin = !baseline.authProfiles[id] ? 'overlay-created' : entry ? 'overlay-changed' : 'baseline'
+      return {
+        id, origin,
+        allowedDomains: profile.allowedDomains,
+        persistState: profile.persistState ?? false,
+        // Only a path the overlay chose (or one inside the auth directory) is shown: a baseline path is the user's own layout.
+        ...entry?.storageStatePath || profile.storageStatePath.startsWith(this.config.authDir) ? { storageStatePath: profile.storageStatePath } : {},
+        ...entry ? { overriddenFields: Object.keys(entry) } : {},
+      }
+    })
+    const limit = Math.min(Math.max(Math.trunc(opts.auditLimit ?? 10), 1), 50)
+    return {
+      revision: overlay.revision,
+      ...overlay.revision > 0 ? { updatedAt: overlay.updatedAt } : {},
+      overlayActive: Object.keys(overlay.authProfiles).length > 0 || Object.keys(overlay.usagePolicy).length > 0,
+      ...this.policyStore.warning ? { warning: this.policyStore.warning } : {},
+      allowPrivateHosts: this.config.allowPrivateHosts,
+      authDir: this.config.authDir,
+      authProfiles: profiles,
+      removedByOverlay: Object.entries(overlay.authProfiles).filter(([, entry]) => entry === null).map(([id]) => id).sort(),
+      usagePolicy: Object.fromEntries(Object.entries(effective.usagePolicy).map(([key, value]) => [key, { value, baseline: baseline.usagePolicy[key], overridden: Object.hasOwn(overlay.usagePolicy, key) }])),
+      audit: overlay.audit.slice(-limit),
+    }
   }
 
   /**
@@ -714,7 +813,7 @@ export class BrowserService {
 
   private async navigate(page: any, url: string, options: Record<string, unknown>, signal?: AbortSignal): Promise<any> {
     let response: any
-    for (let attempt = 0; attempt <= this.config.usagePolicy.retryLimit; attempt++) {
+    for (let attempt = 0; attempt <= this.usageGovernor.policy.retryLimit; attempt++) {
       response = await this.usageGovernor.run(url, () => page.goto(url, options), signal)
       const status = Number(response?.status?.() ?? 0)
       if (status >= 200 && status < 400) this.usageGovernor.noteResponse(url, status)
@@ -724,7 +823,7 @@ export class BrowserService {
         ? Number(rawRetryAfter) * 1000
         : (Number.isFinite(Date.parse(rawRetryAfter)) ? Math.max(Date.parse(rawRetryAfter) - Date.now(), 0) : undefined)
       this.usageGovernor.noteResponse(url, status, retryAfterMs)
-      if (attempt === this.config.usagePolicy.retryLimit) return response
+      if (attempt === this.usageGovernor.policy.retryLimit) return response
     }
     return response
   }
@@ -744,6 +843,7 @@ export class BrowserService {
 
   private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean; context?: ContextOptions; interactive?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack; contextOptions: ContextOptions }> {
     if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
+    this.refreshPolicy()
     const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
     const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
@@ -959,13 +1059,15 @@ export class BrowserService {
       url.hash = ''
       return url.href
     })
-    const maxPages = opts.maxPages ?? this.config.usagePolicy.maxPagesPerRun
-    const maxDepth = opts.maxDepth ?? this.config.usagePolicy.maxDepth
-    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > this.config.usagePolicy.maxPagesPerRun) {
-      throw new Error('browser crawl maxPages must be from 1 to configured usagePolicy.maxPagesPerRun (' + this.config.usagePolicy.maxPagesPerRun + ')')
+    this.refreshPolicy()
+    const limits = this.usageGovernor.policy
+    const maxPages = opts.maxPages ?? limits.maxPagesPerRun
+    const maxDepth = opts.maxDepth ?? limits.maxDepth
+    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > limits.maxPagesPerRun) {
+      throw new Error('browser crawl maxPages must be from 1 to configured usagePolicy.maxPagesPerRun (' + limits.maxPagesPerRun + ')')
     }
-    if (!Number.isInteger(maxDepth) || maxDepth < 0 || maxDepth > this.config.usagePolicy.maxDepth) {
-      throw new Error('browser crawl maxDepth must be from 0 to configured usagePolicy.maxDepth (' + this.config.usagePolicy.maxDepth + ')')
+    if (!Number.isInteger(maxDepth) || maxDepth < 0 || maxDepth > limits.maxDepth) {
+      throw new Error('browser crawl maxDepth must be from 0 to configured usagePolicy.maxDepth (' + limits.maxDepth + ')')
     }
     const maxCharsPerPage = Math.min(Math.max(opts.maxCharsPerPage ?? 20_000, 1_000), 50_000)
     const sameOrigin = opts.sameOrigin ?? true
@@ -1128,6 +1230,7 @@ export class BrowserService {
    */
   private async ensurePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string; session?: string; context?: ContextOptions } = {}): Promise<{ page: any; rebuilt?: string[] }> {
     if (targetUrl && !['http:', 'https:'].includes(new URL(targetUrl).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
+    this.refreshPolicy()
     const state = this.state(opts.session)
     if (state.page && (state.page.isClosed() || !this.browserConnected())) await this.closePage(state)
     let rebuilt: string[] | undefined
@@ -1716,6 +1819,7 @@ export class BrowserService {
     if (!Number.isFinite(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 150_000) throw new Error('target.download timeoutMs must be between 1,000 and 150,000 ms')
     const maxBytes = this.config.downloadMaxBytes
     const dir = this.config.downloadDir
+    this.refreshPolicy()
     const state = this.state(opts.session)
     if (state.page && (state.page.isClosed() || !this.browserConnected())) await this.closePage(state)
     if (state.page && !state.page.isClosed()) {
@@ -1995,6 +2099,8 @@ export class BrowserService {
     }
     if (this.config.opencliEnabled && !opencliInstalled) runtimeWarnings.push('OpenCLI is enabled but its package entry is not installed.')
     runtimeWarnings.push(...this.config.configWarnings)
+    this.refreshPolicy()
+    if (this.policyStore.warning) runtimeWarnings.push(this.policyStore.warning)
     return {
       enabled: this.config.enabled,
       channel: this.config.channel,
@@ -2019,7 +2125,7 @@ export class BrowserService {
       opencliRunPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
       ...chromiumExecutablePath ? { chromiumExecutablePath } : {},
-      usagePolicy: this.config.usagePolicy,
+      usagePolicy: this.usageGovernor.policy,
       usageGovernor: this.usageGovernor.snapshot(),
       authProfiles: this.authProfiles.list(),
       rulePacks: Object.keys(this.config.rulePacks).sort(),

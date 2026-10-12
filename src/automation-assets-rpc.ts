@@ -118,6 +118,18 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
             break
           }
           case 'prompts': value = promptsStatus ? promptsStatus() : null; break
+          // The policy overlay (see policy-overlay.ts): what the settings card's overlay section shows and clears.
+          case 'policy': value = service.policyReport({ auditLimit: 20 }); break
+          case 'policyReset': {
+            const scope = payload.scope
+            if (scope !== 'all' && scope !== 'usagePolicy' && scope !== 'authProfile') throw new Error('scope must be all, usagePolicy or authProfile')
+            await service.changePolicy(
+              { kind: 'reset', scope, ...typeof payload.id === 'string' ? { id: payload.id } : {} },
+              { source: 'panel', action: 'panel.reset', reason: 'Cleared from the settings card', ...expectedRevision(payload) !== undefined ? { expectedRevision: expectedRevision(payload) } : {} },
+            )
+            value = service.policyReport({ auditLimit: 20 })
+            break
+          }
           // The same JSON `prompts:dump` prints, for installs that have no script environment.
           case 'promptsDefaults': value = { json: promptsDumpText() }; break
           case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus, { expectedRevision: expectedRevision(payload) }); break

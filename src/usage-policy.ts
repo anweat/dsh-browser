@@ -90,7 +90,10 @@ export class UsageGovernor {
   private totalWaitMs = 0
   private backoffEvents = 0
 
-  constructor(readonly policy: UsagePolicy) {}
+  constructor(public policy: UsagePolicy) {}
+
+  /** Replace the limits (a policy overlay change). Queued waits keep their place; the next acquisition reads the new values. */
+  setPolicy(policy: UsagePolicy): void { this.policy = policy }
 
   private host(url: string): { key: string; state: HostState } {
     let key: string

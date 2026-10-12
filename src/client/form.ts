@@ -20,7 +20,7 @@ export type SectionField =
   | 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
   | 'autoInstall' | 'storageStatePath' | 'defaultAuthProfile'
   | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'maxSessions'
-  | 'downloadDir' | 'downloadMaxBytes'
+  | 'downloadDir' | 'downloadMaxBytes' | 'allowPrivateHosts'
   | 'viewportMode' | 'viewportWidth' | 'viewportHeight' | 'userAgent' | 'locale' | 'timezoneId' | 'proxyServer' | 'proxyBypass'
 
 /** Retained name for callers that predate the section/JSON split. */
@@ -160,6 +160,7 @@ export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   textField('executablePath'),
   textField('snapshotDir'),
   textField('downloadDir'),
+  booleanField('allowPrivateHosts'),
   rangedNumberField('downloadMaxBytes', 1, 10 * 1024 * 1024 * 1024),
   enumField('viewportMode', ['window', '720p', '1080p', 'custom']),
   rangedNumberField('viewportWidth', 200, 7680),

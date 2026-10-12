@@ -85,6 +85,12 @@ export interface Config {
   autoInstall: boolean
   /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
   snapshotDir?: string
+  /**
+   * Whether a policy change made through the agent actions may name localhost, `.local`/`.internal` names and
+   * loopback or private-network IPv4 addresses as allowed domains. Off by default; cloud metadata and link-local
+   * addresses are refused regardless.
+   */
+  allowPrivateHosts?: boolean
   /** Directory the downloads of `target.download` and browser-triggered downloads are saved to; defaults to $DSH_HOME/data/browser/downloads. */
   downloadDir?: string
   /** Largest single download in bytes; a bigger one is aborted and removed. Default 100 MiB. */
@@ -215,6 +221,7 @@ export const Config = z.object({
   }).description('Overrides of the model-facing text. The settings card button Export default text (or `pnpm prompts:dump` in a repository checkout) prints every key with its default. Values over the length limits and unknown keys are ignored and reported by runtime.status. Tool descriptions apply after a restart; everything else applies on the next call.').volatile(),
   autoInstall: z.boolean().default(false).volatile(),
   snapshotDir: z.string().volatile(),
+  allowPrivateHosts: z.boolean().default(false).description('Let agent policy changes name localhost, .local/.internal names and private-network IPv4 addresses as allowed domains').volatile(),
   downloadDir: z.string().description('Absolute directory downloads are saved to; defaults to $DSH_HOME/data/browser/downloads').volatile(),
   downloadMaxBytes: z.number().min(1).max(MAX_DOWNLOAD_BYTES_LIMIT).step(1).default(DEFAULT_DOWNLOAD_MAX_BYTES).description('Largest single download in bytes (default 100 MiB); a bigger one is aborted and removed').volatile(),
   viewportMode: z.string().default('window').description(`Viewport of every context: ${VIEWPORT_MODES.join(' | ')} (window = the browser default)`).volatile(),
@@ -259,6 +266,13 @@ export interface ResolvedConfig {
   snapshotDir: string
   downloadDir: string
   downloadMaxBytes: number
+  allowPrivateHosts: boolean
+  /** `$DSH_HOME/data/browser`: where the plugin keeps the policy overlay and its auth state directory. */
+  dataDir: string
+  /** The only directory an agent-set storageStatePath may live in. */
+  authDir: string
+  /** The managed policy overlay file (see policy-overlay.ts). */
+  policyOverlayFile: string
   /** Context options applied to every context the plugin creates (viewport, user agent, locale, time zone, proxy). */
   contextDefaults: ContextOptions
   /** Settings that were read but have no effect, shown in `runtime.status`. */
@@ -284,6 +298,11 @@ const MISPLACED_KEYS: Record<string, string> = {
 export function defaultSnapshotDir(): string {
   const home = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
   return path.join(home, 'data', 'browser', 'snapshots')
+}
+
+export function defaultBrowserDataDir(): string {
+  const home = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
+  return path.join(home, 'data', 'browser')
 }
 
 export function defaultDownloadDir(): string {
@@ -369,6 +388,13 @@ export function resolveConfig(config: Config): ResolvedConfig {
     snapshotDir,
     downloadDir: resolveDownloadDir(optional('downloadDir')),
     downloadMaxBytes: resolveDownloadMaxBytes(optional('downloadMaxBytes')),
+    allowPrivateHosts: read('allowPrivateHosts', false),
+    // `browserDataDir` is not a setting (the schema drops it): it is how tests and embedders that hand `resolveConfig`
+    // a plain object keep the overlay out of the real DSH_HOME.
+    ...(() => {
+      const dataDir = optional<string>('browserDataDir') ?? defaultBrowserDataDir()
+      return { dataDir, authDir: path.join(dataDir, 'auth'), policyOverlayFile: path.join(dataDir, 'policy-overlay.json') }
+    })(),
     contextDefaults: context.options,
     configWarnings: context.warnings,
     verbose: read('verbose', false),

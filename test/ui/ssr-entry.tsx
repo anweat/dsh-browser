@@ -39,11 +39,20 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
     editor: { text: options.selected ? '{"kind":"recipe","name":"x"}' : '', baseline: options.selected ? '{"kind":"recipe","name":"x"}' : '', testUrl: '', testInputs: '{}', ...options.editor },
   }
   const status = { loading: false, failed: false, status: options.prompts, defaults: options.promptsDefaults }
+  const policyState = { loading: false, failed: false, report: {
+    revision: 3, updatedAt: '2026-01-01T00:00:00Z', overlayActive: true, allowPrivateHosts: false, authDir: '/data/browser/auth',
+    authProfiles: [{ id: 'forum', origin: 'overlay-changed', allowedDomains: ['example.com'], persistState: false }, { id: 'new', origin: 'overlay-created', allowedDomains: ['a.test'], persistState: true }],
+    removedByOverlay: ['old'],
+    usagePolicy: { minDelayMs: { value: 2000, baseline: 750, overridden: true } },
+    audit: [{ revision: 3, at: '2026-01-01T00:00:00Z', source: 'agent', session: 'session:x', action: 'runtime.set_usage_policy', reason: 'rate limited', direction: 'tighten', changes: ['usagePolicy.minDelayMs: 750 -> 2000 (stricter)'] }],
+  } }
   const props = {
     view: 'page', t,
     useBrowserSettings: (select: (state: unknown) => unknown) => select(settings),
     useAutomationAssets: (select: (state: unknown) => unknown) => select(assets),
     usePromptsStatus: (select: (state: unknown) => unknown) => select(status),
+    usePolicyStatus: (select: (state: unknown) => unknown) => select(policyState),
+    refreshPolicyStatus: noop, clearPolicyOverlay: noop,
     edit: noop, resetField: noop, save: noop, discard: noop,
     editPromptText: noop, setPromptSkillEnabled: noop, editPromptExtras: noop, resetPromptExtras: noop, refreshPromptsStatus: noop, exportPromptDefaults: noop, hidePromptDefaults: noop,
     refreshAutomationAssets: noop, selectAutomationAsset: noop, saveAutomationAsset: noop, summarizeAutomationCandidate: noop, dismissAutomationCandidate: noop,

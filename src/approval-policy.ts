@@ -16,6 +16,9 @@ import { isBrowserActionExposed, type AutomationMode } from './freedom.ts'
 import { findAction } from './actions/registry.ts'
 import { argsRejectedByExecutor } from './actions/surface.ts'
 
+/** What `BrowserService.previewPolicyChange` reports for a policy action, so the approval prompt can show the diff. */
+export type PolicyPreview = { ok: true; direction: 'tighten' | 'loosen' | 'none'; lines: string[] } | { ok: false; message: string }
+
 export type BrowserPolicyDecision =
   | { kind: 'allow' }
   | { kind: 'deny'; reason: string }
@@ -85,7 +88,7 @@ export function recipeStepsDecision(name: string, steps: readonly AnyRecipeStep[
  * @param asset - for the same two, the asset itself, so the approval prompt names it instead of showing a bare id.
  */
 export function browserPolicyDecision(
-  name: string, args: unknown, mode: AutomationMode = 'standard', assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[], asset?: AssetRef,
+  name: string, args: unknown, mode: AutomationMode = 'standard', assetKind?: 'recipe' | 'userscript', draftSteps?: readonly AnyRecipeStep[], asset?: AssetRef, policyPreview?: PolicyPreview,
 ): BrowserPolicyDecision {
   const action = findAction(name)
   if (!action && (name.startsWith('browser_') || /^[a-z]+\.[a-z_]+$/.test(name))) {
@@ -112,6 +115,16 @@ export function browserPolicyDecision(
         if (mode === 'read-only') return { kind: 'deny', reason: `Local file upload is disabled by automationMode=${mode}` }
         if (mode === 'unrestricted') return { kind: 'allow' }
         return { kind: 'ask', reason: `${name} ${targetLabel(args)}: Read local files and expose them to the current website upload control: ` + files.slice(0, 5).join(', ') }
+      }
+      case 'policy': {
+        // Judged by direction, not by action: tightening and no-ops are free in every mode. A change the preview
+        // could not plan is let through: the executor refuses it with the reason and changes nothing.
+        if (policyPreview && !policyPreview.ok) return { kind: 'allow' }
+        if (policyPreview && policyPreview.direction !== 'loosen') return { kind: 'allow' }
+        const diff = policyPreview?.ok ? policyPreview.lines.join('; ') : 'a change that may widen what the browser can do'
+        if (mode === 'read-only') return { kind: 'deny', reason: `Loosening a restriction is disabled by automationMode=${mode}: ${clip(diff, 300)}` }
+        if (mode === 'unrestricted') return { kind: 'allow' }
+        return { kind: 'ask', reason: `${name}: Loosen a browser restriction: ${clip(diff, 500)}` }
       }
       case 'download': {
         const url = (args as { url?: unknown })?.url
