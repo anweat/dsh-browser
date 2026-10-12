@@ -125,6 +125,8 @@ export function createHarness(detection: Extract<BrowserDetection, { ok: true }>
     autoInstall: false,
     automationMode: 'unrestricted',
     snapshotDir: dir,
+    // Downloads must never land in the real DSH_HOME while a suite runs.
+    downloadDir: path.join(dir, 'downloads'),
     storageStatePath: undefined,
     ...detection.channel ? { channel: detection.channel } : {},
     ...detection.executablePath ? { executablePath: detection.executablePath } : {},
