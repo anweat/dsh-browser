@@ -45,6 +45,11 @@ export const COMPACT_GUIDE = [
 const MAX_LINE = 170
 
 function approvalNote(action: ActionDef, mode: AutomationMode): string {
+  // Policy actions are judged by direction (approval-policy.ts), so the note says what each one can do, not a generic "asks".
+  if (action.approval === 'policy') {
+    if (action.name === 'runtime.remove_auth_profile') return ''
+    if (action.name === 'runtime.reset_policy') return mode === 'unrestricted' ? 'unasked, result carries risk' : mode === 'read-only' ? 'denied when the baseline is wider' : 'asks when the baseline is wider'
+  }
   const asks: Record<ApprovalClass, (mode: AutomationMode) => string> = {
     none: () => '',
     interaction: m => m === 'standard' ? 'asks' : '',

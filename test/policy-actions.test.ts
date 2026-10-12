@@ -228,3 +228,13 @@ test('the real Host hook previews the change: a loosening asks with its diff, a 
   assert.match(loose.reason!, /usagePolicy\.maxConcurrency: 2 -> 6 \(looser\)/)
   assert.equal((await decide('runtime.set_usage_policy', { minDelayMs: 9000, reason: 'be careful' })).kind, 'allow')
 })
+
+test('the catalog line of each policy action says what that action does with approval', async () => {
+  const { renderIndex } = await import('../src/actions/index-view.ts')
+  const env = (mode: AutomationMode) => ({ mode, options: { modelDevelopmentEnabled: true }, enabled: true, skillAvailable: true })
+  const line = (mode: AutomationMode, action: string) => renderIndex({ action }, env(mode)).text
+  assert.doesNotMatch(line('standard', 'runtime.remove_auth_profile'), /approval: asks/, 'removing is never asked about')
+  assert.match(line('standard', 'runtime.set_auth_profile'), /approval: asks when loosening/)
+  assert.match(line('standard', 'runtime.reset_policy'), /approval: asks when the baseline is wider/)
+  assert.match(line('unrestricted', 'runtime.reset_policy'), /unasked, result carries risk/)
+})
