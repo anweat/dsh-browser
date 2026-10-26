@@ -68,3 +68,14 @@ test('multi-line texts are literal blocks and single lines are quoted scalars; t
   assert.match(text, /rootGuide: \|-?\n {2}\S/, 'the guide reads as a block')
   assert.match(text, /rootNote: ""/)
 })
+
+test('prompts:dump --yaml prints the same commented YAML the library produces, in the chosen language', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const script = path.join(new URL('..', import.meta.url).pathname, 'scripts', 'dump-prompts.mjs')
+  for (const lang of ['en', 'zh'] as const) {
+    const run = spawnSync(process.execPath, [script, '--yaml', '--lang', lang], { encoding: 'utf8' })
+    assert.equal(run.status, 0, run.stderr)
+    assert.equal(run.stdout, promptsDumpYaml(lang))
+  }
+  assert.equal(spawnSync(process.execPath, [script, '--yaml'], { encoding: 'utf8' }).stdout, promptsDumpYaml('en'), 'English by default')
+})

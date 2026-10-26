@@ -12,8 +12,8 @@ export const zhUi = {
   summaryTitle: '当前状态', summaryEnabledOn: '已启用', summaryEnabledOff: '已停用', summaryMode: '模式', summarySurface: '工具面', summaryOpencliOn: 'OpenCLI 开', summaryOpencliOff: 'OpenCLI 关',
   summaryWarnings: '{n} 条警告', summaryNoWarnings: '无警告', summaryOverlay: '覆盖层生效', summaryDetails: '查看详情',
   warningsTitle: '需要注意', warningsConfig: '配置里有被忽略的值（已回退到默认）', warningsOverlay: '策略覆盖层', warningsNone: '没有警告。', close: '关闭', helpLabel: '说明',
-  savebarClean: '没有未保存的修改', savebarDirty: '{n} 项未保存', savebarInvalid: '有无效的值，修正后才能保存', savebarFields: '涉及：', discardChanges: '放弃',
-  overriddenCount: '{n} 项已覆盖', restartNote: '保存后需完整重启 profile 才生效。', cancel: '取消', done: '完成', edit: '编辑', remove: '删除', add: '新增',
+  savebarClean: '没有未保存的修改', savebarDirty: '{n} 项未保存', savebarInvalid: '有无效的值，修正后才能保存', discardChanges: '放弃',
+  overriddenCount: '{n} 项已覆盖', cancel: '取消', done: '完成', edit: '编辑', remove: '删除', 
   // groups
   groupCommon: '常用', groupCommonSub: '启用、自动化模式、工具面、OpenCLI',
   groupBrowser: '浏览器', groupBrowserSub: '运行时、通道、无头、自动安装；高级项折叠',
@@ -35,7 +35,7 @@ export const zhUi = {
   surfaceIndexed: 'indexed · 两个入口（默认）', surfaceFlat: 'flat · 每个动作一个工具',
   opencliEnabled: '启用 OpenCLI', opencliEnabledHint: '站点 adapter 与 Chrome Browser Bridge 总开关。',
   // default / override vocabulary
-  reset: '恢复默认', overridden: '已覆盖', defaultValue: '默认',
+  reset: '恢复默认', overridden: '已覆盖', 
   // browser group
   browserRuntime: '运行时', browserRuntimeHint: '默认 Playwright；Patchright 仅支持 Chromium。',
   channel: '浏览器通道', channelHint: '用哪个浏览器内核。', channelHelp: 'chromium：插件自带，开箱即用（默认）。chrome / msedge：使用本机已装的 Chrome 或 Edge。其它值（如 chrome-beta）请先在“高级：文本模式”里确认可用。Patchright 推荐 chrome。',
@@ -82,7 +82,7 @@ export const zhUi = {
   // limits group
   usagePolicy: '调用缓冲', usagePolicyHint: '限制并发、突发与爬取预算，保护目标站点。', usagePolicyHelp: '这些数值作用于所有浏览器与爬取流量，与审批无关。收到 429/503 时按退避与冷却时间暂停。',
   automationAssets: '资产策略', automationAssetsHint: '候选阈值、持久化与激活规则、数量与预算。', automationAssetsHelp: '控制 agent 的成功操作何时被建议总结为可复用资产，以及资产的数量、上下文预算与激活条件。',
-  limitsRange: '范围 {min}–{max}', limitsDefault: '默认 {value}', limitsPolicyAdvanced: '高级：原始 JSON', limitsAssetsAdvanced: '更多资产策略',
+  limitsRange: '范围 {min}–{max}', limitsDefault: '默认 {value}', 
   // advanced
   advancedHint: '文本即视图：改它就是改上面的字段，反之亦然。# 开头的是注释，保存时忽略。', advancedCopy: '复制为文本', advancedCopied: '已复制', advancedNote: '这里只列“默认参数”；开关、策略、提示词与登录 profile 在各自的分组里编辑。',
 } as const
@@ -91,8 +91,8 @@ export const enUi: Record<keyof typeof zhUi, string> = {
   summaryTitle: 'Status', summaryEnabledOn: 'Enabled', summaryEnabledOff: 'Disabled', summaryMode: 'Mode', summarySurface: 'Tool surface', summaryOpencliOn: 'OpenCLI on', summaryOpencliOff: 'OpenCLI off',
   summaryWarnings: '{n} warning(s)', summaryNoWarnings: 'No warnings', summaryOverlay: 'Overlay active', summaryDetails: 'Details',
   warningsTitle: 'Needs attention', warningsConfig: 'Values in the configuration were ignored (fell back to defaults)', warningsOverlay: 'Policy overlay', warningsNone: 'No warnings.', close: 'Close', helpLabel: 'Explanation',
-  savebarClean: 'No unsaved changes', savebarDirty: '{n} unsaved', savebarInvalid: 'Some values are invalid; fix them to save', savebarFields: 'Changed: ', discardChanges: 'Discard',
-  overriddenCount: '{n} overridden', restartNote: 'Restart the whole profile after saving for this to take effect.', cancel: 'Cancel', done: 'Done', edit: 'Edit', remove: 'Delete', add: 'Add',
+  savebarClean: 'No unsaved changes', savebarDirty: '{n} unsaved', savebarInvalid: 'Some values are invalid; fix them to save', discardChanges: 'Discard',
+  overriddenCount: '{n} overridden', cancel: 'Cancel', done: 'Done', edit: 'Edit', remove: 'Delete', 
   groupCommon: 'Common', groupCommonSub: 'Enable, automation mode, tool surface, OpenCLI',
   groupBrowser: 'Browser', groupBrowserSub: 'Runtime, channel, headless, auto-install; advanced items folded',
   groupContext: 'Page environment', groupContextSub: 'Viewport, user agent, language, time zone, proxy (what every new context starts from)',
@@ -111,7 +111,7 @@ export const enUi: Record<keyof typeof zhUi, string> = {
   toolSurfaceHelp: 'indexed (default): only browser_index / browser_call stay in context and the model looks things up on demand (about 325 tokens).\nflat: one tool per action; the always-on context is far larger (about 8.8k tokens).\nTools are registered at startup, so restart the profile after saving.',
   surfaceIndexed: 'indexed · two entry tools (default)', surfaceFlat: 'flat · one tool per action',
   opencliEnabled: 'Enable OpenCLI', opencliEnabledHint: 'Master switch for site adapters and the Chrome Browser Bridge.',
-  reset: 'Restore default', overridden: 'Overridden', defaultValue: 'default',
+  reset: 'Restore default', overridden: 'Overridden', 
   browserRuntime: 'Runtime', browserRuntimeHint: 'Playwright by default; Patchright is Chromium-only.',
   channel: 'Browser channel', channelHint: 'Which browser engine to use.', channelHelp: 'chromium: bundled with the plugin, works out of the box (default). chrome / msedge: the Chrome or Edge installed on this machine. Other values (such as chrome-beta) are best confirmed in "Advanced: text mode" first. Patchright recommends chrome.',
   headless: 'Headless', headlessHint: 'Do not show a browser window.', headlessHelp: 'On by default. Turn it off to watch the page, or when a site detects headless browsers; Patchright usually works best headed.',
@@ -153,6 +153,6 @@ export const enUi: Record<keyof typeof zhUi, string> = {
   policyAuthDirLabel: 'Login-state directory', policyUsageEffective: 'Effective limits', policyRemovedLabel: 'Baseline profiles removed by the overlay',
   usagePolicy: 'Call buffer', usagePolicyHint: 'Bounds concurrency, bursts and crawl budget to protect target sites.', usagePolicyHelp: 'These numbers apply to all browser and crawl traffic, independent of approvals. On 429/503 responses traffic pauses by the backoff and cooldown values.',
   automationAssets: 'Asset policy', automationAssetsHint: 'Candidate thresholds, persistence, activation, counts and budgets.', automationAssetsHelp: 'Controls when an agent\'s successful runs are suggested for summarizing into reusable assets, plus asset counts, the context budget and activation conditions.',
-  limitsRange: 'Range {min}–{max}', limitsDefault: 'default {value}', limitsPolicyAdvanced: 'Advanced: raw JSON', limitsAssetsAdvanced: 'More asset policy',
+  limitsRange: 'Range {min}–{max}', limitsDefault: 'default {value}', 
   advancedHint: 'The text is a view: editing it edits the fields above, and the other way round. Lines starting with # are comments and ignored on save.', advancedCopy: 'Copy as text', advancedCopied: 'Copied', advancedNote: 'Only the default parameters are listed here; switches, policies, prompts and login profiles are edited in their own groups.',
 }

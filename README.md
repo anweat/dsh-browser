@@ -49,7 +49,7 @@
 来自 Cordis。npm 上 `0.1.15-alpha.2` 仍声明旧版 DSH peer，不能与本版混用。
 
 设置的读取不再对宿主版本做适配：Host 半边直接使用 Loader 传给 `apply` 的条目配置（设置页由条目的 `Config` schema 派生，
-条目 id 为 `browser`），浏览器设置卡片使用 `ConfigForm`/`ctx.configForms`，`devDependencies` 锁定 `0.2.1-rc.2`。
+条目 id 为 `browser`），浏览器设置卡片使用 `ConfigForm`/`ctx.configForms`，`devDependencies` 锁定 `0.2.1-rc.3`。
 可编辑字段都是 `.volatile()`：保存后新值写入运行中的引用，但浏览器进程、工具暴露与审批规则在启动时一次读取，
 所以保存后仍需重启 profile 才生效（只有提示文本覆盖里的目录、错误提示等按调用实时读取，见「自定义提示文本」）。
 
@@ -80,6 +80,8 @@ dsh --profile web
 ## 从旧版本升级
 
 ### 升级到 0.2.2
+
+- **设置界面重做**（用户反馈“文字和框体太多，不知道怎么配，没有注释”）：状态摘要 + 九个可折叠分组（默认只展开“常用”）+ 一直在视野里的保存条（“N 项未保存 / 放弃 / 保存”）；下拉、开关、数字加单位、chips、列表和弹窗取代了整页文本框。登录 profile、提示词、自动化资产都是“列表 + 编辑弹窗”，提示词弹窗左右对照“默认文本｜我的覆盖”。每个键都有注释：字段旁一句话 + `?` 里的长说明，properties 文本模式每个键前一行注释，示例配置与导出的提示词默认文本（新的带注释 YAML）同样如此。保存结构、`Config` schema 与运行时行为不变（`authProfiles` 现在也能在卡片里改，它在 schema 里本来就可写）。详见“配置”一节。
 
 - **DSH 基线跟到 `dsh-v0.2.1-rc.2` / `rc.3`**：受管 peer 为 `>=0.2.1-rc.2 <0.2.2-0`（旧的 `>=0.2.0-rc.2 <0.2.1-0` 会拒绝今天的宿主），
   Cordis peer 为 `~4.0.5`，`devDependencies` 全部锁到 `0.2.1-rc.3`（schemastery 3.18.5）。源码不需要为 0.2.1-rc.2 / rc.3 改动：
@@ -480,7 +482,7 @@ PDF：本插件不抽取 PDF 文本。用 `target.download` 落盘后取返回�
 | `proxyServer` | `http://host:port`、`https://…`、`socks5://…`、`socks4://…`（缺省协议按 http）；**不支持账号密码**，带用户名/密码的地址会被拒绝 |
 | `proxyBypass` | 逗号分隔的主机列表（需要先有 `proxyServer`，否则提示并忽略） |
 
-非法值**不会让插件加载失败**：该键回退到默认值，`runtime.status` 的 `runtimeWarnings` 与设置卡片顶部给出一条警告（键名、原值摘要、原因、如何修，代理地址里的账号密码会被遮蔽）。设置卡片的“默认参数”编辑区在保存前用同一套规则逐行校验，非法行显示行号与原因并禁用保存。这些键在插件挂载时解析，保存后需重启 profile。
+非法值**不会让插件加载失败**：该键回退到默认值，`runtime.status` 的 `runtimeWarnings` 与设置卡片顶部状态摘要里的警告数（点开看详情）给出一条警告（键名、原值摘要、原因、如何修，代理地址里的账号密码会被遮蔽）。设置卡片的“默认参数”编辑区在保存前用同一套规则逐行校验，非法行显示行号与原因并禁用保存。这些键在插件挂载时解析，保存后需重启 profile。
 
 2. **按次参数**：`target.open` 的 `viewport {width,height}`、`userAgent`、`locale`、`timezoneId`、`proxyServer`。语义沿用 `authProfile` / `rulePack` 的先例：
 
@@ -515,62 +517,55 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
 
 ## 配置（cordis.yml / patch config）
 
+下面是一份**每个键都带注释**的完整示例：注释说明用途、可选值或范围、默认值与风险；去掉不需要的键即回到默认值。设置卡片的“高级：文本模式”打印的是同样带注释的文本（注释行以 `#` 开头，读取时忽略）。
+
 ```yaml
 - insert:
     - id: browser
       name: '@anweat/dsh-browser'
       config:
-        automationMode: standard # read-only | standard | autonomous | unrestricted
-        toolSurface: indexed     # indexed（默认，browser_index + browser_call）| flat（每个动作一个工具）
-        browserRuntime: playwright # playwright | patchright
-        channel: chromium        # 'chromium'（打包内核）| 'msedge'（系统 Edge）
-        headless: true
-        opencliEnabled: true
-        usagePolicy:             # 所有模式都生效；无审批模式也不会绕过
-          minDelayMs: 750
-          maxConcurrency: 2
-          burst: 3
-          maxPagesPerRun: 20
-          maxDepth: 2
-          retryLimit: 2
-          backoffBaseMs: 1000
-          cooldownMs: 30000
-        automationAssets:
-          enabled: true
-          persistenceMode: suggest # off | manual | suggest | auto-draft
-          activationMode: manual   # 当前推荐值；不会因静态校验自动激活
-          minSuccessfulRuns: 3
-          minDistinctSessions: 2
-          successWindowDays: 14
-          minSuccessRate: 0.8
-          maxCandidates: 20
-          candidateTtlDays: 14
-          maxSuggestionsPerDay: 2
-          maxDrafts: 10
-          maxActiveAssets: 50
-          retrievalTopK: 5
-          catalogTokenBudget: 800
-          modelDevelopmentEnabled: true
-          maxModelDraftWritesPerSession: 3
-          maxTestCredentials: 5     # 每个资产保留最近 N 条测试凭据（激活只认绑定当前 revision 与内容哈希的 passed 凭据）
-          minInputSetsForActivation: 2  # 声明了输入的资产，激活要求当前版本的通过凭据至少覆盖 N 组输入（1–5）；无输入的资产不受影响
-        maxSessions: 8           # 同时持有 context+page 的 session 上限，超出淘汰最久未使用者
-        viewportMode: window     # window（默认）| 720p | 1080p | custom；custom 时再写 viewportWidth / viewportHeight
-        # userAgent: ''          # 留空 = 浏览器自带
-        # locale: en-US
-        # timezoneId: Asia/Shanghai
-        # proxyServer: http://127.0.0.1:7890   # 不支持账号密码
-        # proxyBypass: example.com,.internal.test
-        # downloadDir: D:/dsh/downloads        # 绝对路径；默认 $DSH_HOME/data/browser/downloads
-        downloadMaxBytes: 104857600            # 单个下载上限，默认 100 MiB
-        allowPrivateHosts: false # true 时 agent 才能把 localhost/.internal/内网 IP 写进 allowedDomains
-        storageStatePath: ''     # Playwright 登录态 JSON（复用已登录会话）
-        authProfiles:
+        # ── 常用 ────────────────────────────────────────────────────────────
+        enabled: true            # 是否启用浏览器服务；false 时 agent 没有浏览器工具。默认 true
+        automationMode: standard # 自动化模式：read-only 只读 | standard 写操作逐次询问（默认）| autonomous 页面交互直接执行 | unrestricted 全部免审批（风险最高：agent 还能自行放宽登录域名与限流）
+        toolSurface: indexed     # 工具面：indexed（默认）= 只常驻 browser_index + browser_call，约 325 token | flat = 每个动作一个工具，常驻上下文大得多。改后需重启
+        opencliEnabled: true     # OpenCLI（站点 adapter 与 Chrome Browser Bridge）总开关。默认 true
+
+        # ── 浏览器 ──────────────────────────────────────────────────────────
+        browserRuntime: playwright # 驱动：playwright（默认）| patchright（仅 Chromium，对反爬检测更友好）
+        channel: chromium        # 浏览器：chromium（打包内核，默认）| chrome | msedge（本机已装）；Patchright 推荐 chrome
+        headless: true           # true 不显示窗口（默认）| false 显示；Patchright 通常关闭无头兼容性最好
+        autoInstall: false       # 缺内核时是否自动 install chromium（几十到上百 MB）。默认 false，建议用 runtime.install 显式安装
+        # executablePath: ''     # 自定义浏览器的绝对路径；留空用自带或通道默认
+        # cdpPort: 9222          # 本机 CDP 调试端口 1–65535；留空关闭。风险：同机其它程序可借此控制浏览器
+        maxSessions: 8           # 同时持有 context+page 的 session 上限 1–64，超出淘汰最久未使用者。默认 8
+        # args: ['--disable-gpu'] # 追加的 Chromium 启动参数；只加你理解的。默认 []
+        # snapshotDir: ''        # 截图目录（绝对路径）；默认 $DSH_HOME/data/browser/snapshots
+        verbose: false           # 输出启动与诊断信息。默认 false
+
+        # ── 页面环境（每个新 context 的起点；target.open 可按次覆盖，省略即沿用）──
+        viewportMode: window     # 视口：window（浏览器默认）| 720p | 1080p | custom；custom 时必须再写 viewportWidth / viewportHeight
+        # viewportWidth: 1280    # custom 的宽度 200–7680（像素）
+        # viewportHeight: 720    # custom 的高度 200–4320（像素）
+        # userAgent: ''          # User-Agent；留空 = 浏览器自带。风险：改变站点看到的指纹；agent 按次改它需要审批（unrestricted 除外）
+        # locale: en-US          # 语言标签（BCP 47）；留空 = 浏览器自带
+        # timezoneId: Asia/Shanghai # IANA 时区；留空 = 本机时区
+        # proxyServer: http://127.0.0.1:7890   # 代理；不支持账号密码，勿写凭据；留空 = 直连。agent 按次指定代理需要审批
+        # proxyBypass: example.com,.internal.test # 不走代理的主机，逗号分隔；需先设 proxyServer
+
+        # ── 下载 ────────────────────────────────────────────────────────────
+        # downloadDir: D:/dsh/downloads        # 下载目录（绝对路径）；默认 $DSH_HOME/data/browser/downloads
+        downloadMaxBytes: 104857600            # 单个下载上限（字节），1 到 10 GiB；默认 100 MiB，超出会中止并删除
+
+        # ── 登录与权限 ──────────────────────────────────────────────────────
+        allowPrivateHosts: false # true 时 agent 才能把 localhost/.internal/内网 IP 写进 allowedDomains。风险：扩大 agent 可授权的范围。默认 false
+        storageStatePath: ''     # 旧版全局登录态 JSON（对所有站点生效，无域名限制）；新配置请用 authProfiles
+        defaultAuthProfile: forum # 未显式选择时使用的 profile 名（必须存在）；crawl 始终匿名
+        authProfiles:            # 按域名限定的命名登录态；设置卡片里是“登录 profile”列表，可在弹窗里增删改
           forum:
-            storageStatePath: 'D:/secrets/forum.json'
-            allowedDomains: [example.com]
-            persistState: false  # 默认只读；true 才会原子回写刷新后的状态
-        rulePacks:
+            storageStatePath: 'D:/secrets/forum.json' # Playwright storageState JSON；含 cookie，不要提交到仓库
+            allowedDomains: [example.com]             # 只有这些域名（含子域）能用它；至少一个
+            persistState: false  # 默认只读（文件须已存在）；true 才会在 context 关闭时原子回写刷新后的状态，文件可先不存在
+        rulePacks:               # 域名限定、哈希固定的页面增强包；结构复杂，只在配置文件里编辑
           forum-enhanced:
             matches: [example.com]
             initScriptPath: 'D:/dsh/rules/forum.js'
@@ -578,26 +573,82 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
             steps:
               - { type: waitFor, selector: '#results', timeoutMs: 10000 }
               - { type: scroll, deltaY: 1600, repeat: 2, waitMs: 300 }
-        autoInstall: false       # 缺内核时是否自动 install chromium
-        verbose: false
+
+        # ── 使用限流（所有模式都生效；无审批模式也不会绕过）──────────────────────
+        usagePolicy:
+          minDelayMs: 750        # 同一主机两次请求之间至少等待，0–60000 毫秒。默认 750
+          maxConcurrency: 2      # 同时进行的请求数 1–8。默认 2
+          burst: 3               # 短时间内允许连续发出的请求数 1–20。默认 3
+          maxPagesPerRun: 20     # 一次 crawl 最多访问的页面数 1–100。默认 20
+          maxDepth: 2            # crawl 最多跟进的链接层数 0–5。默认 2
+          retryLimit: 2          # 可重试错误的最大重试数 0–5。默认 2
+          backoffBaseMs: 1000    # 重试等待的起始时长（逐次加倍）1–60000 毫秒。默认 1000
+          cooldownMs: 30000      # 收到 429/503 后暂停该主机的时长 100–300000 毫秒。默认 30000
+
+        # ── 自动化资产（可复用的 recipe 与脚本，实验性）─────────────────────────
+        automationAssets:
+          enabled: true          # 关闭后不记录、不检索资产。默认 true
+          # directory: ''        # 资产目录（绝对路径）；默认 $DSH_HOME/data/browser/automations
+          persistenceMode: suggest # off 不记录 | manual 仅手动 | suggest 记录并建议总结（默认）| auto-draft 自动生成草稿
+          activationMode: manual   # manual 必须手动激活（默认，推荐）| auto-tested 通过测试后自动激活；不会因静态校验自动激活
+          minSuccessfulRuns: 3   # 同一操作成功多少次才建议总结 2–20。默认 3
+          minDistinctSessions: 2 # 这些成功分布在至少几个会话 1–10。默认 2
+          successWindowDays: 14  # 只统计最近多少天的成功 1–90。默认 14
+          minSuccessRate: 0.8    # 最低成功率 0.5–1。默认 0.8
+          maxCandidates: 20      # 同时保留的候选数 1–100。默认 20
+          candidateTtlDays: 14   # 候选多久没再出现就丢弃 1–90 天。默认 14
+          maxSuggestionsPerDay: 2 # 每天最多提示几次“是否总结”，0–20（0 = 不提示）。默认 2
+          maxDrafts: 10          # 草稿上限 1–100。默认 10
+          maxActiveAssets: 50    # 同时激活的资产上限 1–200。默认 50
+          retrievalTopK: 5       # 每次向模型展示几条相关资产摘要 1–20。默认 5
+          catalogTokenBudget: 800 # 资产摘要占用模型上下文的上限 100–4000 token。默认 800
+          modelDevelopmentEnabled: true # false 时 agent 看不到 automation.develop（需重启）。默认 true
+          maxModelDraftWritesPerSession: 3 # 一个会话里模型保存草稿的次数上限 1–20。默认 3
+          maxTestCredentials: 5     # 每个资产保留最近 N 条测试凭据 1–20（激活只认绑定当前 revision 与内容哈希的 passed 凭据）。默认 5
+          minInputSetsForActivation: 2  # 声明了输入的资产，激活要求当前版本的通过凭据至少覆盖 N 组输入（1–5）；无输入的资产不受影响。默认 2
+
+        # ── 提示词（覆盖模型看到的文字；不写 = 全部用默认）──────────────────────
+        # prompts: { ... }       # 结构见“自定义提示文本”；设置卡片“提示词”分区的“导出默认文本”给出带注释的 YAML
 ```
 
-这些字段同时进入 Host settings 命名空间和专用可视化卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`，可调整工具自由度、默认参数（Playwright/Patchright、窗口、代理、目录等）、OpenCLI、`usagePolicy`、自动化资产策略；同一卡片包含候选提示、脚本列表、JSON 编辑器、测试、激活和归档操作。
+这些字段同时进入 Host settings 命名空间和专用设置卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`。0.2.2 起卡片不再是“一个大文本框加一长串提示词框”，而是**状态摘要 + 分组 + 底部保存条**：
 
-- **策略覆盖层分区**：显示覆盖层版本、告警、每个 profile 与限流项的来源标记（基线 / 来自覆盖层 / 覆盖层新建）、最近 20 条审计，以及“清除覆盖 / 回滚到基线”按钮。上面的 `authProfiles` / `usagePolicy` 编辑框始终是基线；覆盖层优先，所以这里的生效值可能与框里不同。
-- **默认参数（properties）编辑区**：运行时、窗口、语言、代理、目录、限额这类“默认值”不再是一堆单独的表单项，而是一个 `key = value` 文本。每个新 context 从这些默认参数起步；agent 每次操作时“复制”它们，只改任务需要改的部分（见下）。
-  - **格式**：每行 `key = value`，值是第一个 `=` 之后的全部内容（去掉首尾空白，可用一对双引号包裹以保留空白）；`#` 开头的行是注释，没有行内注释（值里的 `#` 就是 `#`）；数组写成一行 JSON，例如 `args = ["--disable-gpu"]`。值为空等同未设置。
-  - **预填**：打开时列出该插件当前全部默认参数键。已覆盖的键是 `key = 值` 的实际行；未覆盖的键是注释行，显示当前生效的值（部署值或内置默认），例如 `# viewportMode = window`、`# maxSessions = 8`。注释掉或删掉一行即恢复默认；编辑区下方“已覆盖的默认参数”列出所有覆盖项，每项有“恢复部署值”按钮。写成与当前生效值相同的值不构成覆盖（不会被保存）。
-  - **即时校验**：逐行用与服务端同一套规则校验（`src/config-rules.ts`），错误带行号和键名，例如 `line 5: proxyServer scheme must be one of http, https, socks5, socks4`；任一行非法则禁用保存。`viewportMode = custom` 缺宽或缺高也是错误（部署值里已有的算数）。**未知键、以及别处编辑的键（`enabled`、`usagePolicy`、`prompts` 等）给出行级警告并被忽略**，不会静默丢弃；同一键重复出现时以后一行为准并提示。
-  - **保存结果**：与旧的逐项表单完全一样——同样的扁平键，同样的 `set` / `unset` 操作（有测试保证同一份配置经两条路径写出相同的配置行），不改 `Config` schema，不改运行时行为。
-  - 仍是独立控件的：自动化自由度（`enabled`、`automationMode`、`toolSurface`、`opencliEnabled`）、调用缓冲与自动化资产策略 JSON 框、提示文本、策略覆盖层、资产库。`authProfiles`、`rulePacks` 结构较复杂，卡片里只列名称并注明“在配置文件中编辑”。
+- **顶部状态摘要**：启用开关状态、自动化模式（按风险着色）、工具面、OpenCLI、警告数（“查看详情”弹窗列出运行时报告的被忽略配置和覆盖层告警）。
+- **九个分组，默认只展开“常用”**，每个分组头显示一句话说明和“N 项已覆盖”徽标：
+  1. **常用**：启用开关、自动化模式（下拉，`standard` 为默认并标注风险等级，所选项下一行说明）、工具面（下拉）、OpenCLI 开关。
+  2. **浏览器**：运行时、通道（下拉）、无头与自动安装（开关）；可执行文件、CDP 端口、会话上限、启动参数（chips）、快照目录、详细日志折叠在“高级”里。
+  3. **页面环境**（原 context 默认值）：视口模式（下拉，选 `custom` 才出现宽高）、User-Agent（预设下拉 + 自定义）、语言区域与时区（带建议的输入）、“使用代理”开关（展开地址与绕过列表）。
+  4. **下载**：下载目录、单个文件上限（数字 + B / KiB / MiB / GiB 单位）。
+  5. **登录与权限**：登录 profile **列表**（名称、域名数、是否回写状态、来自覆盖层的标记），“编辑 / 新增 profile”在**弹窗**里改域名（chips）和 persistState，状态文件路径只读显示并写明规则；默认 profile 从列表下拉选；允许内网域名开关带风险标注；策略覆盖层是一行状态，变更记录（含每个 profile 的来源、限流生效值和最近 20 条审计）在“查看变更记录”弹窗里，旁边是“清除覆盖 / 回滚到基线”。上面的 `authProfiles` / `usagePolicy` 始终是基线；覆盖层优先，所以生效值可能与输入框里不同。
+  6. **使用限流**：`usagePolicy` 八项、`automationAssets` 十九项都是带单位、范围和默认值的数字输入（资产策略折叠在“资产策略（高级）”里）；超出范围的值会被说明并禁用保存（插件对资产数字会悄悄截断，所以这里不让它发生）；原始 JSON 折叠在“高级：原始 JSON”里，与输入框是同一份数据。
+  7. **提示词**：每段可覆盖的文字是一行（名称、`默认`/`已覆盖`、字数），“编辑”弹窗左右（窄屏上下）对照“默认文本｜我的覆盖”，有“以默认为起点”“恢复默认”和字数上限；分组 / 动作 / 错误提示覆盖是只列出改过的条目的列表，“新增条目 / 编辑”弹窗同样对照默认；顶部是 L0 预算与诊断；“导出默认文本”弹窗给出**带注释的 YAML**（推荐）和 JSON。
+  8. **自动化资产**：候选与资产是列表行，编辑器、测试、激活、归档在一个弹窗里（逻辑不变，有未保存修改时关闭弹窗仍会先确认）。
+  9. **高级：文本模式**：把默认参数当作 `key = value` 文本查看和编辑（见下）。
+- **底部保存条一直在视野里**：显示“N 项未保存”（点开不需要，直接保存即可）、“放弃”和“保存”；有无效值时说明原因并禁用保存。每个弹窗自己的“完成 / 保存”只把修改放进暂存，写入仍由页面的“保存”完成。
+- **每个字段**：标签 + 一句话说明；长说明、风险说明和选项含义在 `?` 里点开；已覆盖的字段有“已覆盖”徽标和就地“恢复默认”，未覆盖时灰色显示当前生效值。
+
+- **高级：文本模式（默认参数 properties）**：运行时、窗口、语言、代理、目录、限额这些“默认值”也可以当一个 `key = value` 文本来读和改，它是上面控件的**视图**——改文本就是改对应字段，改控件文本会重新打印。每个键前一行是注释，写明用途、可选值或范围、默认值和风险，例如：
+
+  ```properties
+  # 视口：window = 浏览器默认 | 720p（1280x720）| 1080p（1920x1080）| custom（需同时填宽高）。默认 window
+  viewportMode = custom
+  # 自定义视口宽度（像素），200–7680；仅 viewportMode = custom 时生效。默认 空
+  viewportWidth = 1280
+  # 单个下载的字节上限，1 到 10737418240（10 GiB）；超出会中止并删除。默认 104857600（100 MiB）
+  # downloadMaxBytes = 104857600
+  ```
+
+  - **格式**：每行 `key = value`，值是第一个 `=` 之后的全部内容（去掉首尾空白，可用一对双引号包裹以保留空白）；`#` 开头的行是注释，**保存时一律忽略，不当作数据**；没有行内注释（值里的 `#` 就是 `#`）；数组写成一行 JSON，例如 `args = ["--disable-gpu"]`。值为空等同未设置。注释语言随界面语言（中 / 英）。
+  - **被注释的 `# key = 值` 行**显示当前生效的值（部署值或内置默认）；注释掉或删掉一行即恢复默认；写成与当前生效值相同的值不构成覆盖（不会被保存）。往返不丢键：打印、解析、再打印得到同一份文本（有测试保证）。“复制为文本”按钮复制整段带注释的文本，可作为当前配置的导出。
+  - **即时校验**：逐行用与服务端同一套规则校验（`src/config-rules.ts`），错误带行号和键名，例如 `line 5: proxyServer scheme must be one of http, https, socks5, socks4`；任一行非法则禁用保存。`viewportMode = custom` 缺宽或缺高也是错误（部署值里已有的算数；现在从任何控件改都会拦截，而不只是文本里）。**未知键、以及别处编辑的键（`enabled`、`usagePolicy`、`prompts` 等）给出行级警告并被忽略**，不会静默丢弃；同一键重复出现时以后一行为准并提示。
+  - **保存结果**：与改版前完全一样——同样的扁平键，同样的 `set` / `unset` 操作（有测试保证同一份配置经控件、文本两条路径写出相同的配置行），不改 `Config` schema，不改运行时行为。唯一新增的可写字段是 `authProfiles`（它在 schema 里本来就是 `.volatile()`，此前只能在配置文件里改）。`rulePacks` 结构复杂且带哈希固定的脚本，卡片里只列名称并注明“在配置文件中编辑”。
 
   **默认值与每次操作的关系**：默认参数是“新 context 的起点”。`target.open` 的 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer` 是对它的按次覆盖，省略的参数沿用当前默认，只需写要改的键；结果里的 `contextOptions` 总是列出本次生效的完整参数集，`contextSources` 标明每个值来自 `call`（本次调用）、`session`（同一 context 里更早调用的覆盖）还是 `default`（配置默认）。`browser_index({action:"target.open"})` 的详情层写出当前生效的默认值摘要（`target.download` 写 `downloadDir` 与 `downloadMaxBytes`），常驻层不受影响。
 - **测试输入 JSON** 填一个对象是在当前页面运行一次；填 2 到 5 个对象组成的数组是逐组在全新上下文中回放（等价于 `inputSets`）。卡片逐组显示结果和 `PARAMETERIZATION_SUSPECT` 警告；声明了输入的资产在通过凭据覆盖的输入组数不足 `minInputSetsForActivation` 时，“激活”按钮旁给出说明并保持禁用。
 - **新建 recipe** 从 v2 模板开始（带 `schemaVersion: 2`、locator 步骤、`inputSchema` 和 `postconditions` 占位），模板本身可以直接保存。v1 recipe 有“转换为 v2”按钮：生成新草稿并选中，显示仍取第一个匹配的步骤数（`pendingDisambiguation`），原资产不变；有未保存修改时会先确认。
-- **提示文本显示默认长什么样**：打开卡片时自动取得默认文本（不必先点“导出”）。每个输入框未覆盖时，用灰色 placeholder 显示默认文本（超过 6 行或 500 字符的截断并加 `…`，完整内容在框下的“查看完整默认文本”里展开）；框旁有“以默认文本为起点编辑”按钮，把默认文本复制进框内再改；skill 正文文件和 skill 追加文本没有默认文本，placeholder 说明“未设置”的含义；“分组 / 动作 / 错误提示覆盖 JSON”框的 placeholder 是默认的 groups / actions / errorHints 结构，按钮同样可以把完整默认 JSON 放进框里。
-- **与默认文本完全相同 = 没有覆盖**：框里的文本与默认文本相同（或 JSON 框里的某一项与默认相同）时不会被保存，只保存真正改动的部分，这样以后默认文本升级会自动跟进，不会被旧默认值冻结。更早的版本如果已经存了与默认相同的文本，卡片会标出“与默认文本相同”，点“恢复默认”即可清除。
-- “提示文本”分区底部的“导出默认文本”按钮保留：在只读文本框里显示全部默认值（与 `pnpm prompts:dump` 相同的 JSON），复制后按需改写。
+- **提示词分区显示默认长什么样**：打开卡片时自动取得默认文本（不必先点“导出”）。每段文字一行，“编辑”弹窗里**左边是只读的默认文本，右边是你的覆盖**（窄屏上下排列）；“以默认为起点”把默认文本复制进右边再改，“恢复默认”清空覆盖；skill 正文文件和 skill 追加文本没有默认文本，左边写明“留空表示不设置”。分组 / 动作 / 错误提示覆盖是只列改过的条目的列表，“新增条目”可从建议里选键，弹窗同样把该键的默认并排给出。
+- **与默认文本完全相同 = 没有覆盖**：弹窗里的文本与默认文本相同（或某个条目与默认相同）时不会被保存，只保存真正改动的部分，这样以后默认文本升级会自动跟进，不会被旧默认值冻结。更早的版本如果已经存了与默认相同的文本，列表会标出“与默认文本相同”，点“恢复默认”即可清除。
+- “提示词”分区底部的“导出默认文本”打开一个弹窗：**带注释的 YAML**（推荐）和 JSON（与 `node scripts/dump-prompts.mjs` 相同）两个页签，可复制。YAML 在每段前注明它属于哪一层（L0 工具描述 / L1 目录 / L2 动作详情 / 错误结果 / skill）、模型何时读到、字数上限和生效方式（工具描述需重启），每个分组、动作和错误码也各有一行；解析后与 JSON 完全相同，所以原样粘回不改变任何东西。仓库里同样可用 `node scripts/dump-prompts.mjs --yaml --lang zh`。
 - 估算的常驻 L0 token 数与 `node scripts/measure-tool-surface.mjs` 使用同一个估算函数和同一份工具定义，两处数字一致。保存运行时配置后需要重启 profile；资产 CRUD 通过 loopback-only Host RPC 即时落盘。若没有看到卡片，先确认浏览器插件已同步升级并完整重启，而不是只刷新 Web Search Pro 页面。
 
 ### Patchright 可选内核
@@ -648,7 +699,7 @@ Camoufox 当前没有硬集成：截至本版，其 JS 包要求 Node 22 且 pee
 
 动作键可以是 `group.action`、子动作（`automation.develop.save`）或详情页（`observe.read.controls`，其 `notes` 即该页正文）。空字符串等于不覆盖。
 
-**导出全部默认文本**：设置面板“提示文本”分区的“导出默认文本”按钮会在只读文本框里显示一份 JSON，结构与 `prompts` 完全一致，包含每个可覆盖项的内置文本，安装包用户不需要任何脚本环境。在仓库检出里也可以运行 `pnpm prompts:dump`（`node scripts/dump-prompts.mjs`），输出与按钮完全相同。复制它，删掉保持默认的部分，改写其余部分，放进配置即可；原样放回不改变任何输出（有测试保证）。
+**导出全部默认文本**：设置面板“提示词”分区的“导出默认文本”按钮会打开弹窗，给出带注释的 YAML 与一份 JSON，结构与 `prompts` 完全一致，包含每个可覆盖项的内置文本，安装包用户不需要任何脚本环境。在仓库检出里也可以运行 `pnpm prompts:dump`（`node scripts/dump-prompts.mjs`），输出与按钮完全相同。复制它，删掉保持默认的部分，改写其余部分，放进配置即可；原样放回不改变任何输出（有测试保证）。
 
 **长度上限**（超限的值整条忽略，不会被截断，并写入诊断）：
 

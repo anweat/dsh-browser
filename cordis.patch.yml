@@ -3,7 +3,7 @@
 #   dsh plugin --profile <name> add @anweat/dsh-browser
 # then boot the profile (the web profile has HMR disabled, so a restart applies it).
 #
-# Supports DSH 0.2.0-rc.2 only (see the peer ranges in package.json).
+# Supports DSH 0.2.1-rc.2 and 0.2.1-rc.3 (see the peer ranges in package.json).
 #
 # Login state: prefer named `authProfiles` with explicit `allowedDomains` (see
 # README). `storageStatePath` remains as a legacy global fallback.
@@ -13,9 +13,16 @@
 # target row's whole `config`. So this insert row carries no config: the Config schema
 # defaults supply the initial values and the profile row holds the saved settings.
 #
+# Settings: everything under `config` of that row is editable in the settings card (Settings -> Plugins -> Browser
+# automation): a status summary, nine collapsible groups (only "Common" is open), drop-downs and switches for the choices,
+# lists with dialogs for login profiles / prompts / assets, and a save bar. The README's "配置" section lists every key
+# with its allowed values, default and risk as comments; the card's "Advanced: text mode" prints the same, in your language.
+#
 # Model-facing text (tool descriptions, root guide/note, summaries, error hints, skill) can be
-# overridden under `prompts` in that config row; the settings card's "Export default text" (or `pnpm prompts:dump` in a
-# repository checkout) prints every default in the exact structure. See README "自定义提示文本".
+# overridden under `prompts` in that config row. The card's Prompts group ("Export default text") and
+# `node scripts/dump-prompts.mjs --yaml` in a repository checkout print every default as commented YAML (each section says
+# which layer the model reads it in, its length cap and when a change applies); without --yaml it prints JSON.
+# See README "自定义提示文本".
 - insert:
     - id: browser
       name: '@anweat/dsh-browser'
