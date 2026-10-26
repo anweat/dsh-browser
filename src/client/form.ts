@@ -20,7 +20,7 @@ import {
 } from './properties-form.ts'
 import { POLICY_SPECS, defaultOf, parsePolicyText, valueText, type PolicyFieldName } from './policy-fields.ts'
 import { parseProfiles, validAuthProfiles, type AuthProfileEntry } from './auth-profiles-form.ts'
-import { PROMPT_TEXT_FIELDS, canonicalPrompts, pruneDefaultExtras, type PromptDefaults, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
+import { PROMPT_TEXT_FIELDS, extraEntries, withExtraEntry, canonicalPrompts, pruneDefaultExtras, type PromptDefaults, type PromptExtraEntry, type PromptExtraKind, type PromptExtraValue, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
   | 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
@@ -73,6 +73,8 @@ export interface PromptsCardState {
   skillEnabled: boolean
   /** The JSON box for groups, actions and errorHints. */
   extras: { text: string; invalid: boolean }
+  /** The overridden group, action and error-hint entries of the staged draft, for the list. */
+  entries: PromptExtraEntry[]
   /** Whether saving would leave a `prompts` entry in the user layer. */
   overridden: boolean
   /** Whether the whole `prompts` draft is one the plugin would refuse to take. */
@@ -277,6 +279,7 @@ export class BrowserSettingsController {
       saveAuthProfile: (id: string, entry: AuthProfileEntry) => this.saveAuthProfile(id, entry),
       removeAuthProfile: (id: string) => this.removeAuthProfile(id),
       resetPromptExtras: () => this.resetPromptExtras(),
+      setPromptExtra: (kind: PromptExtraKind, key: string, value: PromptExtraValue | undefined) => this.setPromptExtra(kind, key, value),
     }
   }
 
@@ -423,6 +426,20 @@ export class BrowserSettingsController {
     this.refresh()
   }
 
+  /**
+   * One entry of the groups / actions / errorHints lists, from the entry dialog. An entry equal to the plugin's own
+   * text is no override (see editPromptText), so it leaves the list instead of freezing today's wording.
+   */
+  setPromptExtra(kind: PromptExtraKind, key: string, value: PromptExtraValue | undefined): void {
+    this.extrasRaw = undefined
+    this.extrasInvalid = false
+    const next = withExtraEntry(this.promptsDraft(), kind, key, value)
+    const defaults = this.promptDefaults()?.extras
+    const extras = Object.fromEntries((['groups', 'actions', 'errorHints'] as const).filter(name => next[name] !== undefined).map(name => [name, next[name]]))
+    const effective = defaults ? pruneDefaultExtras(extras, defaults) : extras
+    this.stagePrompts(withExtras(next, effective))
+  }
+
   /** Back to the plugin's own text for groups, actions and error hints. */
   resetPromptExtras(): void {
     this.extrasRaw = undefined
@@ -545,6 +562,7 @@ export class BrowserSettingsController {
       texts,
       skillEnabled: getAt(draft, ['skill', 'enabled']) !== false,
       extras: { text: this.extrasRaw ?? extrasText(draft), invalid: this.extrasInvalid },
+      entries: extraEntries(draft),
       overridden: field.overridden,
       invalid: field.invalid,
     }

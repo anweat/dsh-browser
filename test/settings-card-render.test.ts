@@ -63,7 +63,7 @@ const variants: Record<string, Record<string, unknown>> = {
 function fieldsRendered(html: string): { controls: string[]; notes: string[] } {
   return {
     // Ids with a dash belong to a part of a field (a policy key's input `usagePolicy-minDelayMs`, the raw box `usagePolicy-json`, a prompt box `prompts-…`).
-    controls: [...new Set([...html.matchAll(/<(?:input|textarea|select)[^>]*\bid="plugin-config-dsh-browser-([A-Za-z0-9-]+)"/g)].map(match => match[1]!).filter(id => !id.includes('-') || id.startsWith('prompts-')).concat([...html.matchAll(/data-dsb-field="([A-Za-z0-9]+)"/g)].map(match => match[1]!)))],
+    controls: [...new Set([...html.matchAll(/<(?:input|textarea|select)[^>]*\bid="plugin-config-dsh-browser-([A-Za-z0-9-]+)"/g)].map(match => match[1]!).filter(id => !id.includes('-')).concat([...html.matchAll(/data-dsb-field="([A-Za-z0-9]+)"/g)].map(match => match[1]!)))],
     notes: [...html.matchAll(/data-dsh-browser-config-note="([A-Za-z0-9]+)"/g)].map(match => match[1]!),
   }
 }
@@ -86,7 +86,7 @@ test('every public config field has exactly one entry in the card: a control, or
     const text = editor![1]!.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&')
     const inEditor = (field: string) => new RegExp(`^#? ?${field} =`, 'm').test(text)
     for (const field of publicFields) {
-      const control = field === 'prompts' ? controls.some(id => id.startsWith('prompts-')) : controls.filter(id => id === field).length === 1
+      const control = controls.filter(id => id === field).length === 1
       const note = notes.includes(field)
       assert.equal(controls.filter(id => id === field).length > 1, false, `config field "${field}" has more than one control in the ${locale} card`)
       if (pending.includes(field)) { assert.ok(inEditor(field), `${field} is still a line of the properties text`); continue }
@@ -94,9 +94,9 @@ test('every public config field has exactly one entry in the card: a control, or
       assert.equal([control, note].filter(Boolean).length, 1, `config field "${field}" is shown as ${[control && 'a control', note && 'a note'].filter(Boolean).join(' and ')}`)
     }
     // Nothing on the card points at a field the schema does not have (the properties text is a mirror, not a field).
-    for (const id of controls.filter(id => !id.startsWith('prompts-') && id !== 'properties')) assert.ok(publicFields.includes(id), `control ${id} is not a config field`)
+    for (const id of controls.filter(id => id !== 'properties')) assert.ok(publicFields.includes(id), `control ${id} is not a config field`)
     for (const id of notes) assert.ok(publicFields.includes(id), `note ${id} is not a config field`)
-    for (const field of ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled', 'browserRuntime', 'channel', 'headless', 'maxSessions', 'args', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass', 'downloadDir', 'downloadMaxBytes', 'usagePolicy', 'automationAssets', 'authProfiles', 'defaultAuthProfile', 'allowPrivateHosts', 'storageStatePath']) assert.ok(controls.includes(field), `${field} is a control`)
+    for (const field of ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled', 'browserRuntime', 'channel', 'headless', 'maxSessions', 'args', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass', 'downloadDir', 'downloadMaxBytes', 'usagePolicy', 'automationAssets', 'authProfiles', 'defaultAuthProfile', 'allowPrivateHosts', 'storageStatePath', 'prompts']) assert.ok(controls.includes(field), `${field} is a control`)
     assert.ok(notes.includes('rulePacks'), 'rulePacks has a note')
     assert.ok(!controls.includes('rulePacks'))
     assert.equal(html.includes(locale === 'zh' ? '配置文件' : 'config file'), true, 'the note says where to edit')
@@ -143,20 +143,14 @@ test('the policy overlay clear button is usable while a corrupt overlay file is 
   }
 })
 
-test('the prompt section offers "Export default text" and no longer asks anyone to run pnpm', (t) => {
+test('the prompts group offers "Export default text" (the dialog is opened from it) and never asks anyone to run pnpm', (t) => {
   if (skip) return t.skip(skip)
   for (const locale of ['en', 'zh'] as const) {
     const { html } = renderCard!({ locale })
     assert.equal(/pnpm/i.test(html), false, `the ${locale} card never mentions pnpm`)
     assert.match(html, locale === 'zh' ? /导出默认文本/ : /Export default text/)
     assert.ok(html.includes('data-dsh-browser-prompts-export'))
-    // Once loaded, the defaults sit in a read-only box that has a name.
-    const loaded = renderCard!({ locale, promptsDefaults: '{"rootNote":""}' }).html
-    const box = loaded.match(/<textarea[^>]*data-dsh-browser-prompts-defaults[^>]*>/)?.[0] ?? ''
-    assert.match(box, /aria-label="[^"]+"/, 'the box has a name')
-    assert.match(box, /readonly/i, 'and is read-only')
-    assert.ok(loaded.includes('data-dsh-browser-prompts-defaults'))
-    assert.ok(loaded.includes('rootNote'))
+    assert.equal(html.includes('data-dsh-browser-prompts-defaults'), false, 'the box lives in the dialog, which is closed')
   }
 })
 
@@ -238,26 +232,23 @@ test('configuration warnings of the running plugin are counted in the status sum
   assert.match(renderCard!().html, /data-dsb-warnings-count="0"/)
 })
 
-test('each prompt control shows the default text in the empty box and offers to start from it; a long default has a full view', (t) => {
+test('the prompts group lists every text with its state, and only the entries that were changed', (t) => {
   if (skip) return t.skip(skip)
-  const long = Array.from({ length: 20 }, (_, i) => `line ${i + 1} of the default`).join('\n')
-  const defaults = { texts: { indexDescription: 'Browse the web with browser_index and browser_call.', rootGuide: long, skillDescription: 'Use to open pages.' }, extras: { groups: { act: { summary: 'click' } } } }
+  const stored = { prompts: { rootNote: 'Prefer search first.', tools: { browser_index: { description: 'Short index.' } }, actions: { 'act.click': { summary: 'Click it' } }, errorHints: { DEADLINE: 'Wait longer.' } } }
   for (const locale of ['en', 'zh'] as const) {
-    const { html, missingKeys } = renderCard!({ locale, promptDefaults: defaults })
+    const { html, missingKeys } = renderCard!({ locale, values: stored })
     assert.deepEqual(missingKeys, [], locale)
-    assert.match(html, /placeholder="Browse the web with browser_index and browser_call\."/)
-    // A long default is cut in the placeholder and complete behind the details.
-    const guide = html.slice(html.indexOf('data-dsh-browser-prompt="rootGuide"'), html.indexOf('data-dsh-browser-prompt="rootNote"'))
-    assert.match(guide, /placeholder="line 1 of the default\nline 2[^"]*line 6 of the default …"/)
-    assert.doesNotMatch(guide.slice(0, guide.indexOf('<details')), /line 7 of the default/)
-    assert.match(guide, /<details data-dsh-browser-prompt-full="true">[\s\S]*line 20 of the default/)
-    assert.match(html, /data-dsh-browser-prompt-start/, 'the start-from-default button is there')
-    // The extras box shows the default structure as its placeholder.
-    assert.match(html, /id="plugin-config-dsh-browser-prompts-extras"[^>]*placeholder="\{\n  &quot;groups&quot;/)
-    // Controls without a default text say what "not set" means.
-    assert.match(html, locale === 'zh' ? /未设置：使用插件内置的 SKILL\.md 正文/ : /not set: the packaged SKILL\.md body is used/)
+    const list = html.slice(html.indexOf('data-dsb-prompt-list'), html.indexOf('data-dsb-entry-list'))
+    for (const id of ['indexDescription', 'callDescription', 'rootGuide', 'rootNote', 'skillDescription', 'skillBodyFile', 'skillAppend']) assert.ok(list.includes(`data-dsb-item="${id}"`), `${id} is a row`)
+    const row = (id: string) => list.slice(list.indexOf(`data-dsb-item="${id}"`)).split('data-dsb-item=')[1] ?? ''
+    assert.match(row('rootNote'), locale === 'zh' ? /已覆盖/ : /overridden/)
+    assert.match(row('indexDescription'), locale === 'zh' ? /已覆盖/ : /overridden/)
+    assert.match(row('rootGuide'), locale === 'zh' ? /默认/ : /default/)
+    assert.doesNotMatch(row('rootGuide'), locale === 'zh' ? /已覆盖/ : /overridden/)
+    const entries = html.slice(html.indexOf('data-dsb-entry-list'))
+    assert.ok(entries.includes('data-dsb-item="actions:act.click"') && entries.includes('data-dsb-item="errorHints:DEADLINE"'))
+    assert.equal(entries.includes('data-dsb-item="groups:'), false, 'unchanged groups are not listed')
   }
-  // Defaults not loaded yet: a neutral placeholder, no start button for the texts.
-  const early = renderCard!({}).html
-  assert.match(early, /loading the default text/)
+  // Nothing overridden: the list says so.
+  assert.match(renderCard!({}).html, /No entries changed/)
 })

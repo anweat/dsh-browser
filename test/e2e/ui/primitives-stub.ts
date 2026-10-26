@@ -125,3 +125,6 @@ export const Modal = (props: { open: boolean; onClose: () => void; title: string
       createElement('div', null, props.children),
       props.footer ? createElement('div', null, props.footer) : null)
     : null
+export const SegmentedControl = (props: { id: string; value: string; options: { value: string; label: string; disabled?: boolean }[]; onChange: (next: string) => void; label: string; disabled?: boolean }) =>
+  createElement('div', { role: 'tablist', 'aria-label': props.label },
+    props.options.map(option => createElement('button', { key: option.value, type: 'button', role: 'tab', id: `${props.id}-${option.value}`, 'aria-selected': option.value === props.value, disabled: props.disabled || option.disabled, onClick: () => { if (option.value !== props.value) props.onChange(option.value) } }, option.label)))

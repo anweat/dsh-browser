@@ -1,7 +1,7 @@
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { Context } from './context-types.ts'
 import { BrowserSettingsController, type BrowserCardState } from './form.ts'
-import type { PromptTextFieldId } from './prompts-form.ts'
+import type { PromptExtraKind, PromptExtraValue, PromptTextFieldId } from './prompts-form.ts'
 import type { AuthProfileEntry } from './auth-profiles-form.ts'
 import type { PolicyFieldName } from './policy-fields.ts'
 import { PromptsStatusController, type PromptsStatusState } from './prompts-status-client.ts'
@@ -45,6 +45,10 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   usePromptsStatus: <R>(selector: (snapshot: PromptsStatusState) => R) => R
   refreshPromptsStatus: () => void
   exportPromptDefaults: () => Promise<void>
+  /** The default texts as commented YAML, in the given language (`en` or `zh`). */
+  exportPromptYaml: (lang: string) => Promise<void>
+  /** One entry of the groups / actions / errorHints overrides: a group summary, an action's summary and notes, or an error hint. */
+  setPromptExtra: (kind: PromptExtraKind, key: string, value: PromptExtraValue | undefined) => void
   hidePromptDefaults: () => void
   usePolicyStatus: <R>(selector: (snapshot: PolicyStatusState) => R) => R
   refreshPolicyStatus: () => void

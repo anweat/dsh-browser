@@ -10,6 +10,7 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadBrowserRuntime } from '../../src/deps.ts'
 import { defaultPrompts } from '../../src/prompts.ts'
+import { promptsDumpYaml } from '../../src/prompts-yaml.ts'
 import { computeContentHash } from '../../src/automation-assets.ts'
 import { registerAutomationAssetRpc } from '../../src/automation-assets-rpc.ts'
 import { createHarness, detectBrowser, startFixtureServer, type Harness } from './support.ts'
@@ -319,39 +320,43 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     await page.close()
   })
 
-  it('the prompt text section renders and shows what the plugin reports: L0 estimate, overrides and diagnostics', async (t) => {
+  it('the prompts group shows what the plugin reports: the L0 estimate, how many overrides are in force, the diagnostics, and a row per text', async (t) => {
     if ('skip' in bundled) return t.skip(bundled.skip)
     const { page, errors } = await openUi()
     const section = page.locator('[data-dsh-browser-prompts]')
     await section.waitFor()
-    await page.waitForFunction(() => document.querySelector('[data-dsh-browser-prompts-budget]') !== null)
-    assert.match(await section.locator('h3').innerText(), /Prompt text/)
-    assert.match(await page.locator('[data-dsh-browser-prompts-budget]').innerText(), /~325 tokens \(budget 1500\)/)
-    assert.match(await page.locator('[data-dsh-browser-prompts-status]').innerText(), /1 overrides in effect: rootNote \(42\)/)
+    await page.waitForFunction(() => /325/.test(document.querySelector('[data-dsh-browser-prompts-budget]')?.textContent ?? ''))
+    assert.match(await page.locator('[data-dsh-browser-prompts-budget]').innerText(), /L0 always-on ≈ 325 \/ 1500 tokens · largest catalog layer automation\.develop\.save ≈ 980 \/ 1000/)
+    assert.match(await page.locator('[data-dsh-browser-prompts-status]').innerText(), /1 override\(s\) in force/)
+    await page.locator('[data-dsb-fold="prompts-diagnostics"] > summary').click()
     assert.match(await page.locator('[data-dsh-browser-prompts-diagnostics]').innerText(), /groups\.nope: no such group/)
-    assert.equal(await page.locator('#plugin-config-dsh-browser-prompts-rootNote').count(), 1)
-    assert.equal(await page.locator('#plugin-config-dsh-browser-prompts-extras').count(), 1)
+    assert.equal(await page.locator('[data-dsb-prompt-list] [data-dsb-item]').count(), 7)
     assert.deepEqual(errors, [])
     await page.close()
   })
 
-  it('Export default text shows the same JSON as prompts:dump in a read-only box, with no pnpm in the section', async (t) => {
+  it('Export default text opens a dialog: commented YAML first, the same JSON prompts:dump prints on the other tab, and no pnpm', async (t) => {
     if ('skip' in bundled) return t.skip(bundled.skip)
     const { page, errors } = await openUi()
     const section = page.locator('[data-dsh-browser-prompts]')
     await section.waitFor()
     assert.equal(/pnpm/i.test(await section.innerText()), false)
-    assert.equal(await page.locator('[data-dsh-browser-prompts-defaults]').count(), 0, 'nothing is shown until asked for')
+    assert.equal(await page.getByRole('dialog').count(), 0, 'nothing is shown until asked for')
     await page.getByRole('button', { name: 'Export default text', exact: true }).click()
-    const box = page.locator('[data-dsh-browser-prompts-defaults]')
-    await box.waitFor()
+    const dialog = page.getByRole('dialog', { name: 'Default text' })
+    const box = dialog.locator('[data-dsh-browser-prompts-defaults]')
+    await page.waitForFunction(() => /^# /.test((document.querySelector('[data-dsh-browser-prompts-defaults]') as HTMLTextAreaElement | null)?.value ?? ''))
     assert.equal(await box.getAttribute('readonly') !== null, true)
+    assert.equal(await box.inputValue(), promptsDumpYaml('en'), 'the YAML is what the plugin prints, in the card\'s language')
+    assert.equal(/pnpm/i.test(await dialog.innerText()), false)
+    await dialog.getByRole('tab', { name: 'JSON' }).click()
+    await page.waitForFunction(() => /^\{/.test((document.querySelector('[data-dsh-browser-prompts-defaults]') as HTMLTextAreaElement | null)?.value ?? ''))
     const text = await box.inputValue()
     assert.deepEqual(JSON.parse(text), defaultPrompts())
     assert.equal(text, JSON.stringify(defaultPrompts(), null, 2))
-    assert.equal(await page.getByRole('textbox', { name: 'Default text (read-only)' }).count(), 1, 'the box has an accessible name')
-    await page.getByRole('button', { name: 'Hide', exact: true }).click()
-    assert.equal(await page.locator('[data-dsh-browser-prompts-defaults]').count(), 0)
+    assert.equal(await dialog.getByRole('textbox', { name: 'Default text' }).count(), 1, 'the box has an accessible name')
+    await dialog.getByRole('button', { name: 'Close' }).last().click()
+    assert.equal(await page.getByRole('dialog').count(), 0)
     assert.deepEqual(errors, [])
     await page.close()
   })

@@ -71,6 +71,45 @@ export function pruneDefaultExtras(extras: Json, defaults: Json): Json {
   return out
 }
 
+/** The three lists of per-entry overrides, and what one entry holds. */
+export type PromptExtraKind = typeof PROMPT_EXTRA_KEYS[number]
+export type PromptExtraValue = { summary?: string; notes?: string } | string
+
+/** One overridden entry of the lists, as the card lists it. */
+export interface PromptExtraEntry {
+  kind: PromptExtraKind
+  key: string
+  summary?: string
+  notes?: string
+  /** An error hint's text. */
+  text?: string
+}
+
+/** The overridden entries of a `prompts` draft, in the order groups, actions, errorHints. */
+export function extraEntries(draft: Json): PromptExtraEntry[] {
+  const out: PromptExtraEntry[] = []
+  for (const kind of PROMPT_EXTRA_KEYS) {
+    const group = draft[kind]
+    if (!isRecord(group)) continue
+    for (const [key, value] of Object.entries(group)) {
+      if (typeof value === 'string') out.push({ kind, key, text: value })
+      else if (isRecord(value)) out.push({ kind, key, ...typeof value.summary === 'string' ? { summary: value.summary } : {}, ...typeof value.notes === 'string' ? { notes: value.notes } : {} })
+    }
+  }
+  return out
+}
+
+/** `draft` with one entry set (or removed when `value` is undefined or empty); parents left empty go with it. */
+export function withExtraEntry(draft: Json, kind: PromptExtraKind, key: string, value: PromptExtraValue | undefined): Json {
+  const copy = structuredClone(draft)
+  const group = isRecord(copy[kind]) ? copy[kind] as Json : {}
+  const empty = value === undefined || (typeof value === 'string' ? value === '' : !value.summary && !value.notes)
+  if (empty) delete group[key]
+  else group[key] = typeof value === 'string' ? value : Object.fromEntries(Object.entries(value).filter(([, text]) => typeof text === 'string' && text !== ''))
+  if (Object.keys(group).length) copy[kind] = group; else delete copy[kind]
+  return copy
+}
+
 /** The members the JSON box edits; the other controls own the rest. */
 export const PROMPT_EXTRA_KEYS = ['groups', 'actions', 'errorHints'] as const
 

@@ -10,6 +10,8 @@ import assert from 'node:assert/strict'
 import { loadBrowserRuntime } from '../../src/deps.ts'
 import { detectBrowser } from './support.ts'
 import { bundleEntry } from './ui-support.ts'
+import { defaultPrompts, promptsDumpText } from '../../src/prompts.ts'
+import { promptsDumpYaml } from '../../src/prompts-yaml.ts'
 
 const detection = detectBrowser()
 
@@ -48,7 +50,7 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
     const errors: string[] = []
     page.on('pageerror', (error: Error) => errors.push(error.message))
     await page.exposeFunction('__rpc', async (endpoint: string) => {
-      const reply = endpoint === 'policy' ? POLICY : endpoint === 'prompts' ? PROMPTS_REPORT : endpoint === 'snapshot' ? { policy: {}, candidates: [], assets: [] } : endpoint === 'promptsDefaults' ? { json: '{}' } : {}
+      const reply = endpoint === 'policy' ? POLICY : endpoint === 'prompts' ? PROMPTS_REPORT : endpoint === 'snapshot' ? { policy: {}, candidates: [], assets: [] } : endpoint === 'promptsDefaults' ? { json: promptsDumpText() } : endpoint === 'promptsDefaultsYaml' ? { yaml: promptsDumpYaml('en') } : {}
       return JSON.stringify({ ok: true, value: reply })
     })
     await page.setContent('<!doctype html><title>settings ui</title><div id="root"></div>')
@@ -188,6 +190,82 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
     // The raw JSON box is folded away and is the same staged data (the stub of the Host's field does not follow state, so read the state).
     assert.equal(await page.locator('[data-dsb-fold="limits-raw"] #plugin-config-dsh-browser-usagePolicy-json').count(), 1)
     assert.equal(await page.evaluate(() => (window as any).__settings.snapshot().jsonFields.usagePolicy.text), '{}')
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  it('prompts: a text is edited beside its default, start-from-default and restore work, Cancel stages nothing, and the page Save writes one prompts object', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const { page, errors, open, writes, unsaved, save } = await openCard({ value: {}, user: {} })
+    await open('prompts')
+    const defaults = defaultPrompts() as { rootGuide: string }
+    const row = page.locator('[data-dsb-item="rootNote"]')
+    assert.match(await row.innerText(), /default/)
+    // Cancel: nothing staged.
+    await row.getByRole('button', { name: 'Edit' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Edit: Root note' })
+    await dialog.getByLabel('Your override').fill('Prefer search first.')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    assert.equal(await unsaved(), 'No unsaved changes')
+    // Save in the dialog stages one prompts change.
+    await row.getByRole('button', { name: 'Edit' }).click()
+    await dialog.getByLabel('Your override').fill('Prefer search first.')
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    assert.equal(await unsaved(), '1 unsaved')
+    assert.match(await row.innerText(), /overridden[\s\S]*20 chars/)
+    // A text with a default: the default is shown, start-from-default copies it, and saving it unchanged is no override.
+    const guide = page.locator('[data-dsb-item="rootGuide"]')
+    await guide.getByRole('button', { name: 'Edit' }).click()
+    const guideDialog = page.getByRole('dialog', { name: /Edit: Compact guide/ })
+    await page.waitForFunction(() => (document.querySelector('[data-dsb-prompt-default]') as HTMLElement | null)?.textContent?.startsWith('Guide:'))
+    assert.equal(await guideDialog.locator('[data-dsb-prompt-default]').innerText(), defaults.rootGuide)
+    await guideDialog.getByRole('button', { name: 'Start from default' }).click()
+    assert.equal(await guideDialog.getByLabel('Your override').inputValue(), defaults.rootGuide)
+    assert.match(await guideDialog.innerText(), /Same as the default text/)
+    await guideDialog.getByRole('button', { name: 'Save', exact: true }).click()
+    assert.equal(await unsaved(), '1 unsaved', 'the default itself stages nothing')
+    // Too long: refused with the cap.
+    await guide.getByRole('button', { name: 'Edit' }).click()
+    await guideDialog.getByLabel('Your override').fill('x'.repeat(1501))
+    assert.match(await guideDialog.innerText(), /1501\/1500/)
+    assert.equal(await guideDialog.getByRole('button', { name: 'Save', exact: true }).isDisabled(), true)
+    await guideDialog.getByRole('button', { name: 'Cancel' }).click()
+    await save()
+    assert.deepEqual((await writes())[0]!.ops, [{ op: 'set', path: ['prompts'], value: { rootNote: 'Prefer search first.' } }])
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  it('prompts: group, action and error-hint entries are listed only when changed, edited in their dialog beside the default, and removed again', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const { page, errors, open, writes, unsaved, save } = await openCard({ value: {}, user: {} })
+    await open('prompts')
+    assert.match(await page.locator('[data-dsb-entry-list]').innerText(), /No entries changed/)
+    await page.getByRole('button', { name: 'Add entry' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add an entry' })
+    assert.equal(await dialog.getByRole('button', { name: 'Save', exact: true }).isDisabled(), true, 'a key and text first')
+    await dialog.getByLabel('Key', { exact: true }).fill('act.click')
+    await page.waitForFunction(() => /click/i.test(document.querySelector('[role=dialog] pre')?.textContent ?? ''))
+    assert.match(await dialog.locator('pre').first().innerText(), /click/i, 'the default summary of the action is shown')
+    await dialog.getByLabel('Summary · Your override').fill('Click or tap an element.')
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    assert.equal(await unsaved(), '1 unsaved')
+    const entry = page.locator('[data-dsb-item="actions:act.click"]')
+    assert.match(await entry.innerText(), /act\.click[\s\S]*action[\s\S]*Click or tap an element\./)
+    // An error hint, and an unknown key is only noted.
+    await page.getByRole('button', { name: 'Add entry' }).click()
+    await dialog.getByLabel('Kind').selectOption('errorHints')
+    await dialog.getByLabel('Key', { exact: true }).fill('NOT_A_CODE')
+    assert.match(await dialog.innerText(), /no such key|defaults have no such key/i)
+    await dialog.getByLabel('Hint text · Your override').fill('Try again later.')
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    assert.equal(await unsaved(), '1 unsaved', 'still one field: prompts')
+    await save()
+    assert.deepEqual((await writes())[0]!.ops, [{ op: 'set', path: ['prompts'], value: { actions: { 'act.click': { summary: 'Click or tap an element.' } }, errorHints: { NOT_A_CODE: 'Try again later.' } } }])
+    // Remove one: back to a single entry.
+    await entry.getByRole('button', { name: 'Edit' }).click()
+    await page.getByRole('dialog', { name: /Edit entry: act\.click/ }).getByRole('button', { name: 'Remove override' }).click()
+    assert.equal(await page.locator('[data-dsb-item="actions:act.click"]').count(), 0)
     assert.deepEqual(errors, [])
     await page.close()
   })

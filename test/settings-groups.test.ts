@@ -189,3 +189,26 @@ test('policy keys: the asset policy takes enums, switches, a decimal ratio and t
   assert.equal(state().minSuccessRate!.problem, undefined)
   assert.equal(form.snapshot().invalid, false)
 })
+
+test('prompt entries: one entry is set or removed in the staged draft, an entry equal to the default is no override, and they list in order', () => {
+  const defaults = { texts: {}, extras: { groups: { act: { summary: 'click, fill' } }, actions: { 'act.click': { summary: 'click', notes: '' } }, errorHints: { DEADLINE: 'Wait.' } } }
+  const scope = fakeScope({ value: {}, user: {} })
+  const form = new BrowserSettingsController(scope as never, () => defaults as never)
+  const props = form.inject()
+  props.setPromptExtra('actions', 'act.click', { summary: 'Click it', notes: 'Use a locator.' })
+  props.setPromptExtra('errorHints', 'DEADLINE', 'Try later.')
+  props.setPromptExtra('groups', 'act', { summary: 'act things' })
+  assert.deepEqual(form.snapshot().prompts.entries.map(entry => `${entry.kind}:${entry.key}`), ['groups:act', 'actions:act.click', 'errorHints:DEADLINE'])
+  assert.deepEqual(JSON.parse(form.snapshot().jsonFields.prompts!.text), { groups: { act: { summary: 'act things' } }, actions: { 'act.click': { summary: 'Click it', notes: 'Use a locator.' } }, errorHints: { DEADLINE: 'Try later.' } })
+  // Equal to the default: not an override, so the entry leaves the list.
+  props.setPromptExtra('errorHints', 'DEADLINE', 'Wait.')
+  props.setPromptExtra('groups', 'act', { summary: 'click, fill' })
+  assert.deepEqual(form.snapshot().prompts.entries.map(entry => entry.key), ['act.click'])
+  // Removing the last one leaves no prompts at all; when nothing was stored, the form is clean again.
+  props.setPromptExtra('actions', 'act.click', undefined)
+  assert.deepEqual(form.snapshot().prompts.entries, [])
+  assert.deepEqual(form.snapshot().changes, [])
+  // An entry with no text is not an entry.
+  props.setPromptExtra('actions', 'act.hover', { summary: '', notes: '' })
+  assert.deepEqual(form.snapshot().prompts.entries, [])
+})

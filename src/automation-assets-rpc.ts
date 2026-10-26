@@ -7,6 +7,7 @@ import type { BrowserService } from './browser-service.ts'
 import { executeAutomationAsset, executeDraftInputSets } from './automation-execution.ts'
 import { convertV1ToV2Draft } from './automation-convert.ts'
 import { promptsDumpText } from './prompts.ts'
+import { promptsDumpYaml } from './prompts-yaml.ts'
 import { stripAnsi } from './actions/errors.ts'
 
 /**
@@ -132,6 +133,8 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
           }
           // The same JSON `prompts:dump` prints, for installs that have no script environment.
           case 'promptsDefaults': value = { json: promptsDumpText() }; break
+          // The same defaults as commented YAML (every section says where the model reads it), in the card's language.
+          case 'promptsDefaultsYaml': value = { yaml: promptsDumpYaml(payload.lang === 'zh' ? 'zh' : 'en') }; break
           case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus, { expectedRevision: expectedRevision(payload) }); break
           default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}`, details: {} } }
         }

@@ -30,6 +30,7 @@ import { ContextGroup } from './group-context.tsx'
 import { DownloadsGroup } from './group-downloads.tsx'
 import { AccessGroup } from './group-access.tsx'
 import { LimitsGroup } from './group-limits.tsx'
+import { PromptsGroup } from './group-prompts.tsx'
 import { Group } from './ui-kit.tsx'
 
 /**
@@ -94,7 +95,7 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
     <Group id="properties" title={t('properties')} summary={t('propertiesHint')}><PropertiesPanel {...props} /></Group>
     <AccessGroup card={props} />
     <LimitsGroup card={props} />
-    <Group id="prompts" title={t('prompts')} summary={t('promptsHint')}><PromptsPanel {...props} disabled={disabled} /></Group>
+    <PromptsGroup card={props} />
     <Group id="assets" title={t('assetLibrary')} summary={t('assetLibraryHint')}><AutomationAssetsPanel {...props} /></Group>
     <SaveBar card={props} />
   </Frame>
