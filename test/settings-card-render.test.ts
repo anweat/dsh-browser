@@ -75,7 +75,7 @@ test('every public config field has exactly one entry in the card: a control, or
   // Rows that exist only while they apply: a custom viewport size, the proxy address and bypass list. Render them present.
   const conditional = { viewportMode: 'custom', proxyServer: 'http://127.0.0.1:7890' }
   // Fields whose group is not rebuilt yet: still reachable through the properties text. Emptied as each group lands.
-  const pending = ['storageStatePath', 'defaultAuthProfile', 'allowPrivateHosts']
+  const pending: string[] = []
   for (const locale of ['en', 'zh'] as const) {
     const { html, missingKeys } = renderCard!({ locale, fieldTexts: conditional })
     assert.deepEqual(missingKeys, [], `every label and hint the card asks for exists in ${locale}`)
@@ -95,11 +95,9 @@ test('every public config field has exactly one entry in the card: a control, or
     // Nothing on the card points at a field the schema does not have (the properties text is a mirror, not a field).
     for (const id of controls.filter(id => !id.startsWith('prompts-') && id !== 'properties')) assert.ok(publicFields.includes(id), `control ${id} is not a config field`)
     for (const id of notes) assert.ok(publicFields.includes(id), `note ${id} is not a config field`)
-    for (const field of ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled', 'browserRuntime', 'channel', 'headless', 'maxSessions', 'args', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass', 'downloadDir', 'downloadMaxBytes', 'usagePolicy', 'automationAssets']) assert.ok(controls.includes(field), `${field} is a control`)
-    for (const field of ['authProfiles', 'rulePacks']) {
-      assert.ok(notes.includes(field), `${field} has a note`)
-      assert.ok(!controls.includes(field))
-    }
+    for (const field of ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled', 'browserRuntime', 'channel', 'headless', 'maxSessions', 'args', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass', 'downloadDir', 'downloadMaxBytes', 'usagePolicy', 'automationAssets', 'authProfiles', 'defaultAuthProfile', 'allowPrivateHosts', 'storageStatePath']) assert.ok(controls.includes(field), `${field} is a control`)
+    assert.ok(notes.includes('rulePacks'), 'rulePacks has a note')
+    assert.ok(!controls.includes('rulePacks'))
     assert.equal(html.includes(locale === 'zh' ? '配置文件' : 'config file'), true, 'the note says where to edit')
   }
   // The conditional rows are absent while they do not apply.
@@ -124,7 +122,7 @@ test('the policy boxes list every key the code accepts, in both locales (maxTest
 
 test('the policy overlay clear button is usable while a corrupt overlay file is being ignored (the warning tells people to use it)', (t) => {
   if (skip) return t.skip(skip)
-  const clear = (html: string) => html.match(/<button[^>]*data-dsh-browser-policy-clear[^>]*>/)?.[0] ?? ''
+  const clear = (html: string) => html.match(/<button[^>]*data-dsb-action="policy-clear"[^>]*>/)?.[0] ?? ''
   const disabled = (html: string) => /\sdisabled(=|\s|>)/.test(clear(html))
   for (const locale of ['en', 'zh'] as const) {
     assert.ok(clear(renderCard!({ locale }).html), 'the card has the clear button')

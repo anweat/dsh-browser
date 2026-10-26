@@ -37,3 +37,6 @@ export const USAGE_POLICY_BOUNDS = {
 } as const satisfies Record<string, readonly [number, number]>
 
 export const USAGE_POLICY_KEYS = Object.keys(USAGE_POLICY_BOUNDS) as (keyof typeof USAGE_POLICY_BOUNDS)[]
+
+/** The name of a login profile: starts with a letter or digit, then letters, digits, `_` and `-`, at most 40 characters. The policy overlay and the settings card use this one rule. */
+export const AUTH_PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/

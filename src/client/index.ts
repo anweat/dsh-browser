@@ -2,6 +2,7 @@ import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { Context } from './context-types.ts'
 import { BrowserSettingsController, type BrowserCardState } from './form.ts'
 import type { PromptTextFieldId } from './prompts-form.ts'
+import type { AuthProfileEntry } from './auth-profiles-form.ts'
 import { PromptsStatusController, type PromptsStatusState } from './prompts-status-client.ts'
 import { PolicyStatusController, type PolicyStatusState } from './policy-status-client.ts'
 import { SettingsCard } from './SettingsCard.tsx'
@@ -35,6 +36,9 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   setPromptSkillEnabled: (enabled: boolean) => void
   editPromptExtras: (text: string) => void
   resetPromptExtras: () => void
+  /** The login-profile list: add or replace one profile, or remove one, in the staged configuration. */
+  saveAuthProfile: (id: string, entry: AuthProfileEntry) => void
+  removeAuthProfile: (id: string) => void
   usePromptsStatus: <R>(selector: (snapshot: PromptsStatusState) => R) => R
   refreshPromptsStatus: () => void
   exportPromptDefaults: () => Promise<void>

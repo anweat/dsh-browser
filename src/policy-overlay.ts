@@ -19,7 +19,7 @@ import { domainToASCII } from 'node:url'
 import { ActionArgError, ActionUnavailableError } from './actions/types.ts'
 import type { AuthProfileConfig } from './auth-profiles.ts'
 import type { UsagePolicy } from './usage-policy.ts'
-import { USAGE_POLICY_BOUNDS, USAGE_POLICY_KEYS } from './policy-keys.ts'
+import { AUTH_PROFILE_ID, USAGE_POLICY_BOUNDS, USAGE_POLICY_KEYS } from './policy-keys.ts'
 
 // -- limits --
 
@@ -29,7 +29,7 @@ export const MAX_AUDIT_ENTRIES = 50
 const MAX_REASON = 300
 const MAX_DOMAIN_LENGTH = 253
 
-const PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/
+const PROFILE_ID = AUTH_PROFILE_ID
 const FORBIDDEN_IDS = new Set(['__proto__', 'constructor', 'prototype'])
 const CONTROL_OR_SPACE = /[\u0000-\u0020\u007f-\u009f\u00a0\u2028\u2029\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
 

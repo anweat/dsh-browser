@@ -48,6 +48,8 @@ export interface RowProps {
   invalid?: boolean
   /** Replaces the hint while the value is invalid. */
   problem?: string
+  /** A short warning badge beside the label, for a setting that widens what an agent may do. */
+  risk?: string
   disabled?: boolean
   labels: RowLabels
   onReset?: () => void
@@ -65,6 +67,7 @@ export function Row(props: RowProps) {
       <div className={css.rowLabel}>
         {props.id ? <label htmlFor={props.id}>{props.label}</label> : <span>{props.label}</span>}
         {props.help ? <Help label={labels.help} text={props.help} /> : null}
+        {props.risk ? <Badge tone="warning">{props.risk}</Badge> : null}
         {props.overridden ? <Badge tone="info">{labels.overridden}</Badge> : null}
         {props.overridden && props.onReset ? <button type="button" className={css.link} disabled={props.disabled} onClick={props.onReset} data-dsb-reset={props.field}>{labels.reset}</button> : null}
       </div>

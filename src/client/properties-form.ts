@@ -74,7 +74,7 @@ export const PROPERTY_KEYS: ReadonlySet<string> = new Set(PROPERTY_FIELDS.map(fi
 export const ELSEWHERE_KEYS: Readonly<Record<string, string>> = {
   enabled: 'the "automation freedom" controls', automationMode: 'the "automation freedom" controls', toolSurface: 'the "automation freedom" controls', opencliEnabled: 'the "automation freedom" controls',
   usagePolicy: 'the usage buffer JSON box', automationAssets: 'the automation asset policy JSON box', prompts: 'the prompt text section',
-  authProfiles: 'the configuration file (domain-scoped login states)', rulePacks: 'the configuration file (hash-pinned rule packs)',
+  authProfiles: 'the login profiles list', rulePacks: 'the configuration file (hash-pinned rule packs)',
 }
 
 export interface LineIssue {

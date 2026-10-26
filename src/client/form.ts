@@ -18,6 +18,7 @@ import { crossFieldProblems, fieldProblem } from './field-rules.ts'
 import {
   PROPERTY_FIELDS, checkProperties, commentOutProperty, parseProperties, serializeProperties, type LineIssue, type PropertyField,
 } from './properties-form.ts'
+import { parseProfiles, validAuthProfiles, type AuthProfileEntry } from './auth-profiles-form.ts'
 import { PROMPT_TEXT_FIELDS, canonicalPrompts, pruneDefaultExtras, type PromptDefaults, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
@@ -207,6 +208,7 @@ export const JSON_FIELD_SPECS: readonly SettingsFieldSpec[] = [
   jsonField('usagePolicy', validUsagePolicy),
   jsonField('automationAssets', validAssetPolicy),
   jsonField('prompts', validPrompts),
+  jsonField('authProfiles', validAuthProfiles),
   stringArrayField('args'),
 ] as const
 
@@ -215,7 +217,7 @@ export const JSON_FIELD_SPECS: readonly SettingsFieldSpec[] = [
  * hash-pinned scripts) that are safer to edit in the profile config file. The card names each one and says so, instead
  * of leaving it out without a word. `rulePacks` is not `.volatile()` in the Host schema, so no form could write it.
  */
-export const CONFIG_FILE_ONLY_FIELDS = ['authProfiles', 'rulePacks'] as const
+export const CONFIG_FILE_ONLY_FIELDS = ['rulePacks'] as const
 
 /** Section fields rendered as JSON code editors rather than single inputs. */
 export const JSON_FIELDS: ReadonlySet<string> = new Set(JSON_FIELD_SPECS.map(spec => spec.field))
@@ -260,6 +262,8 @@ export class BrowserSettingsController {
       editPromptText: (id: PromptTextFieldId, text: string) => this.editPromptText(id, text),
       setPromptSkillEnabled: (enabled: boolean) => this.setPromptSkillEnabled(enabled),
       editPromptExtras: (text: string) => this.editPromptExtras(text),
+      saveAuthProfile: (id: string, entry: AuthProfileEntry) => this.saveAuthProfile(id, entry),
+      removeAuthProfile: (id: string) => this.removeAuthProfile(id),
       resetPromptExtras: () => this.resetPromptExtras(),
     }
   }
@@ -412,6 +416,30 @@ export class BrowserSettingsController {
     this.extrasRaw = undefined
     this.extrasInvalid = false
     this.stagePrompts(withExtras(this.promptsDraft(), {}))
+  }
+
+  // --- login profiles: the list's dialog stages one edit of the `authProfiles` map ------------------------------
+
+  /** Stage a whole `authProfiles` map; the stored map itself is staged back when they are equal, so the form is clean again. */
+  private stageProfiles(next: Record<string, AuthProfileEntry>): void {
+    const spec = ALL_FIELD_SPECS.find(entry => entry.field === 'authProfiles')!
+    const stored = this.scope.getSnapshot().value?.authProfiles
+    const canonical = (map: Record<string, AuthProfileEntry>) => JSON.stringify(Object.keys(map).sort().map(id => [id, map[id]!.storageStatePath, [...map[id]!.allowedDomains], map[id]!.persistState]))
+    const same = canonical(next) === canonical(parseProfiles(spec.format(stored)))
+    this.form.actions().edit('authProfiles', same ? spec.format(stored) : JSON.stringify(next, null, 2))
+  }
+
+  /** Add or replace one profile. A profile's state-file path is kept as given: the card never rewrites a path it did not create. */
+  saveAuthProfile(id: string, entry: AuthProfileEntry): void {
+    const current = parseProfiles(this.form.field('authProfiles').text)
+    this.stageProfiles({ ...current, [id]: { storageStatePath: entry.storageStatePath, allowedDomains: [...entry.allowedDomains], persistState: entry.persistState } })
+  }
+
+  /** Remove one profile from the baseline configuration. */
+  removeAuthProfile(id: string): void {
+    const current = parseProfiles(this.form.field('authProfiles').text)
+    delete current[id]
+    this.stageProfiles(current)
   }
 
   snapshot(): BrowserCardState { return this.store.getSnapshot() }

@@ -42,6 +42,8 @@ export interface FieldProps {
   placeholder?: string
   /** Skip the label/hint lookup by name: the row is labelled by these. */
   label?: string
+  /** A short warning badge beside the label. */
+  risk?: string
 }
 
 /** How many of these fields carry an override: the number a group's badge shows. */
@@ -67,7 +69,7 @@ function rowFor(props: FieldProps, field: ReturnType<typeof useField>, children:
   const { t } = card
   return <Row field={name} id={extra.id} label={props.label ?? t(name as LabelKey)} hint={typeof props.hint === 'function' ? props.hint(field.state.text) : props.hint ?? t(`${name}Hint` as LabelKey)}
     help={WITH_HELP.has(name) ? t(`${name}Help` as LabelKey) : undefined}
-    overridden={field.state.overridden} invalid={field.state.invalid || !!field.problem} problem={extra.problem ?? field.problem ?? t('invalid')} disabled={field.disabled}
+    risk={props.risk} overridden={field.state.overridden} invalid={field.state.invalid || !!field.problem} problem={extra.problem ?? field.problem ?? t('invalid')} disabled={field.disabled}
     labels={rowLabels(t)} onReset={field.reset} inline={extra.inline} wide={extra.wide}>{children}</Row>
 }
 

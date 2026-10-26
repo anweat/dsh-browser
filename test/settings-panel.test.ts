@@ -123,7 +123,7 @@ test('browser settings panel covers every public browser configuration field', (
     'downloadDir', 'downloadMaxBytes', 'allowPrivateHosts', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass',
   ]
   assert.deepEqual(FIELD_SPECS.map(spec => spec.field).toSorted(), fields.toSorted())
-  assert.deepEqual(JSON_FIELD_SPECS.map(spec => spec.field).toSorted(), ['args', 'automationAssets', 'prompts', 'usagePolicy'])
+  assert.deepEqual(JSON_FIELD_SPECS.map(spec => spec.field).toSorted(), ['args', 'authProfiles', 'automationAssets', 'prompts', 'usagePolicy'])
 
   // Every rendered field must be `.volatile()` in the Host schema: `volatileForm`
   // drops unmarked fields, so a control for one could never be written.
