@@ -156,7 +156,7 @@ function satisfies(version, range, options = {}) {
 
 // ── 策略与检查 ────────────────────────────────────────────────────────────────
 /** 本仓库声明支持、并已在真实 profile 上跑过的 DSH 基线：只有这一条线。 */
-const SUPPORTED_BASELINES = ['0.2.1-rc.2']
+const SUPPORTED_BASELINES = ['0.2.1-rc.2', '0.2.1-rc.3']
 /**
  * 必须被拒绝的宿主版本（runtime 与 install 两种模式都不能满足）：
  * 已放弃的旧线、功能未在其上验证过的前一个预发布、以及不放行的下一个次版本的预发布。
@@ -165,7 +165,7 @@ const REJECTED_BASELINES = ['0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.2-alp
 /** 用于说明范围宽窄的代表性版本（只做展示，不影响退出码）。 */
 const MATRIX_VERSIONS = [
   '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.0', '0.2.1-alpha.1', '0.2.1-rc.1',
-  '0.2.1-rc.2', '0.2.1', '0.2.2-alpha.1', '0.2.2', '0.3.0-rc.1',
+  '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1', '0.2.2-alpha.1', '0.2.2', '0.3.0-rc.1',
 ]
 
 const gatedPeers = (manifest) =>
@@ -197,6 +197,7 @@ function selftest() {
     [pinned, '0.2.1-alpha.1', false, false],  // 新功能没有在 0.2.1 的 alpha 宿主上验证过
     [pinned, '0.2.1-rc.1', false, false],
     [pinned, '0.2.1-rc.2', true, true],       // 受支持基线；`>=0.2.1-rc.2` 这个比较符自带同号预发布，是承重的
+    [pinned, '0.2.1-rc.3', true, true],       // 第二个受支持基线（rc.2→rc.3 只有导航入口自定义等 4 个功能提交）
     [pinned, '0.2.1-rc.9', true, true],
     [pinned, '0.2.1', true, true],            // 0.2.1 正式版与基线同 tuple，声明兼容
     [pinned, '0.2.2-alpha.1', false, false],  // 上界是 <0.2.2-0，不是 <0.2.2：连 0.2.2 的预发布也挡掉
