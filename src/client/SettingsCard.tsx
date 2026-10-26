@@ -29,6 +29,7 @@ import { BrowserGroup } from './group-browser.tsx'
 import { ContextGroup } from './group-context.tsx'
 import { DownloadsGroup } from './group-downloads.tsx'
 import { AccessGroup } from './group-access.tsx'
+import { LimitsGroup } from './group-limits.tsx'
 import { Group } from './ui-kit.tsx'
 
 /**
@@ -91,13 +92,8 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
     <ContextGroup card={props} />
     <DownloadsGroup card={props} />
     <Group id="properties" title={t('properties')} summary={t('propertiesHint')}><PropertiesPanel {...props} /></Group>
-    <Group id="limits" title={t('usage')} summary={t('usageHint')}>
-      <div className={css.grid}>
-        {USAGE_FIELDS.map(name => field(name))}
-      </div>
-      <p className={css.notice} role="note">{t('restart')}</p>
-    </Group>
     <AccessGroup card={props} />
+    <LimitsGroup card={props} />
     <Group id="prompts" title={t('prompts')} summary={t('promptsHint')}><PromptsPanel {...props} disabled={disabled} /></Group>
     <Group id="assets" title={t('assetLibrary')} summary={t('assetLibraryHint')}><AutomationAssetsPanel {...props} /></Group>
     <SaveBar card={props} />

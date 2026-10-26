@@ -137,3 +137,55 @@ test('login profiles: a hand-typed authProfiles text that is not a map of well-f
   props.edit('authProfiles', '{"x":{"storageStatePath":"/p","allowedDomains":["a.com"]}}')
   assert.equal(form.snapshot().invalid, false)
 })
+
+test('policy keys: each control edits one key of the staged object, the object keeps only what differs from the default, and a refused text blocks the save', async () => {
+  const stored = { minDelayMs: 750, maxConcurrency: 2, burst: 3, maxPagesPerRun: 20, maxDepth: 2, retryLimit: 2, backoffBaseMs: 1000, cooldownMs: 30000 }
+  const { scope, form, props } = controller({ usagePolicy: stored }, {})
+  assert.equal(form.snapshot().policies.usagePolicy.minDelayMs!.overridden, false)
+  props.editPolicyKey('usagePolicy', 'minDelayMs', '2000')
+  assert.deepEqual(form.snapshot().changes, ['usagePolicy'])
+  assert.equal(form.snapshot().policies.usagePolicy.minDelayMs!.overridden, true)
+  assert.equal(form.snapshot().jsonFields.usagePolicy!.text, JSON.stringify({ minDelayMs: 2000 }, null, 2), 'only the key that differs')
+  // Out of range, not a number, a decimal in an integer key: kept as typed, flagged, and the save is refused.
+  for (const [text, problem] of [['60001', 'invalidRange'], ['abc', 'invalidNumber'], ['1.5', 'invalidNumber'], ['-1', 'invalidRange']] as const) {
+    props.editPolicyKey('usagePolicy', 'minDelayMs', text)
+    assert.equal(form.snapshot().policies.usagePolicy.minDelayMs!.problem, problem, text)
+    assert.equal(form.snapshot().policies.usagePolicy.minDelayMs!.text, text)
+    assert.equal(form.snapshot().invalid, true)
+  }
+  await props.save()
+  assert.equal(scope.writes.length, 0, 'nothing is written while a key is refused')
+  props.editPolicyKey('usagePolicy', 'minDelayMs', '1500')
+  props.editPolicyKey('usagePolicy', 'cooldownMs', '45000')
+  assert.equal(form.snapshot().invalid, false)
+  await props.save()
+  assert.deepEqual(scope.writes[0]!.ops, [{ op: 'set', path: ['usagePolicy'], value: { minDelayMs: 1500, cooldownMs: 45000 } }])
+  // Back to the default (typed, or by the reset): the key leaves the object; an empty object is still a write of {} when something was stored.
+  props.editPolicyKey('usagePolicy', 'minDelayMs', '750')
+  props.editPolicyKey('usagePolicy', 'cooldownMs', '')
+  await props.save()
+  assert.deepEqual(scope.writes[1]!.ops, [{ op: 'set', path: ['usagePolicy'], value: {} }])
+})
+
+test('policy keys: the asset policy takes enums, switches, a decimal ratio and the directory, and holds every number to the range the resolver would clamp it to', () => {
+  const { form, props } = controller({}, {})
+  const state = () => form.snapshot().policies.automationAssets
+  props.editPolicyKey('automationAssets', 'persistenceMode', 'manual')
+  props.editPolicyKey('automationAssets', 'enabled', 'false')
+  props.editPolicyKey('automationAssets', 'minSuccessRate', '0.9')
+  props.editPolicyKey('automationAssets', 'directory', '/data/assets')
+  assert.deepEqual(JSON.parse(form.snapshot().jsonFields.automationAssets!.text), { enabled: false, directory: '/data/assets', persistenceMode: 'manual', minSuccessRate: 0.9 })
+  props.editPolicyKey('automationAssets', 'persistenceMode', 'sometimes')
+  assert.equal(state().persistenceMode!.problem, 'invalidChoice')
+  props.editPolicyKey('automationAssets', 'persistenceMode', 'suggest')
+  assert.equal(state().persistenceMode!.problem, undefined)
+  for (const [key, bad] of [['minSuccessRate', '1.2'], ['minSuccessRate', '0.4'], ['minInputSetsForActivation', '6'], ['minInputSetsForActivation', '0'], ['minSuccessfulRuns', '1'], ['maxActiveAssets', '201'], ['catalogTokenBudget', '99']] as const) {
+    props.editPolicyKey('automationAssets', key, bad)
+    assert.equal(state()[key]!.problem, 'invalidRange', `${key}=${bad}`)
+  }
+  // A hand-edited raw box replaces what the controls typed.
+  props.edit('automationAssets', '{"maxDrafts":12}')
+  assert.equal(state().maxDrafts!.text, '12')
+  assert.equal(state().minSuccessRate!.problem, undefined)
+  assert.equal(form.snapshot().invalid, false)
+})

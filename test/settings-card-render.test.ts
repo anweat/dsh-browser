@@ -62,7 +62,8 @@ const variants: Record<string, Record<string, unknown>> = {
 /** The ids of the controls and the notes the card rendered. */
 function fieldsRendered(html: string): { controls: string[]; notes: string[] } {
   return {
-    controls: [...new Set([...html.matchAll(/<(?:input|textarea)[^>]*\bid="plugin-config-dsh-browser-([A-Za-z0-9-]+)"/g)].map(match => match[1]!).concat([...html.matchAll(/data-dsb-field="([A-Za-z0-9]+)"/g)].map(match => match[1]!)))],
+    // Ids with a dash belong to a part of a field (a policy key's input `usagePolicy-minDelayMs`, the raw box `usagePolicy-json`, a prompt box `prompts-…`).
+    controls: [...new Set([...html.matchAll(/<(?:input|textarea|select)[^>]*\bid="plugin-config-dsh-browser-([A-Za-z0-9-]+)"/g)].map(match => match[1]!).filter(id => !id.includes('-') || id.startsWith('prompts-')).concat([...html.matchAll(/data-dsb-field="([A-Za-z0-9]+)"/g)].map(match => match[1]!)))],
     notes: [...html.matchAll(/data-dsh-browser-config-note="([A-Za-z0-9]+)"/g)].map(match => match[1]!),
   }
 }
@@ -100,6 +101,12 @@ test('every public config field has exactly one entry in the card: a control, or
     assert.ok(!controls.includes('rulePacks'))
     assert.equal(html.includes(locale === 'zh' ? '配置文件' : 'config file'), true, 'the note says where to edit')
   }
+  // Every key of the two policy objects has its own input in the card, and the raw box lists the keys the code accepts.
+  const { ASSET_POLICY_KEYS, USAGE_POLICY_KEYS } = await import('../src/policy-keys.ts')
+  const rendered = renderCard!({}).html
+  const policyRows = (field: string) => [...rendered.matchAll(new RegExp(`data-dsb-policy-key="${field}\\.([A-Za-z]+)"`, 'g'))].map(match => match[1]!)
+  assert.deepEqual(policyRows('usagePolicy'), [...USAGE_POLICY_KEYS], 'one row per usagePolicy key, in the code\'s order')
+  assert.deepEqual(policyRows('automationAssets').toSorted(), [...ASSET_POLICY_KEYS].toSorted(), 'one row per automationAssets key')
   // The conditional rows are absent while they do not apply.
   const plain = fieldsRendered(renderCard!({}).html).controls
   for (const field of ['viewportWidth', 'viewportHeight', 'proxyServer', 'proxyBypass']) assert.equal(plain.includes(field), false, `${field} appears only when it applies`)
@@ -111,7 +118,7 @@ test('the policy boxes list every key the code accepts, in both locales (maxTest
   assert.ok(ASSET_POLICY_KEYS.includes('maxTestCredentials') && ASSET_POLICY_KEYS.includes('minInputSetsForActivation'))
   for (const locale of ['en', 'zh'] as const) {
     const { html } = renderCard!({ locale })
-    const hintOf = (field: string) => html.match(new RegExp(`data-dsh-field="plugin-config-dsh-browser-${field}"[\\s\\S]*?<p>([^<]*)</p>`))?.[1] ?? ''
+    const hintOf = (field: string) => html.match(new RegExp(`data-dsh-field="plugin-config-dsh-browser-${field}-json"[\\s\\S]*?<p>([^<]*)</p>`))?.[1] ?? ''
     for (const [field, keys] of [['automationAssets', ASSET_POLICY_KEYS], ['usagePolicy', USAGE_POLICY_KEYS]] as const) {
       const hint = hintOf(field)
       const listed = hint.slice(hint.lastIndexOf(locale === 'zh' ? '可用键名：' : 'Keys:')).replace(/^[^:：]*[:：]\s*/, '').split(/,\s*/)

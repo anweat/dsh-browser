@@ -163,4 +163,32 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
     assert.equal(await page.getByRole('dialog').count(), 0)
     await page.close()
   })
+
+  it('usage limits: a number with its unit and range, an out-of-range text is refused with a reason, the save writes only what differs', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const stored = { minDelayMs: 750, maxConcurrency: 2, burst: 3, maxPagesPerRun: 20, maxDepth: 2, retryLimit: 2, backoffBaseMs: 1000, cooldownMs: 30000 }
+    const { page, errors, open, writes, unsaved, save } = await openCard({ value: { usagePolicy: stored }, user: {} })
+    await open('limits')
+    const row = page.locator('[data-dsb-policy-key="usagePolicy.minDelayMs"]')
+    assert.match(await row.innerText(), /Minimum gap[\s\S]*Range 0–60000 · default 750/)
+    assert.equal(await row.locator('input').inputValue(), '750')
+    const input = row.locator('input')
+    await input.fill('90000')
+    assert.match(await row.innerText(), /Out of range/)
+    assert.match(await page.locator('[data-dsb-savebar]').innerText(), /invalid/)
+    assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), true)
+    await input.fill('2000')
+    assert.equal(await unsaved(), '1 unsaved')
+    assert.match(await row.innerText(), /Overridden/)
+    await save()
+    assert.deepEqual((await writes())[0]!.ops, [{ op: 'set', path: ['usagePolicy'], value: { minDelayMs: 2000 } }])
+    // The reset puts the default back.
+    await row.getByRole('button', { name: 'Restore default' }).click()
+    assert.equal(await input.inputValue(), '750')
+    // The raw JSON box is folded away and is the same staged data (the stub of the Host's field does not follow state, so read the state).
+    assert.equal(await page.locator('[data-dsb-fold="limits-raw"] #plugin-config-dsh-browser-usagePolicy-json').count(), 1)
+    assert.equal(await page.evaluate(() => (window as any).__settings.snapshot().jsonFields.usagePolicy.text), '{}')
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
 })

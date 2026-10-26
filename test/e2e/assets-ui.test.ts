@@ -8,34 +8,14 @@
  */
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
 import { loadBrowserRuntime } from '../../src/deps.ts'
 import { defaultPrompts } from '../../src/prompts.ts'
 import { computeContentHash } from '../../src/automation-assets.ts'
 import { registerAutomationAssetRpc } from '../../src/automation-assets-rpc.ts'
 import { createHarness, detectBrowser, startFixtureServer, type Harness } from './support.ts'
+import { bundleEntry } from './ui-support.ts'
 
 const detection = detectBrowser()
-const require = createRequire(import.meta.url)
-
-/** Bundle the card with the rolldown that tsdown already ships; skip loudly when it is not installed. */
-async function bundleCard(): Promise<{ code: string } | { skip: string }> {
-  let rolldown: typeof import('rolldown')
-  try {
-    const fromTsdown = createRequire(require.resolve('tsdown/package.json'))
-    rolldown = await import(fromTsdown.resolve('rolldown'))
-  } catch (error) { return { skip: `rolldown (a dependency of tsdown) is not installed: ${String(error)}` } }
-  const entry = new URL('./ui/entry.tsx', import.meta.url).pathname
-  const stub = new URL('./ui/primitives-stub.ts', import.meta.url).pathname
-  const bundle = await rolldown.rolldown({
-    input: entry, platform: 'browser', logLevel: 'silent',
-    resolve: { alias: { '@deepseek-ai/dsh-client-ui-primitives': stub } },
-    transform: { define: { 'process.env.NODE_ENV': '"development"' }, jsx: { runtime: 'automatic' } },
-  } as never)
-  const { output } = await bundle.generate({ format: 'iife' })
-  await bundle.close()
-  return { code: output[0]!.code }
-}
 
 const PROMPTS_REPORT = {
   overrides: [{ key: 'rootNote', length: 42 }],
@@ -54,7 +34,7 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
 
   before(async () => {
     assert.ok(detection.ok)
-    bundled = await bundleCard()
+    bundled = await bundleEntry('settings-entry.tsx')
     if ('skip' in bundled) { console.log(`[e2e:assets-ui] SKIPPED: ${bundled.skip}`); return }
     server = await startFixtureServer()
     harness = createHarness(detection, { automationAssets: { maxModelDraftWritesPerSession: 30, modelDevelopmentEnabled: true } })

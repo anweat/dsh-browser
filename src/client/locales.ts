@@ -175,7 +175,8 @@ const enBase: Record<keyof typeof zhBase, string> = {
 }
 
 import { zhUi, enUi } from './locales-ui.ts'
+import { zhPolicy, enPolicy } from './locales-policy.ts'
 
 /** The card's dictionary: the base entries, with the settings redesign's entries laid over them (a key present in both takes the redesign's text). */
-export const zh = { ...zhBase, ...zhUi } as const
-export const en: Record<keyof typeof zh, string> = { ...enBase, ...enUi }
+export const zh = { ...zhBase, ...zhUi, ...zhPolicy } as const
+export const en: Record<keyof typeof zh, string> = { ...enBase, ...enUi, ...enPolicy }
