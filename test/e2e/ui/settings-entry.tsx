@@ -10,7 +10,9 @@ import { PromptsStatusController } from '../../../src/client/prompts-status-clie
 import { PolicyStatusController } from '../../../src/client/policy-status-client.ts'
 import { en, zh } from '../../../src/client/locales.ts'
 import { fakeScope } from './primitives-stub.ts'
+import { ensureStyles } from '../../../src/client/styles.ts'
 
+ensureStyles() // the card's real stylesheet: layout (sticky bar, scroll margins) is part of what the tests check
 const init = (window as any).__init ?? {}
 const scope = fakeScope(init)
 ;(window as any).__scope = scope

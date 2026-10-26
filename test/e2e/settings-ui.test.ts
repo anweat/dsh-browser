@@ -194,6 +194,46 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
     await page.close()
   })
 
+  it('the save bar floats only while there are unsaved edits, so before anything is edited it never sits over a group heading', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const { page, errors, open, unsaved } = await openCard({ value: {}, user: {} }, 900)
+    await page.setViewportSize({ width: 900, height: 420 })
+    const bar = page.locator('[data-dsb-savebar]')
+    const topmostIsInside = (selector: string) => page.evaluate((sel) => {
+      const el = document.querySelector(sel)!
+      const box = el.getBoundingClientRect()
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+      return !!hit && el.contains(hit)
+    }, selector)
+
+    // Clean: the bar is part of the page flow. Scroll every heading to the bottom edge of the window: each one is what a click would reach.
+    assert.equal(await bar.evaluate(el => getComputedStyle(el).position), 'static', 'nothing to save: the bar does not float over the content')
+    const ids = await page.locator('[data-dsb-group]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-dsb-group')!))
+    assert.ok(ids.length >= 5, 'the card has several groups')
+    for (const id of ids) {
+      const summary = `[data-dsb-group="${id}"] > summary`
+      await page.evaluate((sel) => document.querySelector(sel)!.scrollIntoView({ block: 'end' }), summary)
+      assert.equal(await topmostIsInside(summary), true, `heading ${id} is clickable at the bottom edge of the window`)
+    }
+    // The first click on such a heading opens the group.
+    const last = ids[ids.length - 1]!
+    await page.evaluate((sel) => document.querySelector(sel)!.scrollIntoView({ block: 'end' }), `[data-dsb-group="${last}"] > summary`)
+    await open(last)
+    assert.equal(await page.locator(`[data-dsb-group="${last}"]`).evaluate(el => (el as HTMLDetailsElement).open), true)
+    await page.locator(`[data-dsb-group="${last}"] > summary`).click()
+
+    // Unsaved edits: now the bar floats (Save stays in reach while scrolling), and going back to clean puts it back in the flow.
+    await open('limits')
+    await page.locator('[data-dsb-policy-key="usagePolicy.minDelayMs"] input').fill('2000')
+    assert.equal(await unsaved(), '1 unsaved')
+    assert.equal(await bar.evaluate(el => getComputedStyle(el).position), 'sticky')
+    await page.getByRole('button', { name: 'Discard', exact: true }).click()
+    assert.equal(await unsaved(), 'No unsaved changes')
+    assert.equal(await bar.evaluate(el => getComputedStyle(el).position), 'static')
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
   it('prompts: a text is edited beside its default, start-from-default and restore work, Cancel stages nothing, and the page Save writes one prompts object', async (t) => {
     if ('skip' in bundled) return t.skip(bundled.skip)
     const { page, errors, open, writes, unsaved, save } = await openCard({ value: {}, user: {} })

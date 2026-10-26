@@ -59,7 +59,10 @@ export function SaveBar({ card }: { card: Card }) {
   const state = card.useBrowserSettings(snapshot => snapshot)
   const count = state.changes.length
   const blocked = !state.dirty || state.invalid || state.saving
-  return <div className={css.savebar} role="region" aria-label={t('save')} data-dsb-savebar>
+  // The bar floats at the bottom of the window only while there is something to act on (unsaved edits, a save running or failed).
+  // Otherwise it sits in the page flow after the last group, so it cannot cover a group heading the user is about to click.
+  const floating = state.dirty || state.saving || state.failed
+  return <div className={css.savebar} role="region" aria-label={t('save')} data-dsb-savebar data-dsb-floating={floating ? '' : undefined}>
     <div className={css.saveText}>
       <span data-dsb-unsaved={count}>{state.invalid ? t('savebarInvalid') : count ? fill(t('savebarDirty'), { n: count }) : t('savebarClean')}</span>
       {state.failed ? <span className="dsb-bad" role="status">{t('saveFailed')}</span> : null}
