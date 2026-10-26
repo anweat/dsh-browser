@@ -19,6 +19,7 @@
  * Pure (no DOM, no host); validation is the server's own rule set (`../config-rules.ts` through `field-rules.ts`).
  * @module dsh-browser/client/properties-form
  */
+import { type PropertyDocs } from './property-docs.ts';
 export type PropertyKind = 'string' | 'boolean' | 'enum' | 'integer' | 'strings';
 export interface PropertyField {
     key: string;
@@ -79,7 +80,11 @@ export interface PropertyView {
     text: string;
     overridden: boolean;
 }
-/** Print the editor text: overridden keys as `key = value`, the rest as `# key = value-in-force`, grouped under comment headers. */
-export declare function serializeProperties(views: readonly PropertyView[]): string;
+/**
+ * Print the editor text. Every key has a comment line in front of it (what it is for, its values, its default, the
+ * risk), then either `key = value` (overridden) or `# key = value-in-force`; groups are under a comment header. Comments
+ * are lines starting with `#`, which {@link parseProperties} ignores, so printing and parsing again keeps every key.
+ */
+export declare function serializeProperties(views: readonly PropertyView[], docs?: PropertyDocs): string;
 /** `text` with the lines that set `key` turned into a comment showing `shown` (the deployed value or default). */
 export declare function commentOutProperty(text: string, key: string, shown: string): string;

@@ -59,6 +59,25 @@ export declare function defaultsFromJson(json: string): PromptDefaults | undefin
  * one line must save one override, not freeze every other text at today's wording.
  */
 export declare function pruneDefaultExtras(extras: Json, defaults: Json): Json;
+/** The three lists of per-entry overrides, and what one entry holds. */
+export type PromptExtraKind = typeof PROMPT_EXTRA_KEYS[number];
+export type PromptExtraValue = {
+    summary?: string;
+    notes?: string;
+} | string;
+/** One overridden entry of the lists, as the card lists it. */
+export interface PromptExtraEntry {
+    kind: PromptExtraKind;
+    key: string;
+    summary?: string;
+    notes?: string;
+    /** An error hint's text. */
+    text?: string;
+}
+/** The overridden entries of a `prompts` draft, in the order groups, actions, errorHints. */
+export declare function extraEntries(draft: Json): PromptExtraEntry[];
+/** `draft` with one entry set (or removed when `value` is undefined or empty); parents left empty go with it. */
+export declare function withExtraEntry(draft: Json, kind: PromptExtraKind, key: string, value: PromptExtraValue | undefined): Json;
 /** The members the JSON box edits; the other controls own the rest. */
 export declare const PROMPT_EXTRA_KEYS: readonly ["groups", "actions", "errorHints"];
 export declare function getAt(root: Json, path: readonly string[]): unknown;

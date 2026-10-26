@@ -79,6 +79,8 @@ export interface PromptsSource {
 export declare function promptsSource(read: () => unknown): PromptsSource;
 /** A source that never overrides anything. */
 export declare const NO_PROMPTS_SOURCE: PromptsSource;
+/** What each overridable `actions` key is: an action, one of its sub-actions, or a detail topic (a page of its own). */
+export declare function promptTargetKinds(): Record<string, 'action' | 'sub' | 'topic'>;
 /**
  * Every overridable text with its built-in value, in the exact structure of the `prompts` configuration. Pasted back
  * as the configuration it changes nothing (a blank `notes`, `rootNote` or `append` means "none"), which makes it the

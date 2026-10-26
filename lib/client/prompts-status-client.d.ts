@@ -15,6 +15,13 @@ export interface PromptsStatusState {
     defaultTexts?: PromptDefaults;
     /** The default export as loaded, so "Export default text" can show it without another request. */
     defaultsJson?: string;
+    /** The commented YAML export, with the language it was made in. */
+    defaultsYaml?: {
+        lang: string;
+        text: string;
+    };
+    /** Set when loading the commented YAML failed. */
+    yamlFailed?: boolean;
 }
 /** Reads the plugin's own account of its prompt overrides, for the "prompt text" section. */
 export declare class PromptsStatusController {
@@ -30,6 +37,7 @@ export declare class PromptsStatusController {
         };
         refreshPromptsStatus: () => void;
         exportPromptDefaults: () => Promise<void>;
+        exportPromptYaml: (lang: string) => Promise<void>;
         loadPromptDefaults: () => Promise<void>;
         hidePromptDefaults: () => void;
     };
@@ -39,6 +47,8 @@ export declare class PromptsStatusController {
     loadDefaults(): Promise<void>;
     /** Show the default text in the read-only box under the section. */
     exportDefaults(): Promise<void>;
+    /** The commented YAML of the defaults, in the card's language (fetched once per language). */
+    exportYaml(lang: string): Promise<void>;
     refresh(): Promise<void>;
     private publish;
 }
