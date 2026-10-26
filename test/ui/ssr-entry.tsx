@@ -4,7 +4,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SettingsCard } from '../../src/client/SettingsCard.tsx'
 import { en, zh } from '../../src/client/locales.ts'
-import { PROPERTY_FIELDS, checkProperties, parseProperties, serializeProperties } from '../../src/client/properties-form.ts'
+import { BrowserSettingsController, ALL_FIELD_SPECS } from '../../src/client/form.ts'
+import { fakeScope } from '../e2e/ui/primitives-stub.ts'
 
 const noop = () => {}
 const proxy = (value: unknown) => new Proxy({}, { get: () => value })
@@ -22,8 +23,13 @@ export interface RenderOptions {
   promptsDefaults?: string
   /** The per-control default texts the card loads when it opens. */
   promptDefaults?: { texts: Record<string, string>; extras: Record<string, unknown> }
-  /** Text each single-input field holds, by field name. */
+  /** Text each single-input field holds, by field name (typed text; stored as that field's own parse of it). */
   fieldTexts?: Record<string, string>
+  /** Stored values by field name, as the Host's section carries them. */
+  values?: Record<string, unknown>
+  /** The composition layer under the stored values. */
+  base?: Record<string, unknown>
+  writable?: boolean
   /** The properties text exactly as the editor holds it (instead of printing it from fieldTexts). */
   propertiesText?: string
   /** What the running plugin reports it ignored in its configuration. */
@@ -34,22 +40,18 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
   const dictionary = (options.locale === 'zh' ? zh : en) as Record<string, string>
   const missing = new Set<string>()
   const t = (key: string) => dictionary[key] ?? (missing.add(key), key)
-  // The default-parameters editor, printed and checked by the card's own pure code from the texts the test gives.
-  const texts = options.fieldTexts ?? {}
-  const printed = options.propertiesText ?? serializeProperties(PROPERTY_FIELDS.map(field => ({ key: field.key, text: texts[field.key] ?? '', overridden: field.key in texts })))
-  const parsedProps = parseProperties(printed)
-  const issues = checkProperties(parsedProps, key => texts[key] ?? '')
-  const properties = {
-    text: printed, issues,
-    overridden: PROPERTY_FIELDS.filter(field => parsedProps.values.has(field.key)).map(field => ({ key: field.key, value: parsedProps.values.get(field.key)!.value })),
-    invalid: issues.some(issue => issue.level === 'error'),
+  // The REAL form controller over a fake settings scope: the state the card reads is the one the Host page would give it.
+  // `fieldTexts` are texts as a person would type them (parsed by the field's own spec); `values` are stored values as they are.
+  const specs = new Map(ALL_FIELD_SPECS.map(spec => [spec.field, spec]))
+  const value: Record<string, unknown> = { ...options.values }
+  for (const [field, text] of Object.entries(options.fieldTexts ?? {})) {
+    const write = specs.get(field)?.parse(text)
+    if (write?.kind === 'set') value[field] = write.value
   }
-  const settings = {
-    properties, changes: [],
-    available: true, writable: true, saving: false, dirty: false, invalid: false, failed: false,
-    fields: new Proxy({}, { get: (_target, name) => ({ text: options.fieldTexts?.[String(name)] ?? '', invalid: false, overridden: false }) }), jsonFields: proxy({ text: '', invalid: false, overridden: false }),
-    prompts: { texts: proxy({ text: '', invalid: false }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false },
-  }
+  const controller = new BrowserSettingsController(fakeScope({ value, user: value, base: options.base ?? {}, writable: options.writable ?? true }) as never, () => options.promptDefaults as never)
+  const injected = controller.inject()
+  if (options.propertiesText !== undefined) injected.editProperties(options.propertiesText)
+  const settings = controller.snapshot()
   const assets = {
     loading: false, busy: false, failed: false,
     snapshot: {
@@ -76,9 +78,9 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
     useAutomationAssets: (select: (state: unknown) => unknown) => select(assets),
     usePromptsStatus: (select: (state: unknown) => unknown) => select(status),
     usePolicyStatus: (select: (state: unknown) => unknown) => select(policyState),
-    refreshPolicyStatus: noop, clearPolicyOverlay: noop, editProperties: noop, resetProperty: noop,
-    edit: noop, resetField: noop, save: noop, discard: noop,
-    editPromptText: noop, setPromptSkillEnabled: noop, editPromptExtras: noop, resetPromptExtras: noop, refreshPromptsStatus: noop, exportPromptDefaults: noop, hidePromptDefaults: noop,
+    refreshPolicyStatus: noop, clearPolicyOverlay: noop,
+    ...injected, hooks: undefined,
+    refreshPromptsStatus: noop, exportPromptDefaults: noop, hidePromptDefaults: noop,
     refreshAutomationAssets: noop, selectAutomationAsset: noop, saveAutomationAsset: noop, summarizeAutomationCandidate: noop, dismissAutomationCandidate: noop,
     validateAutomationAsset: noop, testAutomationAsset: noop, setAutomationAssetStatus: noop, editAutomationAsset: noop, setAssetTestUrl: noop, setAssetTestInputs: noop,
     requestSelectAutomationAsset: noop, requestNewAutomationAsset: noop, requestRefreshAutomationAssets: noop, requestForkAutomationAsset: noop, requestConvertAutomationAsset: noop,

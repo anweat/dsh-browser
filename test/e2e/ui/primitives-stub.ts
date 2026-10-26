@@ -17,7 +17,93 @@ export const SettingsValueField = (props: { id: string; label: string; hint?: st
     createElement('p', null, props.invalid ? props.invalidLabel : props.hint ?? ''))
 export const settingsTextField = (field: string) => ({ field, format: (value: unknown) => typeof value === 'string' ? value : '', parse: (text: string) => text.trim() === '' ? { kind: 'clear' } : { kind: 'set', value: text.trim() } })
 export const settingsNumberField = (field: string) => ({ field, format: (value: unknown) => typeof value === 'number' ? String(value) : '', parse: (text: string) => text.trim() === '' ? { kind: 'clear' } : { kind: 'set', value: Number(text) } })
-export class SettingsFormModel {}
+
+// The staged-edit model, mirroring @deepseek-ai/dsh-client-ui-primitives' SettingsFormModel (the same behavior the
+// controller tests stand it in with): a draft is staged per field, a field is overridden by its presence in the user
+// layer, a save is one `mutate(ops, revision)`, and a save that did not land keeps its drafts.
+export class SettingsFormModel {
+  scope: any; specs: Map<string, any>; staged = new Map<string, { text: string; clear: boolean }>(); listeners = new Set<() => void>()
+  baseline: any = undefined; saving = false; failed = false; unsubscribe: (() => void) | undefined
+  constructor(scope: any, specs: any[]) { this.scope = scope; this.specs = new Map(specs.map(spec => [spec.field, spec])); this.unsubscribe = scope.subscribe(() => this.publish()) }
+  publish() { for (const listener of this.listeners) listener() }
+  bind(project: () => unknown) {
+    let snapshot = project()
+    this.listeners.add(() => { snapshot = project(); for (const listener of storeListeners) listener() })
+    const storeListeners = new Set<() => void>()
+    return { getSnapshot: () => snapshot, subscribe(listener: () => void) { storeListeners.add(listener); return () => { storeListeners.delete(listener) } } }
+  }
+  shell() {
+    const snap = this.scope.getSnapshot()
+    const plan = this.plan()
+    return { available: snap.status === 'ready', writable: snap.writable, dirty: plan.length > 0, invalid: plan.some((item: any) => item.write === undefined && !item.clear), saving: this.saving, failed: this.failed }
+  }
+  field(field: string) {
+    const spec = this.specs.get(field)
+    if (!spec) throw new Error(`plugin card has no field ${field}`)
+    const draft = this.staged.get(field)
+    if (!draft) return { text: spec.format(this.sectionValue(field)), overridden: this.stored(field), invalid: false }
+    const write = draft.clear ? { kind: 'clear' } : spec.parse(draft.text)
+    return { text: draft.text, overridden: write?.kind === 'set', invalid: write === undefined }
+  }
+  actions() {
+    const stage = (field: string, edit: { text: string; clear: boolean }) => { this.baseline ??= this.scope.getSnapshot(); this.staged.set(field, edit); this.failed = false; this.publish() }
+    return {
+      edit: (field: string, text: string) => stage(field, { text, clear: false }),
+      resetField: (field: string) => stage(field, { text: this.specs.get(field).format(this.baseValue(field)), clear: true }),
+      save: () => { void this.save() },
+      discard: () => { if (this.staged.size === 0 && !this.failed) return; this.staged.clear(); this.baseline = undefined; this.failed = false; this.publish() },
+    }
+  }
+  async save() {
+    const plan = this.plan()
+    if (this.saving || plan.length === 0 || plan.some((item: any) => item.write === undefined && !item.clear)) return
+    this.saving = true; this.failed = false; this.publish()
+    const ops = plan.map((item: any) => item.clear || item.write.kind === 'clear' ? { op: 'unset', path: [item.field] } : { op: 'set', path: [item.field], value: item.write.value })
+    let landed = false
+    try { landed = await this.scope.mutate(ops, this.baseline?.revision) } catch { landed = false }
+    if (landed) { this.staged.clear(); this.baseline = undefined }
+    this.saving = false; this.failed = !landed; this.publish()
+  }
+  plan(): { field: string; write?: any; clear?: boolean }[] {
+    const out: { field: string; write?: any; clear?: boolean }[] = []
+    for (const [field, draft] of this.staged) {
+      const spec = this.specs.get(field)
+      if (draft.clear) { if (this.stored(field)) out.push({ field, clear: true }); continue }
+      if (draft.text === spec.format(this.sectionValue(field))) continue
+      out.push({ field, write: spec.parse(draft.text) })
+    }
+    return out
+  }
+  sectionValue(field: string) { return this.scope.getSnapshot().value?.[field] }
+  baseValue(field: string) { return this.scope.getSnapshot().base?.[field] }
+  stored(field: string) { const user = this.scope.getSnapshot().user; return user !== undefined && Object.hasOwn(user, field) }
+  dispose() { this.unsubscribe?.(); this.listeners.clear() }
+}
+
+/** A fake settings scope over plain objects: what the Host's configuration form for the entry reports, plus the writes it was asked for. */
+export function fakeScope(initial: { value?: Record<string, unknown>; base?: Record<string, unknown>; user?: Record<string, unknown>; writable?: boolean; accept?: boolean } = {}) {
+  const state = { value: initial.value ?? {}, base: initial.base ?? {}, user: initial.user ?? {}, writable: initial.writable ?? true, revision: 1 }
+  const listeners = new Set<() => void>()
+  const writes: { ops: readonly any[]; revision: number | undefined }[] = []
+  return {
+    writes,
+    getSnapshot: () => ({ status: 'ready' as const, value: state.value, base: state.base, user: state.user, writable: state.writable, revision: state.revision }),
+    subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
+    async mutate(ops: readonly any[], revision?: number) {
+      writes.push({ ops, revision })
+      if (initial.accept === false) return false
+      // The Host accepts the write: the user layer and the resolved value now carry it.
+      const user = { ...state.user }, value = { ...state.value }
+      for (const op of ops) {
+        const key = op.path[0]
+        if (op.op === 'set') { user[key] = op.value; value[key] = op.value } else { delete user[key]; if (key in state.base) value[key] = state.base[key]; else delete value[key] }
+      }
+      state.user = user; state.value = value; state.revision += 1
+      for (const listener of listeners) listener()
+      return true
+    },
+  }
+}
 
 export const Button = forwardRef<HTMLButtonElement, Record<string, unknown>>(function Button({ variant, size, icon, children, ...rest }, ref) {
   void icon

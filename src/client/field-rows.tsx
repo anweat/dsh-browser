@@ -9,6 +9,7 @@
 
 import type { ReactNode } from 'react'
 import type { BrowserSettingsCardProps } from './index.ts'
+import type { BrowserCardState, CardFieldState } from './form.ts'
 import { Row, Select, TextInput, Toggle, UnitInput, type RowLabels, type SelectOption } from './ui-kit.tsx'
 
 export type Card = BrowserSettingsCardProps
@@ -45,14 +46,20 @@ export interface FieldProps {
 
 /** How many of these fields carry an override: the number a group's badge shows. */
 export function useOverriddenCount(card: Card, names: readonly string[]): number {
-  return card.useBrowserSettings(snapshot => names.filter(name => snapshot.fields[name as keyof typeof snapshot.fields]?.overridden).length)
+  return card.useBrowserSettings(snapshot => names.filter(name => stateOf(snapshot, name)?.overridden).length)
+}
+
+/** A field's staged state, whether it is a single-input field or one of the JSON-shaped ones (launch arguments, policies). */
+export function stateOf(snapshot: BrowserCardState, name: string): CardFieldState | undefined {
+  return snapshot.fields[name as keyof typeof snapshot.fields] ?? snapshot.jsonFields[name]
 }
 
 /** Read one single-input field's staged state. */
 export function useField(card: Card, name: string) {
-  const state = card.useBrowserSettings(snapshot => snapshot.fields[name as keyof typeof snapshot.fields])
+  const state = card.useBrowserSettings(snapshot => stateOf(snapshot, name)!)
   const disabled = card.useBrowserSettings(snapshot => !snapshot.writable)
-  return { state, disabled, edit: (text: string) => card.edit(name, text), reset: () => card.resetField(name) }
+  const problem = card.useBrowserSettings(snapshot => snapshot.problems?.[name])
+  return { state, disabled, problem, edit: (text: string) => card.edit(name, text), reset: () => card.resetField(name) }
 }
 
 function rowFor(props: FieldProps, field: ReturnType<typeof useField>, children: ReactNode, extra: { id?: string; inline?: boolean; wide?: boolean; problem?: string } = {}) {
@@ -60,7 +67,7 @@ function rowFor(props: FieldProps, field: ReturnType<typeof useField>, children:
   const { t } = card
   return <Row field={name} id={extra.id} label={props.label ?? t(name as LabelKey)} hint={typeof props.hint === 'function' ? props.hint(field.state.text) : props.hint ?? t(`${name}Hint` as LabelKey)}
     help={WITH_HELP.has(name) ? t(`${name}Help` as LabelKey) : undefined}
-    overridden={field.state.overridden} invalid={field.state.invalid} problem={extra.problem ?? t('invalid')} disabled={field.disabled}
+    overridden={field.state.overridden} invalid={field.state.invalid || !!field.problem} problem={extra.problem ?? field.problem ?? t('invalid')} disabled={field.disabled}
     labels={rowLabels(t)} onReset={field.reset} inline={extra.inline} wide={extra.wide}>{children}</Row>
 }
 
@@ -75,14 +82,14 @@ export function SwitchRow(props: FieldProps) {
 export function SelectRow(props: FieldProps & { options: readonly SelectOption[] }) {
   const field = useField(props.card, props.name)
   const id = controlId(props.name)
-  return rowFor(props, field, <Select id={id} value={field.state.text} options={props.options} disabled={field.disabled} muted={!field.state.overridden} invalid={field.state.invalid} onChange={field.edit} />, { id })
+  return rowFor(props, field, <Select id={id} value={field.state.text} options={props.options} disabled={field.disabled} muted={!field.state.overridden} invalid={field.state.invalid || !!field.problem} onChange={field.edit} />, { id })
 }
 
 /** A free-text field. `listId` names a `<datalist>` of suggestions rendered by the caller. */
 export function TextRow(props: FieldProps & { listId?: string; code?: boolean }) {
   const field = useField(props.card, props.name)
   const id = controlId(props.name)
-  return rowFor(props, field, <TextInput id={id} value={field.state.text} placeholder={props.placeholder} list={props.listId} code={props.code} disabled={field.disabled} muted={!field.state.overridden} invalid={field.state.invalid} onChange={field.edit} />, { id })
+  return rowFor(props, field, <TextInput id={id} value={field.state.text} placeholder={props.placeholder} list={props.listId} code={props.code} disabled={field.disabled} muted={!field.state.overridden} invalid={field.state.invalid || !!field.problem} onChange={field.edit} />, { id })
 }
 
 /** A whole-number field with its unit written after the input. */
@@ -90,7 +97,7 @@ export function NumberRow(props: FieldProps & { unit?: string }) {
   const field = useField(props.card, props.name)
   const id = controlId(props.name)
   const input = props.unit
-    ? <UnitInput id={id} value={field.state.text} unit={props.unit} placeholder={props.placeholder} disabled={field.disabled} muted={!field.state.overridden} invalid={field.state.invalid} onChange={field.edit} />
-    : <TextInput id={id} value={field.state.text} placeholder={props.placeholder} numeric disabled={field.disabled} muted={!field.state.overridden} invalid={field.state.invalid} onChange={field.edit} />
+    ? <UnitInput id={id} value={field.state.text} unit={props.unit} placeholder={props.placeholder} disabled={field.disabled} muted={!field.state.overridden} invalid={field.state.invalid || !!field.problem} onChange={field.edit} />
+    : <TextInput id={id} value={field.state.text} placeholder={props.placeholder} numeric disabled={field.disabled} muted={!field.state.overridden} invalid={field.state.invalid || !!field.problem} onChange={field.edit} />
   return rowFor(props, field, input, { id })
 }

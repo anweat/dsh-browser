@@ -76,6 +76,14 @@ export function Row(props: RowProps) {
   </div>
 }
 
+/** A closed-by-default fold inside a group, for the items few people need. */
+export function Fold(props: { id: string; title: string; hint?: string; children: ReactNode }) {
+  return <details className={css.fold} data-dsb-fold={props.id}>
+    <summary>{props.title}{props.hint ? <span className={css.foldHint}> · {props.hint}</span> : null}</summary>
+    <div className={css.foldBody}>{props.children}</div>
+  </details>
+}
+
 /** A small heading inside a group, for sets of rows that belong together. */
 export function SubHead(props: { children: ReactNode }) {
   return <div className={css.subHead} role="presentation">{props.children}</div>

@@ -14,7 +14,7 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SettingsFormModel, settingsNumberField, settingsTextField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ASSET_POLICY_BOOLEAN_KEYS, ASSET_POLICY_ENUMS, ASSET_POLICY_INTEGER_RANGES, ASSET_POLICY_KEYS, ASSET_POLICY_STRING_KEYS, USAGE_POLICY_BOUNDS, type AssetPolicyKey } from '../policy-keys.ts'
-import { fieldProblem } from './field-rules.ts'
+import { crossFieldProblems, fieldProblem } from './field-rules.ts'
 import {
   PROPERTY_FIELDS, checkProperties, commentOutProperty, parseProperties, serializeProperties, type LineIssue, type PropertyField,
 } from './properties-form.ts'
@@ -42,6 +42,8 @@ export interface BrowserCardState extends SettingsFormShell {
   prompts: PromptsCardState
   /** The "default parameters" editor: one properties text over the plugin-wide default fields. */
   properties: PropertiesCardState
+  /** Problems that involve several fields (a custom viewport needs both sizes), by the field that is missing something. They block the save. */
+  problems: Record<string, string>
   /** The configuration fields a save would write (staged and different from what is stored), in field order. */
   changes: string[]
 }
@@ -265,6 +267,12 @@ export class BrowserSettingsController {
   /** Forget the advanced text as typed, so it is printed again from the fields (their edits are already staged). */
   private dropTypedProperties(): void { this.propsRaw = undefined; this.propsIssues = [] }
 
+  /** Rules that span fields, read from the texts the fields hold now (the deployed sizes count when a control does not set them). */
+  private crossProblems(): Record<string, string> {
+    const text = (key: string) => this.form.field(key).text
+    return crossFieldProblems({ viewportMode: text('viewportMode'), viewportWidth: text('viewportWidth'), viewportHeight: text('viewportHeight') })
+  }
+
   /** The fields a save would write: the text differs from the stored one, or a reset leaves the stored override. */
   private changedFields(): string[] {
     const value = this.scope.getSnapshot().value as Record<string, unknown> | undefined
@@ -275,7 +283,7 @@ export class BrowserSettingsController {
   }
 
   private async save(): Promise<void> {
-    if (this.extrasInvalid || this.propsIssues.some(issue => issue.level === 'error')) return
+    if (this.extrasInvalid || this.propsIssues.some(issue => issue.level === 'error') || Object.keys(this.crossProblems()).length) return
     await this.form.save()
     // What was typed is now the stored value, so the box shows that again. (A failed save keeps the draft and its flag.)
     if (!this.form.shell().failed && (this.extrasRaw !== undefined || this.propsRaw !== undefined || Object.keys(this.promptRaw).length)) {
@@ -417,7 +425,8 @@ export class BrowserSettingsController {
     for (const spec of JSON_FIELD_SPECS) jsonFields[spec.field] = this.form.field(spec.field)
     const shell = this.form.shell()
     const properties = this.projectProperties()
-    return { ...shell, invalid: shell.invalid || this.extrasInvalid || properties.invalid, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!), properties, changes: this.changedFields() }
+    const problems = this.crossProblems()
+    return { ...shell, invalid: shell.invalid || this.extrasInvalid || properties.invalid || Object.keys(problems).length > 0, problems, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!), properties, changes: this.changedFields() }
   }
 
   private projectPrompts(field: CardFieldState): PromptsCardState {

@@ -25,6 +25,9 @@ import { inputSetShortfall } from '../activation-rules.ts'
 import type { AssetNoticeKind } from './automation-assets-client.ts'
 import { Frame, SaveBar, SummaryBar } from './card-frame.tsx'
 import { CommonGroup } from './group-common.tsx'
+import { BrowserGroup } from './group-browser.tsx'
+import { ContextGroup } from './group-context.tsx'
+import { DownloadsGroup } from './group-downloads.tsx'
 import { Group } from './ui-kit.tsx'
 
 /**
@@ -83,6 +86,9 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
   return <Frame card={props}>
     <SummaryBar card={props} />
     <CommonGroup card={props} />
+    <BrowserGroup card={props} />
+    <ContextGroup card={props} />
+    <DownloadsGroup card={props} />
     <Group id="properties" title={t('properties')} summary={t('propertiesHint')}><PropertiesPanel {...props} /></Group>
     <Group id="limits" title={t('usage')} summary={t('usageHint')}>
       <div className={css.grid}>

@@ -67,41 +67,44 @@ function fieldsRendered(html: string): { controls: string[]; notes: string[] } {
   }
 }
 
-test('every public config field is a control, a note, or a line of the default-parameters text: none disappears into the merge', async (t) => {
+test('every public config field has exactly one entry in the card: a control, or a note; the properties text is only a mirror', async (t) => {
   if (skip) return t.skip(skip)
   const { MISPLACED_CONFIG_KEYS } = await import('../src/config.ts')
   const publicFields = Object.keys((Config as unknown as { dict: Record<string, unknown> }).dict).filter(field => !MISPLACED_CONFIG_KEYS.includes(field))
   assert.ok(publicFields.length >= 21, 'the schema has the fields this test was written against')
+  // Rows that exist only while they apply: a custom viewport size, the proxy address and bypass list. Render them present.
+  const conditional = { viewportMode: 'custom', proxyServer: 'http://127.0.0.1:7890' }
+  // Fields whose group is not rebuilt yet: still reachable through the properties text. Emptied as each group lands.
+  const pending = ['storageStatePath', 'defaultAuthProfile', 'allowPrivateHosts']
   for (const locale of ['en', 'zh'] as const) {
-    const { html, missingKeys } = renderCard!({ locale })
+    const { html, missingKeys } = renderCard!({ locale, fieldTexts: conditional })
     assert.deepEqual(missingKeys, [], `every label and hint the card asks for exists in ${locale}`)
     const { controls, notes } = fieldsRendered(html)
     const editor = /<textarea[^>]*id="plugin-config-dsh-browser-properties"[^>]*>([\s\S]*?)<\/textarea>/.exec(html)
-    assert.ok(editor, 'the default-parameters editor is rendered')
+    assert.ok(editor, 'the default-parameters text is rendered')
     const text = editor![1]!.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&')
     const inEditor = (field: string) => new RegExp(`^#? ?${field} =`, 'm').test(text)
     for (const field of publicFields) {
-      const control = field === 'prompts' ? controls.some(id => id.startsWith('prompts-')) : controls.includes(field)
+      const control = field === 'prompts' ? controls.some(id => id.startsWith('prompts-')) : controls.filter(id => id === field).length === 1
       const note = notes.includes(field)
-      const line = inEditor(field)
-      assert.ok(control || note || line, `config field "${field}" is neither a control, a note, nor a line of the default parameters in the ${locale} card`)
-      assert.equal([control, note, line].filter(Boolean).length, 1, `config field "${field}" is shown ${[control && 'as a control', note && 'as a note', line && 'in the properties text'].filter(Boolean).join(' and ')}`)
+      assert.equal(controls.filter(id => id === field).length > 1, false, `config field "${field}" has more than one control in the ${locale} card`)
+      if (pending.includes(field)) { assert.ok(inEditor(field), `${field} is still a line of the properties text`); continue }
+      assert.ok(control || note, `config field "${field}" is neither a control nor a note in the ${locale} card`)
+      assert.equal([control, note].filter(Boolean).length, 1, `config field "${field}" is shown as ${[control && 'a control', note && 'a note'].filter(Boolean).join(' and ')}`)
     }
-    // Nothing on the card points at a field the schema does not have (the editor itself is not a field).
+    // Nothing on the card points at a field the schema does not have (the properties text is a mirror, not a field).
     for (const id of controls.filter(id => !id.startsWith('prompts-') && id !== 'properties')) assert.ok(publicFields.includes(id), `control ${id} is not a config field`)
     for (const id of notes) assert.ok(publicFields.includes(id), `note ${id} is not a config field`)
-    // The merge: these are lines now, not controls.
-    for (const field of ['maxSessions', 'args', 'viewportMode', 'proxyServer', 'downloadDir', 'headless', 'allowPrivateHosts']) {
-      assert.ok(inEditor(field) && !controls.includes(field), `${field} is a line of the default parameters`)
-    }
-    // The switches and policies stay controls.
-    for (const field of ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled', 'usagePolicy', 'automationAssets']) assert.ok(controls.includes(field), `${field} is still a control`)
+    for (const field of ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled', 'browserRuntime', 'channel', 'headless', 'maxSessions', 'args', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass', 'downloadDir', 'downloadMaxBytes', 'usagePolicy', 'automationAssets']) assert.ok(controls.includes(field), `${field} is a control`)
     for (const field of ['authProfiles', 'rulePacks']) {
       assert.ok(notes.includes(field), `${field} has a note`)
       assert.ok(!controls.includes(field))
     }
     assert.equal(html.includes(locale === 'zh' ? '配置文件' : 'config file'), true, 'the note says where to edit')
   }
+  // The conditional rows are absent while they do not apply.
+  const plain = fieldsRendered(renderCard!({}).html).controls
+  for (const field of ['viewportWidth', 'viewportHeight', 'proxyServer', 'proxyBypass']) assert.equal(plain.includes(field), false, `${field} appears only when it applies`)
 })
 
 test('the policy boxes list every key the code accepts, in both locales (maxTestCredentials and minInputSetsForActivation included)', async (t) => {
