@@ -62,7 +62,7 @@ const variants: Record<string, Record<string, unknown>> = {
 /** The ids of the controls and the notes the card rendered. */
 function fieldsRendered(html: string): { controls: string[]; notes: string[] } {
   return {
-    controls: [...html.matchAll(/<(?:input|textarea)[^>]*\bid="plugin-config-dsh-browser-([A-Za-z0-9-]+)"/g)].map(match => match[1]!),
+    controls: [...new Set([...html.matchAll(/<(?:input|textarea)[^>]*\bid="plugin-config-dsh-browser-([A-Za-z0-9-]+)"/g)].map(match => match[1]!).concat([...html.matchAll(/data-dsb-field="([A-Za-z0-9]+)"/g)].map(match => match[1]!)))],
     notes: [...html.matchAll(/data-dsh-browser-config-note="([A-Za-z0-9]+)"/g)].map(match => match[1]!),
   }
 }
@@ -223,12 +223,11 @@ test('the default-parameters editor lists line-level problems with the line numb
   assert.match(clean.html, /data-dsh-browser-properties-overridden/)
 })
 
-test('configuration warnings of the running plugin are listed above the form', (t) => {
+test('configuration warnings of the running plugin are counted in the status summary (the list itself is in its dialog)', (t) => {
   if (skip) return t.skip(skip)
   const { html } = renderCard!({ configWarnings: ['config proxyServer="ftp://x" was ignored: scheme must be one of http, https, socks5, socks4; no proxy is used instead. Fix: ...'] })
-  assert.match(html, /data-dsh-browser-config-warnings/)
-  assert.match(html, /was ignored: scheme must be one of/)
-  assert.doesNotMatch(renderCard!().html, /data-dsh-browser-config-warnings/)
+  assert.match(html, /data-dsb-warnings-count="1"/)
+  assert.match(renderCard!().html, /data-dsb-warnings-count="0"/)
 })
 
 test('each prompt control shows the default text in the empty box and offers to start from it; a long default has a full view', (t) => {

@@ -45,7 +45,7 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
     invalid: issues.some(issue => issue.level === 'error'),
   }
   const settings = {
-    properties,
+    properties, changes: [],
     available: true, writable: true, saving: false, dirty: false, invalid: false, failed: false,
     fields: new Proxy({}, { get: (_target, name) => ({ text: options.fieldTexts?.[String(name)] ?? '', invalid: false, overridden: false }) }), jsonFields: proxy({ text: '', invalid: false, overridden: false }),
     prompts: { texts: proxy({ text: '', invalid: false }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false },

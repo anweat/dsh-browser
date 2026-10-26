@@ -42,6 +42,8 @@ export interface BrowserCardState extends SettingsFormShell {
   prompts: PromptsCardState
   /** The "default parameters" editor: one properties text over the plugin-wide default fields. */
   properties: PropertiesCardState
+  /** The configuration fields a save would write (staged and different from what is stored), in field order. */
+  changes: string[]
 }
 
 export interface PropertiesCardState {
@@ -245,6 +247,9 @@ export class BrowserSettingsController {
     return {
       hooks: { browserSettings: this.store },
       ...actions,
+      // A control edit replaces whatever was typed in the advanced text: the text is a view of the fields, printed again.
+      edit: (field: string, text: string) => { this.dropTypedProperties(); actions.edit(field, text) },
+      resetField: (field: string) => { this.dropTypedProperties(); actions.resetField(field) },
       // A save is refused while the groups/actions/errorHints box holds something that is not valid.
       save: () => this.save(),
       discard: () => { this.extrasRaw = undefined; this.extrasInvalid = false; this.propsRaw = undefined; this.propsIssues = []; this.clearPromptRaw(); actions.discard() },
@@ -255,6 +260,18 @@ export class BrowserSettingsController {
       editPromptExtras: (text: string) => this.editPromptExtras(text),
       resetPromptExtras: () => this.resetPromptExtras(),
     }
+  }
+
+  /** Forget the advanced text as typed, so it is printed again from the fields (their edits are already staged). */
+  private dropTypedProperties(): void { this.propsRaw = undefined; this.propsIssues = [] }
+
+  /** The fields a save would write: the text differs from the stored one, or a reset leaves the stored override. */
+  private changedFields(): string[] {
+    const value = this.scope.getSnapshot().value as Record<string, unknown> | undefined
+    return ALL_FIELD_SPECS.filter(spec => {
+      const state = this.form.field(spec.field)
+      return state.text !== spec.format(value?.[spec.field]) || (!state.overridden && this.isStored(spec.field))
+    }).map(spec => spec.field)
   }
 
   private async save(): Promise<void> {
@@ -400,7 +417,7 @@ export class BrowserSettingsController {
     for (const spec of JSON_FIELD_SPECS) jsonFields[spec.field] = this.form.field(spec.field)
     const shell = this.form.shell()
     const properties = this.projectProperties()
-    return { ...shell, invalid: shell.invalid || this.extrasInvalid || properties.invalid, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!), properties }
+    return { ...shell, invalid: shell.invalid || this.extrasInvalid || properties.invalid, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!), properties, changes: this.changedFields() }
   }
 
   private projectPrompts(field: CardFieldState): PromptsCardState {

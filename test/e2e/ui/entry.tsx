@@ -20,7 +20,7 @@ const promptsInjected = promptsController.inject()
 const policyController = new PolicyStatusController(rpc as never)
 const policyInjected = policyController.inject()
 const store = injected.hooks.automationAssets
-const settings = { properties: { text: '# defaults\n', issues: [], overridden: [], invalid: false }, available: true, writable: true, saving: false, dirty: false, fields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), jsonFields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), prompts: { texts: new Proxy({}, { get: () => ({ text: '', invalid: false }) }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false } }
+const settings = { changes: [], properties: { text: '# defaults\n', issues: [], overridden: [], invalid: false }, available: true, writable: true, saving: false, dirty: false, fields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), jsonFields: new Proxy({}, { get: () => ({ text: '', invalid: false, overridden: false }) }), prompts: { texts: new Proxy({}, { get: () => ({ text: '', invalid: false }) }), skillEnabled: true, extras: { text: '', invalid: false }, overridden: false, invalid: false } }
 const noop = () => {}
 const props = {
   ...injected, ...promptsInjected, ...policyInjected, view: 'page', t: (key: string) => (en as Record<string, string>)[key] ?? key,

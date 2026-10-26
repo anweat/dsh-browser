@@ -93,6 +93,8 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     })
     await page.setContent('<!doctype html><title>asset ui</title><div id="root"></div>')
     await page.addScriptTag({ content: (bundled as { code: string }).code })
+    // Every group but "Common" starts closed: open them all.
+    await page.evaluate(() => document.querySelectorAll('details[data-dsb-group]').forEach(group => { (group as HTMLDetailsElement).open = true }))
     return { page, errors }
   }
 

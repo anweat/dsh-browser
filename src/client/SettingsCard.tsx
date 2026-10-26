@@ -14,8 +14,7 @@
  */
 
 import { useEffect } from 'react'
-import { SettingsForm, SettingsValueField } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
+import { SettingsValueField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BrowserSettingsCardProps } from './index.ts'
 import { ASSET_POLICY_KEYS, USAGE_POLICY_KEYS } from '../policy-keys.ts'
 import { CONFIG_FILE_ONLY_FIELDS, FIELD_SPECS, JSON_FIELDS } from './form.ts'
@@ -24,6 +23,9 @@ import { styles as css } from './styles.ts'
 import { credentialView, identicalOutputPairs, inputSetLines, isDirty, shortHash } from './asset-editor.ts'
 import { inputSetShortfall } from '../activation-rules.ts'
 import type { AssetNoticeKind } from './automation-assets-client.ts'
+import { Frame, SaveBar, SummaryBar } from './card-frame.tsx'
+import { CommonGroup } from './group-common.tsx'
+import { Group } from './ui-kit.tsx'
 
 /**
  * The page's own translator, taken from the props rather than restated: the
@@ -36,25 +38,12 @@ type LabelKey = Parameters<Translator>[0]
 /** Fill `{name}` placeholders of a dictionary entry. */
 const fill = (text: string, values: Record<string, string | number>): string => text.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key] ?? ''))
 
-/** The copy the shared form frame renders, from this page's dictionary. */
-function formLabels(t: Translator): SettingsFormLabels {
-  return {
-    unavailable: t('unavailable'),
-    readOnly: t('readOnly'),
-    saveFailed: t('saveFailed'),
-    save: t('save'),
-    saving: t('saving'),
-  }
-}
-
 /**
  * The switches and policies that stay one control each. Every plugin-wide DEFAULT (runtime, window, locale, proxy,
  * directories, limits) is a line of the default-parameters editor instead (properties-form.ts). A public config field
  * that is in neither place would be silently absent from the card; test/settings-card-render.test.ts renders the card
  * and checks every Config field is a control, a note, or a line of the properties text.
  */
-const SWITCH_FIELDS: readonly string[] = ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled']
-
 /** The usage section's JSON boxes. */
 const USAGE_FIELDS = ['usagePolicy', 'automationAssets'] as const
 
@@ -91,30 +80,21 @@ export function SettingsCard(props: BrowserSettingsCardProps) {
       onReset={() => props.resetField(name)}
     />
   }
-  return <SettingsForm
-    labels={formLabels(t)}
-    state={state}
-    onSave={props.save}
-    onDiscard={props.discard}
-  >
-    <ConfigWarnings {...props} />
-    <section className={css.section}>
-      <div className={css.sectionHead}><h3>{t('freedom')}</h3><p>{t('freedomHint')}</p></div>
-      <div className={css.grid}>{SWITCH_FIELDS.map(name => field(name))}</div>
-    </section>
-    <PropertiesPanel {...props} />
-    <section className={css.section}>
-      <div className={css.sectionHead}><h3>{t('usage')}</h3><p>{t('usageHint')}</p></div>
+  return <Frame card={props}>
+    <SummaryBar card={props} />
+    <CommonGroup card={props} />
+    <Group id="properties" title={t('properties')} summary={t('propertiesHint')}><PropertiesPanel {...props} /></Group>
+    <Group id="limits" title={t('usage')} summary={t('usageHint')}>
       <div className={css.grid}>
-        {/* `prompts` has its own section below: several controls over one staged draft. */}
         {USAGE_FIELDS.map(name => field(name))}
       </div>
       <p className={css.notice} role="note">{t('restart')}</p>
-    </section>
-    <PolicyPanel {...props} />
-    <PromptsPanel {...props} disabled={disabled} />
-    <AutomationAssetsPanel {...props} />
-  </SettingsForm>
+    </Group>
+    <Group id="access" title={t('policyOverlay')} summary={t('policyOverlayHint')}><PolicyPanel {...props} /></Group>
+    <Group id="prompts" title={t('prompts')} summary={t('promptsHint')}><PromptsPanel {...props} disabled={disabled} /></Group>
+    <Group id="assets" title={t('assetLibrary')} summary={t('assetLibraryHint')}><AutomationAssetsPanel {...props} /></Group>
+    <SaveBar card={props} />
+  </Frame>
 }
 
 /** A public field with no form: its name, what it is for, and where to edit it. */

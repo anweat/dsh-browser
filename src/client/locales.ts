@@ -1,4 +1,4 @@
-export const zh = {
+const zhBase = {
   title: '浏览器自动化', description: '运行时、工具自由度、OpenCLI 与防止过度调用的缓冲策略。',
   expand: '展开设置', collapse: '收起设置', unsaved: '未保存', readOnly: '当前配置只读。',
   freedom: '自动化自由度', freedomHint: '无审批模式只跳过人工确认，不会绕过调用缓冲和参数校验。',
@@ -86,7 +86,7 @@ export const zh = {
   save: '保存', discard: '放弃修改',
 } as const
 
-export const en: Record<keyof typeof zh, string> = {
+const enBase: Record<keyof typeof zhBase, string> = {
   title: 'Browser automation', description: 'Runtime, tool freedom, OpenCLI, and overuse buffering policy.',
   expand: 'Expand settings', collapse: 'Collapse settings', unsaved: 'Unsaved', readOnly: 'Configuration is read-only.',
   freedom: 'Automation freedom', freedomHint: 'No-approval skips human confirmation only; buffering and validation remain active.',
@@ -173,3 +173,9 @@ export const en: Record<keyof typeof zh, string> = {
   saved: 'Configuration is synchronized.', pending: 'Changes are ready to save.', invalidSave: 'Some fields are invalid.', saveFailed: 'Save failed; the draft was retained.', saving: 'Saving…',
   save: 'Save', discard: 'Discard',
 }
+
+import { zhUi, enUi } from './locales-ui.ts'
+
+/** The card's dictionary: the base entries, with the settings redesign's entries laid over them (a key present in both takes the redesign's text). */
+export const zh = { ...zhBase, ...zhUi } as const
+export const en: Record<keyof typeof zh, string> = { ...enBase, ...enUi }
