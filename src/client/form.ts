@@ -18,6 +18,7 @@ import { crossFieldProblems, fieldProblem } from './field-rules.ts'
 import {
   PROPERTY_FIELDS, checkProperties, commentOutProperty, parseProperties, serializeProperties, type LineIssue, type PropertyField,
 } from './properties-form.ts'
+import { propertyDocs, type DocLang } from './property-docs.ts'
 import { POLICY_SPECS, defaultOf, parsePolicyText, valueText, type PolicyFieldName } from './policy-fields.ts'
 import { parseProfiles, validAuthProfiles, type AuthProfileEntry } from './auth-profiles-form.ts'
 import { PROMPT_TEXT_FIELDS, extraEntries, withExtraEntry, canonicalPrompts, pruneDefaultExtras, type PromptDefaults, type PromptExtraEntry, type PromptExtraKind, type PromptExtraValue, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
@@ -245,6 +246,8 @@ export class BrowserSettingsController {
   /** The properties text as typed; undefined shows the text printed from the staged fields. */
   private propsRaw: string | undefined
   private propsIssues: LineIssue[] = []
+  /** The language of the comments printed in the advanced text; the card sets it from its own language. */
+  private docsLang: DocLang = 'en'
   /** What was typed in each prompt control while it differs from what is staged (a text equal to the default stages nothing). */
   private readonly promptRaw: Partial<Record<PromptTextFieldId, string>> = {}
   /** What was typed in a policy key's control while it is not a value the key accepts. */
@@ -271,6 +274,7 @@ export class BrowserSettingsController {
       save: () => this.save(),
       discard: () => { this.clearPolicyRaw(); this.extrasRaw = undefined; this.extrasInvalid = false; this.propsRaw = undefined; this.propsIssues = []; this.clearPromptRaw(); actions.discard() },
       editProperties: (text: string) => this.editProperties(text),
+      setPropertyLanguage: (lang: string) => this.setPropertyLanguage(lang),
       resetProperty: (key: string) => this.resetProperty(key),
       editPromptText: (id: PromptTextFieldId, text: string) => this.editPromptText(id, text),
       setPromptSkillEnabled: (enabled: boolean) => this.setPromptSkillEnabled(enabled),
@@ -331,7 +335,7 @@ export class BrowserSettingsController {
     return serializeProperties(PROPERTY_FIELDS.map(field => {
       const state = this.form.field(field.key)
       return { key: field.key, text: state.text, overridden: state.overridden }
-    }))
+    }), propertyDocs(this.docsLang))
   }
 
   /**
@@ -350,6 +354,14 @@ export class BrowserSettingsController {
       else if (this.isStored(field.key)) actions.resetField(field.key)
       else actions.edit(field.key, this.storedText(field.key))
     }
+  }
+
+  /** Print the comments of the advanced text in this language (`zh`, anything else is English). Text the person typed is not touched. */
+  setPropertyLanguage(lang: string): void {
+    const next: DocLang = lang === 'zh' ? 'zh' : 'en'
+    if (next === this.docsLang) return
+    this.docsLang = next
+    this.refresh()
   }
 
   /** Comment out one key's line: that parameter goes back to the default. */

@@ -22,6 +22,7 @@
 
 import { MAX_DOWNLOAD_BYTES_LIMIT } from '../config-rules.ts'
 import { crossFieldProblems, fieldProblem } from './field-rules.ts'
+import { propertyDocs, type PropertyDocs } from './property-docs.ts'
 
 export type PropertyKind = 'string' | 'boolean' | 'enum' | 'integer' | 'strings'
 
@@ -185,19 +186,21 @@ export interface PropertyView {
   overridden: boolean
 }
 
-/** Print the editor text: overridden keys as `key = value`, the rest as `# key = value-in-force`, grouped under comment headers. */
-export function serializeProperties(views: readonly PropertyView[]): string {
+/**
+ * Print the editor text. Every key has a comment line in front of it (what it is for, its values, its default, the
+ * risk), then either `key = value` (overridden) or `# key = value-in-force`; groups are under a comment header. Comments
+ * are lines starting with `#`, which {@link parseProperties} ignores, so printing and parsing again keeps every key.
+ */
+export function serializeProperties(views: readonly PropertyView[], docs: PropertyDocs = propertyDocs('en')): string {
   const byKey = new Map(views.map(view => [view.key, view]))
-  const out: string[] = [
-    '# Default parameters: what every new browser context starts from. An agent copies these for a task and changes only what it needs.',
-    '# "key = value" overrides the default. A line starting with # is a comment and shows the value in force; delete or comment a line to go back to the default.',
-    '',
-  ]
+  const out: string[] = [...docs.header.map(line => `# ${line}`), '']
   for (const group of PROPERTY_GROUPS) {
-    out.push(`# -- ${group.title} --`)
+    out.push(`# -- ${docs.group[group.id] ?? group.title} --`)
     for (const field of PROPERTY_FIELDS.filter(entry => entry.group === group.id)) {
       const view = byKey.get(field.key)
       const text = view?.text ?? field.defaultText ?? ''
+      const doc = docs.key[field.key]
+      if (doc) out.push(`# ${doc}`)
       out.push(view?.overridden ? `${field.key} = ${quoteValue(text)}` : `# ${field.key} =${text === '' ? '' : ' ' + text}`)
     }
     out.push('')

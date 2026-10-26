@@ -50,6 +50,7 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
   }
   const controller = new BrowserSettingsController(fakeScope({ value, user: value, base: options.base ?? {}, writable: options.writable ?? true }) as never, () => options.promptDefaults as never)
   const injected = controller.inject()
+  injected.setPropertyLanguage(options.locale ?? 'en')
   if (options.propertiesText !== undefined) injected.editProperties(options.propertiesText)
   const settings = controller.snapshot()
   const assets = {

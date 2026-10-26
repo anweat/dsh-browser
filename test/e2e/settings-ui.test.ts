@@ -60,7 +60,7 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
     const open = async (group: string) => { await page.locator(`[data-dsb-group="${group}"] > summary`).click() }
     const writes = (): Promise<{ ops: { op: string; path: string[]; value?: unknown }[] }[]> => page.evaluate(() => JSON.parse(JSON.stringify((window as any).__scope.writes)))
     const unsaved = () => page.locator('[data-dsb-unsaved]').innerText()
-    const save = async () => { await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.waitForFunction(() => (window as any).__scope.writes.length > 0) }
+    const save = async () => { await page.getByRole('button', { name: init.locale === 'zh' ? '保存' : 'Save', exact: true }).click(); await page.waitForFunction(() => (window as any).__scope.writes.length > 0) }
     return { page, errors, open, writes, unsaved, save }
   }
 
@@ -266,6 +266,31 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
     await entry.getByRole('button', { name: 'Edit' }).click()
     await page.getByRole('dialog', { name: /Edit entry: act\.click/ }).getByRole('button', { name: 'Remove override' }).click()
     assert.equal(await page.locator('[data-dsb-item="actions:act.click"]').count(), 0)
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  it('text mode: the text is a view of the controls (comments in front of every key, in the card\'s language) and typing in it stages the same fields', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const { page, errors, open, writes, unsaved, save } = await openCard({ value: { maxSessions: 8, channel: 'chromium' }, user: { maxSessions: 8 }, locale: 'zh' })
+    await open('advanced')
+    const box = page.locator('#plugin-config-dsh-browser-properties')
+    const text = async () => await box.inputValue()
+    assert.match(await text(), /# 同时持有页面的会话数，1–64；超出时关闭最久未使用的。默认 8\nmaxSessions = 8\n/)
+    assert.match(await text(), /# 视口：window = 浏览器默认[^\n]*\n# viewportMode = window\n/)
+    // A control edit prints the text again.
+    await open('browser')
+    await page.locator('#plugin-config-dsh-browser-channel').selectOption('chrome')
+    assert.match(await text(), /\nchannel = chrome\n/)
+    // Typing in the text stages the fields: a changed value, a deleted line (back to the default), a comment line that is not data.
+    await box.fill((await text()).replace('maxSessions = 8', 'maxSessions = 3').replace('channel = chrome', '# channel = chromium'))
+    assert.match(await unsaved(), /1 项未保存/, 'one field is staged: maxSessions (the channel went back to what is stored)')
+    await save()
+    assert.deepEqual((await writes())[0]!.ops, [{ op: 'set', path: ['maxSessions'], value: 3 }])
+    // A broken line is reported with its line number and blocks the save.
+    await box.fill('not a setting line')
+    assert.match(await page.locator('[data-dsh-browser-properties-errors]').innerText(), /^第 ?1 ?行|line 1/)
+    assert.equal(await page.getByRole('button', { name: '保存', exact: true }).isDisabled(), true)
     assert.deepEqual(errors, [])
     await page.close()
   })

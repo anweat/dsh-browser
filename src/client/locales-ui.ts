@@ -22,7 +22,7 @@ export const zhUi = {
   groupAccess: '登录与权限', groupAccessSub: '登录态 profile、默认 profile、内网域名、策略覆盖层',
   groupLimits: '使用限流', groupLimitsSub: '并发、突发、爬取预算与退避；自动化资产的阈值',
   groupPrompts: '提示词', groupPromptsSub: '模型看到的工具描述与指南；默认文本与你的覆盖对照',
-  groupAssets: '自动化资产', groupAssetsSub: '可复用的 recipe 与脚本（实验性）',
+  assetNewTitle: '新建草稿', groupAssets: '自动化资产', groupAssetsSub: '可复用的 recipe 与脚本（实验性）',
   groupAdvanced: '高级：文本模式', groupAdvancedSub: '把默认参数当作带注释的 properties 文本查看与编辑',
   // common
   enabled: '启用浏览器服务', enabledHint: '关闭后 agent 不再有浏览器工具。',
@@ -100,7 +100,7 @@ export const enUi: Record<keyof typeof zhUi, string> = {
   groupAccess: 'Sign-in and permissions', groupAccessSub: 'Login profiles, default profile, private hosts, policy overlay',
   groupLimits: 'Usage limits', groupLimitsSub: 'Concurrency, bursts, crawl budget and backoff; asset thresholds',
   groupPrompts: 'Prompts', groupPromptsSub: 'Tool descriptions and guides the model reads; default text beside your override',
-  groupAssets: 'Automation assets', groupAssetsSub: 'Reusable recipes and scripts (experimental)',
+  assetNewTitle: 'New draft', groupAssets: 'Automation assets', groupAssetsSub: 'Reusable recipes and scripts (experimental)',
   groupAdvanced: 'Advanced: text mode', groupAdvancedSub: 'The default parameters as a commented properties text',
   enabled: 'Enable browser service', enabledHint: 'Off: the agent has no browser tools.',
   automationMode: 'Automation mode', automationModeHint: 'What the agent may do and what needs your approval.',

@@ -31,6 +31,8 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   discard: () => void
   /** The default-parameters editor (one `key = value` text over the plugin-wide defaults). */
   editProperties: (text: string) => void
+  /** The language of the comments in the advanced text (`zh` or `en`). */
+  setPropertyLanguage: (lang: string) => void
   resetProperty: (key: string) => void
   // The "prompt text" section: views of the one staged `prompts` draft.
   editPromptText: (id: PromptTextFieldId, text: string) => void

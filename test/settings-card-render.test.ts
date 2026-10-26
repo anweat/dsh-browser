@@ -222,7 +222,11 @@ test('the default-parameters editor lists line-level problems with the line numb
   assert.doesNotMatch(clean.html, /data-dsh-browser-properties-errors/)
   assert.match(clean.html, /proxyServer = http:\/\/127\.0\.0\.1:7890/)
   assert.match(clean.html, /# userAgent =/)
-  assert.match(clean.html, /data-dsh-browser-properties-overridden/)
+  // Every key is preceded by its comment, in the card's language.
+  const propertiesOf = (html: string) => (/<textarea[^>]*id="plugin-config-dsh-browser-properties"[^>]*>([\s\S]*?)<\/textarea>/.exec(html)?.[1] ?? '').replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&')
+  assert.match(propertiesOf(clean.html), /# Proxy such as http:\/\/127\.0\.0\.1:7890[^\n]*\nproxyServer = http:\/\/127\.0\.0\.1:7890\n/)
+  const zh = renderCard!({ locale: 'zh', fieldTexts: { viewportMode: 'custom' } })
+  assert.match(propertiesOf(zh.html), /# 视口：window = 浏览器默认 \| 720p（1280x720）[^\n]*默认 window\nviewportMode = custom\n/)
 })
 
 test('configuration warnings of the running plugin are counted in the status summary (the list itself is in its dialog)', (t) => {

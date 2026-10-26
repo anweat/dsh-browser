@@ -132,3 +132,31 @@ test('checkProperties: value errors carry their line; a custom viewport needs bo
   const bare = checkProperties(parseProperties(''), key => key === 'viewportMode' ? 'custom' : '')
   assert.deepEqual(bare.map(issue => issue.key).sort(), ['viewportHeight', 'viewportWidth'])
 })
+
+test('the printed text comments every key in both languages, and the comments are never data', async () => {
+  const { propertyDocs } = await import('../src/client/property-docs.ts')
+  const keys = PROPERTY_FIELDS.map(entry => entry.key)
+  for (const lang of ['en', 'zh'] as const) {
+    const docs = propertyDocs(lang)
+    assert.deepEqual(Object.keys(docs.key).toSorted(), keys.toSorted(), `${lang}: one comment per default parameter, no stray one`)
+    for (const group of ['runtime', 'context', 'files']) assert.ok(docs.group[group], `${lang}: group ${group}`)
+    for (const key of keys) assert.match(docs.key[key]!, /(Default|默认)/, `${lang}: the comment of ${key} says its default`)
+    const views = keys.map((key, index) => ({ key, text: index % 3 === 0 ? `value${index}` : '', overridden: index % 3 === 0 }))
+    const text = serializeProperties(views, docs)
+    const lines = text.split('\n').filter(line => line.trim() !== '')
+    // Every line is a comment or a `key = value` line (possibly a commented one), and each key line is right under its comment.
+    for (const [index, line] of lines.entries()) {
+      if (line.startsWith('#')) continue
+      assert.match(line, /^[A-Za-z]+ = /, `${lang}: ${line}`)
+      assert.ok(lines[index - 1]!.startsWith('# ') && lines[index - 1]!.includes(docs.key[line.split(' ')[0]!]!), `${lang}: ${line} follows its comment`)
+    }
+    for (const key of keys) assert.ok(new RegExp(`^(# )?${key} =`, 'm').test(text), `${lang}: ${key} is printed`)
+    // Parsing ignores every comment: the values are exactly the overridden keys, nothing from the explanations.
+    const parsed = parseProperties(text)
+    assert.deepEqual([...parsed.values.keys()], views.filter(view => view.overridden).map(view => view.key))
+    assert.deepEqual(parsed.issues, [], `${lang}: a comment is not a problem`)
+    // Print, parse, print again from what was parsed: no key is lost.
+    const again = serializeProperties(keys.map(key => ({ key, text: parsed.values.get(key)?.value ?? '', overridden: parsed.values.has(key) })), docs)
+    assert.equal(again, text)
+  }
+})
