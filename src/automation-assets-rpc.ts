@@ -121,6 +121,15 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
           case 'prompts': value = promptsStatus ? promptsStatus() : null; break
           // The policy overlay (see policy-overlay.ts): what the settings card's overlay section shows and clears.
           case 'policy': value = service.policyReport({ auditLimit: 20 }); break
+          // Which browser a launch would use and whether OpenCLI is installed: the card's "runtime" notices. Read-only, launches nothing.
+          case 'runtime': {
+            const status = await service.status()
+            value = {
+              browser: status.browser, systemBrowsers: status.systemBrowsers, chromiumInstalled: status.chromiumInstalled,
+              opencli: { enabled: status.opencliEnabled, installed: status.opencliInstalled, ...status.opencliSource ? { source: status.opencliSource } : {}, ...status.opencliInstallHint ? { hint: status.opencliInstallHint } : {} },
+            }
+            break
+          }
           case 'policyReset': {
             const scope = payload.scope
             if (scope !== 'all' && scope !== 'usagePolicy' && scope !== 'authProfile') throw new Error('scope must be all, usagePolicy or authProfile')

@@ -44,13 +44,15 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
   })
   after(async () => { await uiBrowser?.close() })
 
+  const RUNTIME_OK = { browser: { ready: true, source: 'playwright-chromium' }, systemBrowsers: [], chromiumInstalled: true, opencli: { enabled: true, installed: true, source: 'path' } }
+
   /** A card over these stored values (all of them in the user layer unless `user` says otherwise). */
-  async function openCard(init: { value?: Record<string, unknown>; user?: Record<string, unknown>; base?: Record<string, unknown>; locale?: 'en' | 'zh'; accept?: boolean; writable?: boolean } = {}, width = 1100) {
+  async function openCard(init: { value?: Record<string, unknown>; user?: Record<string, unknown>; base?: Record<string, unknown>; locale?: 'en' | 'zh'; accept?: boolean; writable?: boolean; runtime?: unknown } = {}, width = 1100) {
     const page = await uiBrowser.newPage({ viewport: { width, height: 1000 } })
     const errors: string[] = []
     page.on('pageerror', (error: Error) => errors.push(error.message))
     await page.exposeFunction('__rpc', async (endpoint: string) => {
-      const reply = endpoint === 'policy' ? POLICY : endpoint === 'prompts' ? PROMPTS_REPORT : endpoint === 'snapshot' ? { policy: {}, candidates: [], assets: [] } : endpoint === 'promptsDefaults' ? { json: promptsDumpText() } : endpoint === 'promptsDefaultsYaml' ? { yaml: promptsDumpYaml('en') } : {}
+      const reply = endpoint === 'policy' ? POLICY : endpoint === 'prompts' ? PROMPTS_REPORT : endpoint === 'snapshot' ? { policy: {}, candidates: [], assets: [] } : endpoint === 'promptsDefaults' ? { json: promptsDumpText() } : endpoint === 'promptsDefaultsYaml' ? { yaml: promptsDumpYaml('en') } : endpoint === 'runtime' ? (init.runtime ?? RUNTIME_OK) : {}
       return JSON.stringify({ ok: true, value: reply })
     })
     await page.setContent('<!doctype html><title>settings ui</title><div id="root"></div>')
@@ -334,4 +336,25 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
     assert.deepEqual(errors, [])
     await page.close()
   })
+
+  it('the runtime notices: no browser is a warning with the steps, a system Chrome and a missing OpenCLI are notices in the same dialog', async (t) => {
+    if ('skip' in bundled) return t.skip(bundled.skip)
+    const none = await openCard({ runtime: { ...RUNTIME_OK, browser: { ready: false, source: 'none', installAdvice: 'No browser is available to launch. Do one of: (1) install Google Chrome or Microsoft Edge; (2) run the runtime.install action.' }, chromiumInstalled: false } })
+    await none.page.locator('[data-dsb-summary]').getByText('No browser available').waitFor()
+    assert.equal(await none.page.locator('[data-dsb-warnings-count]').getAttribute('data-dsb-warnings-count'), '1')
+    await none.page.locator('[data-dsb-warnings-count]').click()
+    assert.match(await none.page.locator('[data-dsb-runtime-warning]').innerText(), /install Google Chrome or Microsoft Edge[\s\S]*runtime\.install/)
+    assert.deepEqual(none.errors, [])
+
+    const quiet = await openCard({ value: { opencliEnabled: true }, runtime: { ...RUNTIME_OK, browser: { ready: true, source: 'system-browser', note: 'Playwright Chromium is not installed, so Google Chrome is used (nothing to download).' }, chromiumInstalled: false, opencli: { enabled: true, installed: false, hint: 'OpenCLI is not installed (optional). Install it with `npm i -g @jackwener/opencli`.' } } })
+    await quiet.page.locator('[data-dsb-summary]').getByText('OpenCLI not installed').waitFor()
+    assert.equal(await quiet.page.locator('[data-dsb-warnings-count]').getAttribute('data-dsb-warnings-count'), '0')
+    await quiet.page.locator('[data-dsb-summary]').getByText('Browser: system Chrome / Edge').waitFor()
+    await quiet.page.locator('[data-dsb-warnings-count]').click()
+    const notices = await quiet.page.locator('[data-dsb-runtime-notices]').innerText()
+    assert.match(notices, /Google Chrome is used/)
+    assert.match(notices, /npm i -g @jackwener\/opencli/)
+    assert.deepEqual(quiet.errors, [])
+  })
+
 })

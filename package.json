@@ -1,7 +1,7 @@
 {
   "name": "@anweat/dsh-browser",
   "version": "0.2.2",
-  "description": "Self-contained browser runtime plugin for DeepSeek Harness (scoped @anweat) — bundles Playwright (chromium) and OpenCLI as plugin-local dependencies (with global-reuse fallback), exposes a `browser` service and interactive browser tools.",
+  "description": "Browser runtime plugin for DeepSeek Harness (scoped @anweat) — ships Playwright and Patchright, uses your system Chrome / Edge (or a Playwright Chromium you install), optionally drives OpenCLI site adapters, exposes a `browser` service and interactive browser tools.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -55,7 +55,8 @@
     "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0",
     "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0",
     "@deepseek-ai/dsh-settings": ">=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0",
-    "@deepseek-ai/schemastery": ">=3.18.2 <4"
+    "@deepseek-ai/schemastery": ">=3.18.2 <4",
+    "@jackwener/opencli": ">=1.8.0 <2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -93,10 +94,12 @@
     },
     "@deepseek-ai/schemastery": {
       "optional": true
+    },
+    "@jackwener/opencli": {
+      "optional": true
     }
   },
   "dependencies": {
-    "@jackwener/opencli": "^1.8.7",
     "patchright": "^1.62.1",
     "playwright": "^1.60.0"
   },
@@ -128,7 +131,8 @@
     "@deepseek-ai/dsh-client-ui-primitives": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-plugin-manager": "0.2.1-rc.3",
     "clsx": "^2.0.0",
-    "@deepseek-ai/dsh-working-directory": "0.2.1-rc.3"
+    "@deepseek-ai/dsh-working-directory": "0.2.1-rc.3",
+    "@jackwener/opencli": "^1.8.7"
   },
   "dsh": {
     "client": {

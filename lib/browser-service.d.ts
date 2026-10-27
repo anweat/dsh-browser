@@ -8,7 +8,7 @@
  * - render / snapshot / searchResults are the drop-in replacements for
  *   web-search-pro's former PlaywrightManager (rules-aware page extraction and
  *   platform search-page list extraction run in the page itself).
- * - opencli(...) runs the bundled @jackwener/opencli (no global CLI).
+ * - opencli(...) runs @jackwener/opencli when it is installed (optional, see deps.ts).
  * - The interactive surface (open/click/type/hover/setFiles/evaluate/scroll/read/screenshot/closePage)
  *   drives ONE persistent context+page, giving the model multi-step browsing.
  *
@@ -18,7 +18,8 @@
  * doubled (\\s) so the evaluated page code sees a correct \s.
  * @module dsh-browser/browser-service
  */
-import { type CliResult } from './deps.ts';
+import { type CliResult, type OpencliSource } from './deps.ts';
+import { type BrowserPlan, type SystemBrowser } from './system-browser.ts';
 import type { ResolvedConfig } from './config.ts';
 import { type ResolvedAuthProfile } from './auth-profiles.ts';
 import { type ResolvedRulePack } from './rule-packs.ts';
@@ -188,6 +189,10 @@ export interface BrowserStatus {
     opencliEnabled: boolean;
     opencliInstalled: boolean;
     opencliEntryPath?: string;
+    /** Where OpenCLI was found (`plugin`, `path`, `global-npm`, ...). Absent when it is not installed. */
+    opencliSource?: OpencliSource;
+    /** Present while OpenCLI is enabled but not installed: how to install it. OpenCLI is optional; this is not a warning. */
+    opencliInstallHint?: string;
     automationMode: AutomationMode;
     /** Tool names registered for the model under the configured toolSurface. */
     exposedTools: string[];
@@ -207,6 +212,23 @@ export interface BrowserStatus {
     opencliRunPolicy: 'deny' | 'ask' | 'allow';
     chromiumInstalled: boolean;
     chromiumExecutablePath?: string;
+    /**
+     * The browser a launch will use, decided without launching one. `ready: false` means nothing can be launched yet and
+     * `installAdvice` says what to do; `source: system-browser` means the Playwright Chromium is missing and Chrome / Edge is used instead.
+     */
+    browser: {
+        ready: boolean;
+        source: BrowserPlan['source'];
+        path?: string;
+        note?: string;
+        installAdvice?: string;
+    };
+    /** System Chrome / Edge found on this machine (what the automatic fallback can use). */
+    systemBrowsers: {
+        channel: string;
+        name: string;
+        path: string;
+    }[];
     usagePolicy: ResolvedConfig['usagePolicy'];
     usageGovernor: ReturnType<UsageGovernor['snapshot']>;
     authProfiles: {
@@ -312,6 +334,7 @@ export interface SessionIdentity {
 }
 export declare class BrowserService {
     private readonly config;
+    private readonly probe;
     private browser;
     private launching?;
     /** Per-session interactive state. Replaces the former global activePage. */
@@ -328,7 +351,14 @@ export declare class BrowserService {
     private readonly journals;
     /** How many sessions may hold a context+page at once before LRU eviction. */
     private readonly sessionLimit;
-    constructor(config: ResolvedConfig);
+    /**
+     * `probe` replaces what the service reads from the machine (system browsers, file existence); tests use it, the
+     * plugin never passes it.
+     */
+    constructor(config: ResolvedConfig, probe?: {
+        systemBrowsers?: () => SystemBrowser[];
+        exists?: (file: string) => boolean;
+    });
     available(): boolean;
     /** Pick up an overlay file that changed on disk (another process, the panel). Cheap: one stat. */
     private refreshPolicy;
@@ -416,6 +446,11 @@ export declare class BrowserService {
     private handleBrowserDisconnected;
     private trackBrowser;
     private ensure;
+    private systemBrowsers;
+    /** What a launch would use right now. `pw` is the loaded runtime; without it (not installed) the Playwright Chromium path is unknown. */
+    private browserPlan;
+    /** The message for a launch that found no browser. Says which setting was wrong when the user chose one. */
+    private launchFailure;
     /** Run `playwright install chromium` from the bundled playwright CLI. */
     installChromium(): Promise<CliResult>;
     private navigate;

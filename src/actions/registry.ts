@@ -34,7 +34,7 @@ export const GROUP_SUMMARIES: Record<ActionGroup, string> = {
   script: 'page JavaScript, built-in scripts, userscripts',
   automation: 'search/run reusable assets, develop drafts, inline recipes',
   crawl: 'bounded multi-page crawl',
-  opencli: 'bundled OpenCLI site adapters',
+  opencli: 'OpenCLI site adapters',
 }
 
 /**

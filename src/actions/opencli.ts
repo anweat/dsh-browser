@@ -1,4 +1,4 @@
-/** `opencli` group: bundled OpenCLI adapters. @module dsh-browser/actions/opencli */
+/** `opencli` group: OpenCLI adapters (OpenCLI is optional and installed separately). @module dsh-browser/actions/opencli */
 
 import type { ActionDef } from './types.ts'
 
@@ -6,7 +6,7 @@ export const OPENCLI_ACTIONS: ActionDef[] = [
   {
     name: 'opencli.status',
     group: 'opencli',
-    summary: 'Run bundled OpenCLI doctor: daemon, extension, profile, and Browser Bridge connectivity.',
+    summary: 'Run OpenCLI doctor: daemon, extension, profile, and Browser Bridge connectivity.',
     params: {},
     approval: 'none', readOnly: true, mutating: false, concurrencySafe: true, timeoutMs: 45_000,
     examples: [{ args: {} }],
@@ -18,7 +18,7 @@ export const OPENCLI_ACTIONS: ActionDef[] = [
   {
     name: 'opencli.catalog',
     group: 'opencli',
-    summary: 'Discover bundled OpenCLI adapters through a filtered, capped catalog (command, access class, strategy, args).',
+    summary: 'Discover OpenCLI adapters through a filtered, capped catalog (command, access class, strategy, args).',
     notes: 'Use before opencli.run to find exact command names.',
     params: {
       query: { type: 'string' }, site: { type: 'string' },
@@ -35,7 +35,7 @@ export const OPENCLI_ACTIONS: ActionDef[] = [
   {
     name: 'opencli.run',
     group: 'opencli',
-    summary: 'Run any bundled OpenCLI adapter or browser-session command with verbatim argv.',
+    summary: 'Run any OpenCLI adapter or browser-session command with verbatim argv.',
     notes: 'Commands may reuse logged-in Chrome state or perform writes, so approval is skipped only in unrestricted mode. Prefer existing read-only actions when available.',
     params: {
       args: { type: 'array', required: true, items: { type: 'string' }, description: 'Arguments after opencli, e.g. ["reddit","search","dsh","-f","json"].' },

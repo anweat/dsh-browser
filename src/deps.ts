@@ -2,10 +2,12 @@
  * Dependency resolution for dsh-browser, with reuse fallback.
  *
  * Resolution order (per dependency):
- *   1. THIS plugin's own node_modules — self-contained when distributed
- *      (playwright / @jackwener/opencli are declared in package.json).
+ *   1. THIS plugin's own node_modules — playwright / patchright are declared in package.json.
  *   2. The global npm root — reuse what's already installed on the machine,
  *      so a dev box needs zero extra install.
+ *
+ * `@jackwener/opencli` is NOT declared: its install script makes pnpm 11 fail `dsh plugin add`. It is found
+ * wherever it is installed (see `locateOpencli`) and is only needed by the `opencli.*` actions.
  *
  * The Playwright BROWSER BINARY (chromium) is NOT bundled here and NOT
  * re-downloaded: playwright loads it from its shared cache (Windows:
@@ -131,12 +133,203 @@ export function browserRuntimeCliPath(runtime: BrowserRuntimeName): string {
   return path.join(pkgDir(browserRuntimePackage(runtime)), 'cli.js')
 }
 
-/** Entry JS for the bundled/reused @jackwener/opencli (its bin/main). */
+/** Where `@jackwener/opencli` was found. */
+export type OpencliSource = 'env' | 'plugin' | 'path' | 'global-npm' | 'common-prefix'
+
+export interface OpencliLocation {
+  /** The JavaScript entry (`bin.opencli` of its package.json). Run with Node. */
+  entry: string
+  /** The package directory. */
+  packageDir: string
+  source: OpencliSource
+}
+
+/**
+ * What to tell a user whose machine has no OpenCLI. OpenCLI is optional: the browser tools never need it, only the
+ * `opencli.*` actions do. It is NOT a dependency of this package, because its install scripts make pnpm 11 fail
+ * `dsh plugin add` (ERR_PNPM_IGNORED_BUILDS) on a profile that has not approved them.
+ */
+export const OPENCLI_INSTALL_HINT = 'OpenCLI is not installed (it is optional: only the opencli.* actions need it). Install it with `npm i -g @jackwener/opencli` and restart DSH. '
+  + 'If DSH cannot see your PATH (desktop app), set DSH_BROWSER_OPENCLI to the path of its main.js.'
+
+/** Everything `locateOpencli` reads from the machine, so a test can describe a machine instead of owning one. */
+export interface OpencliSearchEnv {
+  platform: NodeJS.Platform
+  env: NodeJS.ProcessEnv
+  home: string
+  /** package.json files of the dependency, in the order the plugin's own resolution finds them. */
+  pluginPackageJsons: () => string[]
+  /** `npm root -g`, or undefined when npm cannot be run. */
+  npmGlobalRoot: () => string | undefined
+}
+
+const OPENCLI_PACKAGE = '@jackwener/opencli'
+
+/** Read `bin.opencli` (or `main`) of an opencli package directory and return its existing entry file. */
+function opencliEntryOf(packageDir: string): string | undefined {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'))
+    if (pkg?.name !== OPENCLI_PACKAGE) return undefined
+    const bin = typeof pkg.bin === 'string' ? pkg.bin : (pkg.bin?.opencli ?? pkg.main ?? 'dist/src/main.js')
+    const entry = path.join(packageDir, bin)
+    return fs.existsSync(entry) ? entry : undefined
+  } catch { return undefined }
+}
+
+/** The opencli package directory a `main.js` / launcher path belongs to: walk up to the nearest package.json named for it. */
+function opencliPackageDirOf(file: string): string | undefined {
+  let dir = path.dirname(file)
+  for (let i = 0; i < 8; i++) {
+    if (opencliEntryOf(dir)) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) return undefined
+    dir = parent
+  }
+  return undefined
+}
+
+/** `DSH_BROWSER_OPENCLI` may name the package directory, its main.js, or the `opencli` launcher. */
+function opencliFromPath(target: string): OpencliLocation | undefined {
+  let resolved: string
+  try { resolved = fs.realpathSync(target) } catch { return undefined }
+  let stat: fs.Stats
+  try { stat = fs.statSync(resolved) } catch { return undefined }
+  const packageDir = stat.isDirectory() ? (opencliEntryOf(resolved) ? resolved : undefined) : opencliPackageDirOf(resolved)
+  const entry = packageDir ? opencliEntryOf(packageDir) : undefined
+  return packageDir && entry ? { entry, packageDir, source: 'env' } : undefined
+}
+
+/** Launchers named `opencli` on PATH: a symlink into the package on Unix, a `.cmd` shim next to `node_modules` on Windows. */
+function opencliFromPathVariable(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): OpencliLocation | undefined {
+  const delimiter = platform === 'win32' ? ';' : ':'
+  const names = platform === 'win32' ? ['opencli.cmd', 'opencli.exe', 'opencli'] : ['opencli']
+  for (const raw of (env.PATH ?? env.Path ?? env.path ?? '').split(delimiter)) {
+    const dir = raw.trim().replace(/^"|"$/g, '')
+    if (!dir) continue
+    for (const name of names) {
+      const launcher = path.join(dir, name)
+      if (!fs.existsSync(launcher)) continue
+      // Unix: the launcher is a symlink to <package>/dist/src/main.js. Windows: the npm shim sits beside node_modules.
+      const viaLink = opencliPackageDirOf(safeRealpath(launcher) ?? launcher)
+      const packageDir = viaLink ?? (opencliEntryOf(path.join(dir, 'node_modules', OPENCLI_PACKAGE)) ? path.join(dir, 'node_modules', OPENCLI_PACKAGE) : undefined)
+      const entry = packageDir ? opencliEntryOf(packageDir) : undefined
+      if (packageDir && entry) return { entry, packageDir, source: 'path' }
+    }
+  }
+  return undefined
+}
+
+function safeRealpath(file: string): string | undefined {
+  try { return fs.realpathSync(file) } catch { return undefined }
+}
+
+/** Global `node_modules` directories a desktop app (which does not inherit the shell's PATH) is likely to need. */
+function commonGlobalRoots(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, home: string): string[] {
+  const roots: string[] = []
+  const prefix = env.npm_config_prefix ?? env.NPM_CONFIG_PREFIX
+  if (prefix) roots.push(platform === 'win32' ? path.join(prefix, 'node_modules') : path.join(prefix, 'lib', 'node_modules'))
+  if (platform === 'win32') {
+    if (env.APPDATA) roots.push(path.join(env.APPDATA, 'npm', 'node_modules'))
+    return roots
+  }
+  roots.push('/opt/homebrew/lib/node_modules', '/usr/local/lib/node_modules', '/usr/lib/node_modules',
+    path.join(home, '.npm-global', 'lib', 'node_modules'), path.join(home, '.local', 'lib', 'node_modules'),
+    path.join(home, '.bun', 'install', 'global', 'node_modules'), path.join(home, '.volta', 'tools', 'image', 'packages', 'opencli', 'lib', 'node_modules'))
+  // Version managers keep one global root per Node version: take them all, newest directory name first.
+  const managed: string[] = [path.join(home, '.nvm', 'versions', 'node'), path.join(home, '.local', 'share', 'fnm', 'node-versions'), path.join(home, 'Library', 'Application Support', 'fnm', 'node-versions'), path.join(home, '.fnm', 'node-versions')]
+  for (const base of managed) {
+    let versions: string[]
+    try { versions = fs.readdirSync(base).sort().reverse() } catch { continue }
+    for (const version of versions) {
+      roots.push(path.join(base, version, 'lib', 'node_modules'), path.join(base, version, 'installation', 'lib', 'node_modules'))
+    }
+  }
+  return roots
+}
+
+/**
+ * Find OpenCLI without requiring it to be a dependency of the plugin. Order: `DSH_BROWSER_OPENCLI`, the plugin's own
+ * resolution (pnpm store, plugin-local, an `@jackwener/opencli` the user added to the profile), an `opencli` launcher on PATH,
+ * `npm root -g`, and the usual global locations. The first hit wins. Pure apart from reading the file system.
+ */
+export function locateOpencli(search: OpencliSearchEnv): OpencliLocation | undefined {
+  const override = search.env.DSH_BROWSER_OPENCLI?.trim()
+  if (override) {
+    const found = opencliFromPath(override)
+    if (found) return found
+    // An explicit override that does not resolve is reported by the caller; do not silently use another copy.
+    return undefined
+  }
+  for (const pkgJson of search.pluginPackageJsons()) {
+    const packageDir = path.dirname(pkgJson)
+    const entry = opencliEntryOf(packageDir)
+    if (entry) return { entry, packageDir, source: 'plugin' }
+  }
+  const viaPath = opencliFromPathVariable(search.env, search.platform)
+  if (viaPath) return viaPath
+  const globalRoot = search.npmGlobalRoot()
+  if (globalRoot) {
+    const packageDir = path.join(globalRoot, OPENCLI_PACKAGE)
+    const entry = opencliEntryOf(packageDir)
+    if (entry) return { entry, packageDir, source: 'global-npm' }
+  }
+  for (const root of commonGlobalRoots(search.env, search.platform, search.home)) {
+    const packageDir = path.join(root, OPENCLI_PACKAGE)
+    const entry = opencliEntryOf(packageDir)
+    if (entry) return { entry, packageDir, source: 'common-prefix' }
+  }
+  return undefined
+}
+
+/** The plugin's own copies of opencli: pnpm's virtual store, then module resolution from the plugin root (the profile's hoisted node_modules). */
+function pluginOpencliPackageJsons(): string[] {
+  const found: string[] = []
+  const store = pnpmStorePackageJson(OPENCLI_PACKAGE)
+  if (store) found.push(store)
+  const req = createRequire(path.join(PLUGIN_ROOT, 'package.json'))
+  try { found.push(req.resolve(OPENCLI_PACKAGE + '/package.json')) } catch { /* exports-restricted or absent */ }
+  try { const root = findPackageRoot(req.resolve(OPENCLI_PACKAGE)); if (root) found.push(root) } catch { /* absent */ }
+  return found
+}
+
+let npmRootAsked = false
+let npmRootValue: string | undefined
+/** `npm root -g`, asked once per process (a spawn per status call would be slow), without the bogus Windows fallback when APPDATA is not set. */
+function npmGlobalRootOrUndefined(): string | undefined {
+  if (npmRootAsked) return npmRootValue
+  npmRootAsked = true
+  try {
+    const root = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', windowsHide: true, timeout: 15000 }).trim()
+    if (root) npmRootValue = root
+  } catch { /* npm is not on PATH (a desktop app launched from the Dock has a minimal one) */ }
+  if (!npmRootValue && process.platform === 'win32' && process.env.APPDATA) npmRootValue = path.join(process.env.APPDATA, 'npm', 'node_modules')
+  return npmRootValue
+}
+
+let cachedOpencli: { key: string; location: OpencliLocation } | undefined
+/** Find OpenCLI on this machine. A hit is remembered while its files exist; a miss is looked up again (the user may install it while DSH runs). */
+export function opencliLocation(): OpencliLocation | undefined {
+  const key = process.env.DSH_BROWSER_OPENCLI?.trim() ?? ''
+  if (cachedOpencli && cachedOpencli.key === key && fs.existsSync(cachedOpencli.location.entry)) return cachedOpencli.location
+  const location = locateOpencli({
+    platform: process.platform,
+    env: process.env,
+    home: process.env.HOME ?? process.env.USERPROFILE ?? '',
+    pluginPackageJsons: pluginOpencliPackageJsons,
+    npmGlobalRoot: npmGlobalRootOrUndefined,
+  })
+  cachedOpencli = location ? { key, location } : undefined
+  return location
+}
+
+/** Entry JS of OpenCLI (its bin/main). Throws the install hint when OpenCLI is not installed. */
 export function opencliEntryPath(): string {
-  const dir = pkgDir('@jackwener/opencli')
-  const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
-  const bin = typeof pkg.bin === 'string' ? pkg.bin : (pkg.bin?.opencli ?? pkg.main ?? 'dist/src/main.js')
-  return path.join(dir, bin)
+  const location = opencliLocation()
+  if (!location) {
+    const override = process.env.DSH_BROWSER_OPENCLI?.trim()
+    throw new Error(override ? `DSH_BROWSER_OPENCLI=${override} is not an OpenCLI package directory, main.js or launcher. ${OPENCLI_INSTALL_HINT}` : OPENCLI_INSTALL_HINT)
+  }
+  return location.entry
 }
 
 /** Electron's process.execPath points to the desktop app, not a Node CLI. */
@@ -160,7 +353,7 @@ function nodeExecutable(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 /**
- * Run a Node.js script with piped stdio capture (bundled opencli / playwright
+ * Run a Node.js script with piped stdio capture (opencli / playwright
  * CLI). Mirrors web-search-pro's runCli contract.
  */
 export function runNode(
@@ -217,7 +410,7 @@ export function runNode(
   })
 }
 
-/** Run opencli (bundled or global-reuse). */
+/** Run opencli (found by `opencliLocation`). */
 export function runOpencli(
   args: string[],
   opts: { timeoutMs?: number; signal: AbortSignal | undefined; maxOutput?: number } = { signal: undefined },

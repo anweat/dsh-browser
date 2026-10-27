@@ -8,7 +8,7 @@
  * - render / snapshot / searchResults are the drop-in replacements for
  *   web-search-pro's former PlaywrightManager (rules-aware page extraction and
  *   platform search-page list extraction run in the page itself).
- * - opencli(...) runs the bundled @jackwener/opencli (no global CLI).
+ * - opencli(...) runs @jackwener/opencli when it is installed (optional, see deps.ts).
  * - The interactive surface (open/click/type/hover/setFiles/evaluate/scroll/read/screenshot/closePage)
  *   drives ONE persistent context+page, giving the model multi-step browsing.
  *
@@ -22,7 +22,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { browserRuntimeCliPath, loadBrowserRuntime, opencliEntryPath, runOpencli, runNode, type CliResult } from './deps.ts'
+import { browserRuntimeCliPath, loadBrowserRuntime, opencliLocation, OPENCLI_INSTALL_HINT, runOpencli, runNode, type CliResult, type OpencliSource } from './deps.ts'
+import { browserInstallAdvice, detectSystemBrowsers, planBrowser, type BrowserPlan, type SystemBrowser } from './system-browser.ts'
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
@@ -216,6 +217,10 @@ export interface BrowserStatus {
   opencliEnabled: boolean
   opencliInstalled: boolean
   opencliEntryPath?: string
+  /** Where OpenCLI was found (`plugin`, `path`, `global-npm`, ...). Absent when it is not installed. */
+  opencliSource?: OpencliSource
+  /** Present while OpenCLI is enabled but not installed: how to install it. OpenCLI is optional; this is not a warning. */
+  opencliInstallHint?: string
   automationMode: AutomationMode
   /** Tool names registered for the model under the configured toolSurface. */
   exposedTools: string[]
@@ -235,6 +240,19 @@ export interface BrowserStatus {
   opencliRunPolicy: 'deny' | 'ask' | 'allow'
   chromiumInstalled: boolean
   chromiumExecutablePath?: string
+  /**
+   * The browser a launch will use, decided without launching one. `ready: false` means nothing can be launched yet and
+   * `installAdvice` says what to do; `source: system-browser` means the Playwright Chromium is missing and Chrome / Edge is used instead.
+   */
+  browser: {
+    ready: boolean
+    source: BrowserPlan['source']
+    path?: string
+    note?: string
+    installAdvice?: string
+  }
+  /** System Chrome / Edge found on this machine (what the automatic fallback can use). */
+  systemBrowsers: { channel: string; name: string; path: string }[]
   usagePolicy: ResolvedConfig['usagePolicy']
   usageGovernor: ReturnType<UsageGovernor['snapshot']>
   authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]
@@ -501,7 +519,11 @@ export class BrowserService {
   /** How many sessions may hold a context+page at once before LRU eviction. */
   private readonly sessionLimit: number
 
-  constructor(private readonly config: ResolvedConfig) {
+  /**
+   * `probe` replaces what the service reads from the machine (system browsers, file existence); tests use it, the
+   * plugin never passes it.
+   */
+  constructor(private readonly config: ResolvedConfig, private readonly probe: { systemBrowsers?: () => SystemBrowser[]; exists?: (file: string) => boolean } = {}) {
     this.policyStore = new PolicyOverlayStore({
       file: config.policyOverlayFile,
       authDir: config.authDir,
@@ -776,9 +798,8 @@ export class BrowserService {
     if (!this.launching) {
       this.launching = (async () => {
         const pw = loadBrowserRuntime(this.config.browserRuntime)
-        const launchOptions: Record<string, unknown> = { headless: this.config.headless }
-        if (this.config.channel) launchOptions.channel = this.config.channel
-        if (this.config.executablePath) launchOptions.executablePath = this.config.executablePath
+        const plan = this.browserPlan(pw)
+        const launchOptions: Record<string, unknown> = { headless: this.config.headless, ...plan.launch }
         const args: string[] = [...(this.config.args ?? [])]
         if (this.config.cdpPort) {
           args.push(`--remote-debugging-port=${this.config.cdpPort}`)
@@ -790,13 +811,13 @@ export class BrowserService {
           return this.trackBrowser(await pw.chromium.launch(launchOptions))
         } catch (error) {
           const msg = String(error)
-          if (/Executable doesn't exist|playwright install|not found/i.test(msg)) {
-            if (this.config.autoInstall) {
+          if (/Executable doesn't exist|playwright install|not found|distribution .* is not found/i.test(msg)) {
+            // Only the default Playwright Chromium can be downloaded; a configured channel / executablePath is the user's own choice.
+            if (this.config.autoInstall && plan.source === 'playwright-chromium') {
               await this.installChromium()
               return this.trackBrowser(await pw.chromium.launch(launchOptions))
-            } else {
-              throw new Error('dsh-browser: chromium is not installed for ' + this.config.browserRuntime + '. Run the runtime.install action, or: node "' + browserRuntimeCliPath(this.config.browserRuntime) + '" install chromium')
             }
+            throw new Error('dsh-browser: ' + this.launchFailure(plan, msg))
           } else {
             throw error
           }
@@ -809,6 +830,37 @@ export class BrowserService {
     } finally {
       if (this.launching === launching) this.launching = undefined
     }
+  }
+
+  private systemBrowsers(): SystemBrowser[] {
+    return this.probe.systemBrowsers ? this.probe.systemBrowsers() : detectSystemBrowsers()
+  }
+
+  /** What a launch would use right now. `pw` is the loaded runtime; without it (not installed) the Playwright Chromium path is unknown. */
+  private browserPlan(pw: any): BrowserPlan {
+    let bundledPath: string | undefined
+    try {
+      const expected = pw?.chromium?.executablePath?.()
+      if (typeof expected === 'string' && expected.trim()) bundledPath = expected
+    } catch { /* an unsupported platform has no bundled path */ }
+    return planBrowser({
+      channel: this.config.channel,
+      ...this.config.executablePath ? { executablePath: this.config.executablePath } : {},
+      ...bundledPath ? { bundledPath } : {},
+      autoInstall: this.config.autoInstall,
+      systemBrowsers: this.systemBrowsers(),
+      exists: this.probe.exists ?? (file => { try { return fs.existsSync(file) } catch { return false } }),
+    })
+  }
+
+  /** The message for a launch that found no browser. Says which setting was wrong when the user chose one. */
+  private launchFailure(plan: BrowserPlan, cause?: string): string {
+    if (plan.source === 'system-browser') return `${plan.note ?? 'A system browser is used.'} It could not be started${cause ? `: ${cause.split('\n')[0]}` : ''}. Install Playwright Chromium instead (run the runtime.install action), or set executablePath to a working Chrome / Chromium.`
+    if (plan.source === 'custom-executable') return `executablePath does not exist or is not a browser: ${this.config.executablePath}. Fix or clear executablePath in the browser plugin settings.`
+    if (plan.source === 'channel') return `channel is ${this.config.channel} but that browser is not installed. Install it, or set channel to chromium (and run runtime.install, or let Google Chrome / Microsoft Edge be picked up automatically).`
+    let cliPath: string | undefined
+    try { cliPath = browserRuntimeCliPath(this.config.browserRuntime) } catch { /* runtime not installed */ }
+    return browserInstallAdvice({ runtime: this.config.browserRuntime, ...cliPath ? { cliPath } : {}, ...process.env.PLAYWRIGHT_BROWSERS_PATH ? { browsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH } : {} })
   }
 
   /** Run `playwright install chromium` from the bundled playwright CLI. */
@@ -1020,17 +1072,17 @@ export class BrowserService {
     }
   }
 
-  // ── bundled opencli ───────────────────────────────────────────────────────
+  // ── opencli (optional) ───────────────────────────────────────────────────────
 
   opencliAvailable(): boolean {
     if (!this.config.enabled || !this.config.opencliEnabled) return false
-    try { return fs.existsSync(opencliEntryPath()) } catch { return false }
+    return opencliLocation() !== undefined
   }
 
   opencli(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
     if (!this.config.enabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: browser service is disabled', timedOut: false })
     if (!this.config.opencliEnabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI is disabled', timedOut: false })
-    if (!this.opencliAvailable()) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI entry is not installed', timedOut: false })
+    if (!this.opencliAvailable()) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: ' + OPENCLI_INSTALL_HINT, timedOut: false })
     if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
       return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
     }
@@ -2097,12 +2149,9 @@ export class BrowserService {
         chromiumInstalled = fs.existsSync(chromiumExecutablePath)
       }
     } catch { chromiumInstalled = false }
-    let opencliInstalled = false
-    let resolvedOpencliEntryPath: string | undefined
-    try {
-      resolvedOpencliEntryPath = path.resolve(opencliEntryPath())
-      opencliInstalled = fs.existsSync(resolvedOpencliEntryPath)
-    } catch { opencliInstalled = false }
+    const opencli = opencliLocation()
+    const opencliInstalled = opencli !== undefined
+    const resolvedOpencliEntryPath = opencli ? path.resolve(opencli.entry) : undefined
     const runtimeWarnings = this.config.browserRuntime === 'patchright'
       ? [
           'Patchright is Chromium-only and disables Playwright console APIs to avoid Runtime.enable detection.',
@@ -2111,10 +2160,12 @@ export class BrowserService {
             : []),
         ]
       : []
-    if (!chromiumInstalled && chromiumExecutablePath && (this.config.channel === 'chromium' || !!this.config.executablePath)) {
-      runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath}. Run runtime.install for ${this.config.browserRuntime}.`)
+    let plan: BrowserPlan
+    try { plan = this.browserPlan(loadBrowserRuntime(this.config.browserRuntime)) } catch { plan = this.browserPlan(undefined) }
+    if (!plan.ready && (this.config.channel === 'chromium' || !!this.config.executablePath)) {
+      runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath ?? '(unknown)'}. ${this.launchFailure(plan)}`)
     }
-    if (this.config.opencliEnabled && !opencliInstalled) runtimeWarnings.push('OpenCLI is enabled but its package entry is not installed.')
+    // OpenCLI is optional (it is not a dependency of this package), so its absence is reported as a hint, not a warning.
     runtimeWarnings.push(...this.config.configWarnings)
     this.refreshPolicy()
     if (this.policyStore.warning) runtimeWarnings.push(this.policyStore.warning)
@@ -2127,6 +2178,8 @@ export class BrowserService {
       opencliEnabled: this.config.opencliEnabled,
       opencliInstalled,
       ...resolvedOpencliEntryPath ? { opencliEntryPath: resolvedOpencliEntryPath } : {},
+      ...opencli ? { opencliSource: opencli.source } : {},
+      ...this.config.opencliEnabled && !opencliInstalled ? { opencliInstallHint: OPENCLI_INSTALL_HINT } : {},
       automationMode: this.config.automationMode,
       exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets, this.config.enabled, this.config.toolSurface),
       exposedActions: configuredBrowserActions(this.config.automationMode, this.config.automationAssets, this.config.enabled),
@@ -2142,6 +2195,14 @@ export class BrowserService {
       opencliRunPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
       ...chromiumExecutablePath ? { chromiumExecutablePath } : {},
+      browser: {
+        ready: plan.ready,
+        source: plan.source,
+        ...plan.path ? { path: plan.path } : {},
+        ...plan.note ? { note: plan.note } : {},
+        ...!plan.ready ? { installAdvice: this.launchFailure(plan) } : {},
+      },
+      systemBrowsers: this.systemBrowsers().map(({ channel, name, path: file }) => ({ channel, name, path: file })),
       usagePolicy: this.usageGovernor.policy,
       usageGovernor: this.usageGovernor.snapshot(),
       authProfiles: this.authProfiles.list(),

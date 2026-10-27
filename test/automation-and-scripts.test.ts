@@ -58,8 +58,10 @@ test('browser status reports a missing runtime Chromium executable truthfully', 
   const descriptor = Object.getOwnPropertyDescriptor(runtime.chromium, 'executablePath')
   const missingPath = path.join(os.tmpdir(), `dsh-browser-missing-chromium-${Date.now()}`, 'chrome.exe')
   Object.defineProperty(runtime.chromium, 'executablePath', { configurable: true, value: () => missingPath })
-  const service = new BrowserService(resolveConfig({ browserRuntime: 'playwright', autoInstall: false }))
-  const channelService = new BrowserService(resolveConfig({ browserRuntime: 'playwright', channel: 'chrome', autoInstall: false }))
+  // No system Chrome / Edge on this (pretend) machine: a developer box that has one would otherwise satisfy the launch.
+  const none = { systemBrowsers: () => [] }
+  const service = new BrowserService(resolveConfig({ browserRuntime: 'playwright', autoInstall: false }), none)
+  const channelService = new BrowserService(resolveConfig({ browserRuntime: 'playwright', channel: 'chrome', autoInstall: false }), none)
   try {
     const status = await service.status()
     assert.equal(status.chromiumInstalled, false)

@@ -256,3 +256,25 @@ test('the prompts group lists every text with its state, and only the entries th
   // Nothing overridden: the list says so.
   assert.match(renderCard!({}).html, /No entries changed/)
 })
+
+test('the status summary says when no browser can launch (a warning), when a system Chrome stands in, and when the optional OpenCLI is not installed (neither is a warning)', (t) => {
+  if (skip) return t.skip(skip)
+  const found = { browser: { ready: true, source: 'playwright-chromium' }, systemBrowsers: [], chromiumInstalled: true, opencli: { enabled: true, installed: true, source: 'path' } }
+  const quiet = renderCard!({ runtime: found }).html
+  assert.match(quiet, /data-dsb-warnings-count="0"/)
+  assert.doesNotMatch(quiet, />OpenCLI not installed<|>No browser available<|>Browser: system Chrome \/ Edge</)
+
+  const none = renderCard!({ runtime: { ...found, browser: { ready: false, source: 'none', installAdvice: 'No browser is available to launch. Do one of: (1) install Google Chrome' } } }).html
+  assert.match(none, /data-dsb-warnings-count="1"/)
+  assert.match(none, />No browser available</)
+
+  const system = renderCard!({ runtime: { ...found, browser: { ready: true, source: 'system-browser', note: 'Playwright Chromium is not installed, so Google Chrome is used (nothing to download).' } } }).html
+  assert.match(system, /data-dsb-warnings-count="0"/)
+  assert.match(system, />Browser: system Chrome \/ Edge</)
+
+  const noOpencli = renderCard!({ fieldTexts: { opencliEnabled: 'true' }, runtime: { ...found, opencli: { enabled: true, installed: false, hint: 'OpenCLI is not installed (it is optional). Install it with `npm i -g @jackwener/opencli`' } } }).html
+  assert.match(noOpencli, /data-dsb-warnings-count="0"/)
+  assert.match(noOpencli, />OpenCLI not installed</)
+  // Switched off in the settings: the badge says off, not "not installed".
+  assert.match(renderCard!({ fieldTexts: { opencliEnabled: 'false' }, runtime: { ...found, opencli: { enabled: false, installed: false } } }).html, /OpenCLI off/)
+})

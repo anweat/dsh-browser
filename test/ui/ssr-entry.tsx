@@ -34,6 +34,8 @@ export interface RenderOptions {
   propertiesText?: string
   /** What the running plugin reports it ignored in its configuration. */
   configWarnings?: string[]
+  /** What the plugin's `runtime` endpoint reports (which browser would launch, whether OpenCLI is installed). */
+  runtime?: Record<string, unknown>
 }
 
 export function renderCard(options: RenderOptions = {}): { html: string; missingKeys: string[] } {
@@ -64,7 +66,7 @@ export function renderCard(options: RenderOptions = {}): { html: string; missing
     editor: { text: options.selected ? '{"kind":"recipe","name":"x"}' : '', baseline: options.selected ? '{"kind":"recipe","name":"x"}' : '', testUrl: '', testInputs: '{}', ...options.editor },
   }
   const status = { loading: false, failed: false, status: options.prompts, defaults: options.promptsDefaults, defaultTexts: options.promptDefaults }
-  const policyState = { loading: false, failed: false, report: {
+  const policyState = { loading: false, failed: false, ...options.runtime ? { runtime: options.runtime } : {}, report: {
     ...options.configWarnings ? { configWarnings: options.configWarnings } : {},
     revision: 3, updatedAt: '2026-01-01T00:00:00Z', overlayActive: true, allowPrivateHosts: false, authDir: '/data/browser/auth',
     authProfiles: [{ id: 'forum', origin: 'overlay-changed', allowedDomains: ['example.com'], persistState: false }, { id: 'new', origin: 'overlay-created', allowedDomains: ['a.test'], persistState: true }],

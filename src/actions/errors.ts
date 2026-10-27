@@ -17,7 +17,7 @@ export const DEFAULT_ERROR_HINTS: Readonly<Partial<Record<ErrorCode, string>>> =
   TARGET_STALE: 'The page navigated, reloaded, or changed history since you observed it, and nothing was done. Call observe.read again, check the page is still the one you meant, then retry with the new generation (current.generation).',
   DEADLINE: 'The action ran out of time. Re-read the page to see whether it took effect before retrying.',
   CANCELLED: 'The call was cancelled before it finished.',
-  CAPABILITY_UNAVAILABLE: 'This capability is not available in the current setup (see browser_index() for runtime state; runtime.install installs Chromium).',
+  CAPABILITY_UNAVAILABLE: 'This capability is not available in the current setup (see browser_index() for runtime state; runtime.status says which browser launches; runtime.install downloads Chromium when no Chrome / Edge is installed).',
   POLICY_DENIED: 'Blocked by the plugin policy for this automationMode or by input validation.',
   NOT_FOUND: 'The referenced item does not exist. Use automation.search to find valid ids.',
   VALIDATION_FAILED: 'The steps ran but an assert step did not hold, so the business result is not confirmed. Read the page (observe.read) to see what happened; if earlier steps submitted something, do not run them again blindly.',

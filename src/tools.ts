@@ -145,7 +145,7 @@ export function registerTools(ctx: Context, config: ResolvedConfig, service: Bro
       if (!args.group && !args.action && !args.query) {
         try {
           const status = await service.status()
-          env.runtime = { chromiumInstalled: status.chromiumInstalled, opencliInstalled: status.opencliInstalled, opencliEnabled: status.opencliEnabled }
+          env.runtime = { chromiumInstalled: status.chromiumInstalled, browserReady: status.browser.ready, opencliInstalled: status.opencliInstalled, opencliEnabled: status.opencliEnabled }
         } catch { /* runtime facts are best-effort */ }
       }
       return renderIndex(args, env)

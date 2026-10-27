@@ -35,6 +35,30 @@ export interface PolicyReportView {
         changes: string[];
     }[];
 }
+/** What `runtime` reports: which browser would launch, and whether the optional OpenCLI is installed. */
+export interface RuntimeView {
+    browser: {
+        ready: boolean;
+        source: 'custom-executable' | 'channel' | 'playwright-chromium' | 'system-browser' | 'none';
+        path?: string;
+        note?: string;
+        installAdvice?: string;
+    };
+    systemBrowsers: {
+        channel: string;
+        name: string;
+        path: string;
+    }[];
+    chromiumInstalled: boolean;
+    opencli: {
+        enabled: boolean;
+        installed: boolean;
+        source?: string;
+        hint?: string;
+    };
+}
+/** Only a reply of the right shape is used: an older plugin, or a bridge that answers `{}` to every endpoint, must not break the card. */
+export declare function isRuntimeView(value: unknown): value is RuntimeView;
 export interface PolicyStatusState {
     loading: boolean;
     failed: boolean;
@@ -42,6 +66,8 @@ export interface PolicyStatusState {
     /** Why the last clear was refused. */
     error?: string;
     report?: PolicyReportView;
+    /** Absent until the first read, and when the plugin is too old to answer (the card then shows nothing about it). */
+    runtime?: RuntimeView;
 }
 /** Reads the policy overlay for the "policy overlay" section and clears it back to the baseline. */
 export declare class PolicyStatusController {
@@ -59,6 +85,7 @@ export declare class PolicyStatusController {
     snapshot(): PolicyStatusState;
     dispose(): void;
     refresh(): Promise<void>;
+    private refreshRuntime;
     clear(scope: 'all' | 'usagePolicy' | 'authProfile', id?: string): Promise<void>;
     private publish;
 }

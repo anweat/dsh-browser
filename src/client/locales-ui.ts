@@ -10,8 +10,8 @@
 export const zhUi = {
   // frame
   summaryTitle: '当前状态', summaryEnabledOn: '已启用', summaryEnabledOff: '已停用', summaryMode: '模式', summarySurface: '工具面', summaryOpencliOn: 'OpenCLI 开', summaryOpencliOff: 'OpenCLI 关',
-  summaryWarnings: '{n} 条警告', summaryNoWarnings: '无警告', summaryOverlay: '覆盖层生效', summaryDetails: '查看详情',
-  warningsTitle: '需要注意', warningsConfig: '配置里有被忽略的值（已回退到默认）', warningsOverlay: '策略覆盖层', warningsNone: '没有警告。', close: '关闭', helpLabel: '说明',
+  summaryWarnings: '{n} 条警告', summaryNoWarnings: '无警告', summaryOverlay: '覆盖层生效', summaryDetails: '查看详情', summaryOpencliMissing: 'OpenCLI 未安装', summaryNoBrowser: '没有可用浏览器', summaryBrowserSystem: '浏览器：系统 Chrome / Edge',
+  warningsTitle: '需要注意', warningsConfig: '配置里有被忽略的值（已回退到默认）', warningsOverlay: '策略覆盖层', warningsNone: '没有警告。', warningsNoBrowser: '找不到可启动的浏览器', noticesRuntime: '运行环境说明（不是警告）', close: '关闭', helpLabel: '说明',
   savebarClean: '没有未保存的修改', savebarDirty: '{n} 项未保存', savebarInvalid: '有无效的值，修正后才能保存', discardChanges: '放弃',
   overriddenCount: '{n} 项已覆盖', cancel: '取消', done: '完成', edit: '编辑', remove: '删除', 
   // groups
@@ -38,11 +38,11 @@ export const zhUi = {
   reset: '恢复默认', overridden: '已覆盖', 
   // browser group
   browserRuntime: '运行时', browserRuntimeHint: '默认 Playwright；Patchright 仅支持 Chromium。',
-  channel: '浏览器通道', channelHint: '用哪个浏览器内核。', channelHelp: 'chromium：插件自带，开箱即用（默认）。chrome / msedge：使用本机已装的 Chrome 或 Edge。其它值（如 chrome-beta）请先在“高级：文本模式”里确认可用。Patchright 推荐 chrome。',
+  channel: '浏览器通道', channelHint: '用哪个浏览器内核。', channelHelp: 'chromium（默认）：用 Playwright 的 Chromium；它没有下载过时，自动改用本机已装的 Google Chrome 或 Edge，都没有才提示安装。chrome / msedge：固定使用本机已装的那个，没装就报错。其它值（如 chrome-beta）请先在“高级：文本模式”里确认可用。Patchright 推荐 chrome。',
   headless: '无头模式', headlessHint: '不显示浏览器窗口。', headlessHelp: '默认开启。需要亲眼看页面、或者站点检测到无头浏览器时可关闭；Patchright 的兼容性最好的配置通常是关闭无头。',
-  autoInstall: '缺失时自动安装 Chromium', autoInstallHint: '可能触发较大的下载，日常建议关闭。', autoInstallHelp: '开启后，找不到浏览器时会自动执行 playwright install chromium（几十到上百 MB）。默认关闭，需要时用 runtime.install 动作显式安装。',
+  autoInstall: '缺失时自动安装 Chromium', autoInstallHint: '可能触发较大的下载，日常建议关闭。', autoInstallHelp: '开启后，找不到 Playwright Chromium 时会自动执行 playwright install chromium（约 150 MB），并且不再改用系统 Chrome。默认关闭：装了 Chrome / Edge 就直接用，没有时用 runtime.install 动作显式安装。',
   browserAdvanced: '高级', browserAdvancedHint: '少数部署才需要改的项。',
-  executablePath: '浏览器可执行文件', executablePathHint: '留空使用自带或通道默认的浏览器。', executablePathHelp: '自定义浏览器的绝对路径，例如 Chrome for Testing。填了它，通道设置仍用于选择驱动行为。',
+  executablePath: '浏览器可执行文件', executablePathHint: '留空：Playwright Chromium，缺失时用系统 Chrome / Edge。', executablePathHelp: '自定义浏览器的绝对路径，例如 Chrome for Testing。填了它，通道设置仍用于选择驱动行为。',
   cdpPort: 'CDP 调试端口', cdpPortHint: '本机远程调试端口，留空即关闭。', cdpPortHelp: '1–65535。开启后外部工具可连到这个端口调试浏览器；只监听本机，但同机的其它程序也能控制浏览器，请谨慎使用。',
   maxSessions: '会话上限', maxSessionsHint: '同时持有页面的会话数，1–64。', maxSessionsHelp: '默认 8。超出时关闭最久未使用的会话。所有会话共用一个浏览器进程，这个数限制的是页面（context）数。',
   args: '启动参数', argsHint: '追加的 Chromium 命令行参数。', argsHelp: '每项一个参数，例如 --disable-gpu。只添加你信任并理解其影响的参数；回车添加，点 × 删除。',
@@ -89,8 +89,8 @@ export const zhUi = {
 
 export const enUi: Record<keyof typeof zhUi, string> = {
   summaryTitle: 'Status', summaryEnabledOn: 'Enabled', summaryEnabledOff: 'Disabled', summaryMode: 'Mode', summarySurface: 'Tool surface', summaryOpencliOn: 'OpenCLI on', summaryOpencliOff: 'OpenCLI off',
-  summaryWarnings: '{n} warning(s)', summaryNoWarnings: 'No warnings', summaryOverlay: 'Overlay active', summaryDetails: 'Details',
-  warningsTitle: 'Needs attention', warningsConfig: 'Values in the configuration were ignored (fell back to defaults)', warningsOverlay: 'Policy overlay', warningsNone: 'No warnings.', close: 'Close', helpLabel: 'Explanation',
+  summaryWarnings: '{n} warning(s)', summaryNoWarnings: 'No warnings', summaryOverlay: 'Overlay active', summaryDetails: 'Details', summaryOpencliMissing: 'OpenCLI not installed', summaryNoBrowser: 'No browser available', summaryBrowserSystem: 'Browser: system Chrome / Edge',
+  warningsTitle: 'Needs attention', warningsConfig: 'Values in the configuration were ignored (fell back to defaults)', warningsOverlay: 'Policy overlay', warningsNone: 'No warnings.', warningsNoBrowser: 'No browser can be launched', noticesRuntime: 'About this machine (not warnings)', close: 'Close', helpLabel: 'Explanation',
   savebarClean: 'No unsaved changes', savebarDirty: '{n} unsaved', savebarInvalid: 'Some values are invalid; fix them to save', discardChanges: 'Discard',
   overriddenCount: '{n} overridden', cancel: 'Cancel', done: 'Done', edit: 'Edit', remove: 'Delete', 
   groupCommon: 'Common', groupCommonSub: 'Enable, automation mode, tool surface, OpenCLI',
@@ -113,11 +113,11 @@ export const enUi: Record<keyof typeof zhUi, string> = {
   opencliEnabled: 'Enable OpenCLI', opencliEnabledHint: 'Master switch for site adapters and the Chrome Browser Bridge.',
   reset: 'Restore default', overridden: 'Overridden', 
   browserRuntime: 'Runtime', browserRuntimeHint: 'Playwright by default; Patchright is Chromium-only.',
-  channel: 'Browser channel', channelHint: 'Which browser engine to use.', channelHelp: 'chromium: bundled with the plugin, works out of the box (default). chrome / msedge: the Chrome or Edge installed on this machine. Other values (such as chrome-beta) are best confirmed in "Advanced: text mode" first. Patchright recommends chrome.',
+  channel: 'Browser channel', channelHint: 'Which browser engine to use.', channelHelp: 'chromium (default): Playwright\'s Chromium; when it has not been downloaded, the Google Chrome or Edge installed on this machine is used automatically, and only if there is none are you told to install one. chrome / msedge: always use that installed browser, and fail when it is missing. Other values (such as chrome-beta) are best confirmed in "Advanced: text mode" first. Patchright recommends chrome.',
   headless: 'Headless', headlessHint: 'Do not show a browser window.', headlessHelp: 'On by default. Turn it off to watch the page, or when a site detects headless browsers; Patchright usually works best headed.',
-  autoInstall: 'Install Chromium when missing', autoInstallHint: 'May trigger a large download; keep off day to day.', autoInstallHelp: 'When on, a missing browser triggers playwright install chromium (tens to hundreds of MB). Off by default; install explicitly with the runtime.install action instead.',
+  autoInstall: 'Install Chromium when missing', autoInstallHint: 'May trigger a large download; keep off day to day.', autoInstallHelp: 'When on, a missing Playwright Chromium triggers playwright install chromium (about 150 MB) and the system Chrome is no longer used instead. Off by default: an installed Chrome / Edge is used directly, otherwise install explicitly with the runtime.install action.',
   browserAdvanced: 'Advanced', browserAdvancedHint: 'Only a few deployments change these.',
-  executablePath: 'Browser executable', executablePathHint: 'Empty uses the bundled or channel browser.', executablePathHelp: 'Absolute path of a custom browser, for example Chrome for Testing. The channel setting still selects driver behavior.',
+  executablePath: 'Browser executable', executablePathHint: 'Empty: Playwright Chromium, or the system Chrome / Edge when it is missing.', executablePathHelp: 'Absolute path of a custom browser, for example Chrome for Testing. The channel setting still selects driver behavior.',
   cdpPort: 'CDP debugging port', cdpPortHint: 'Local remote-debugging port; empty is off.', cdpPortHelp: '1–65535. External tools can attach to this port to debug the browser. It listens locally, but other programs on the machine can then control the browser, so use it with care.',
   maxSessions: 'Session limit', maxSessionsHint: 'Sessions holding a page at once, 1–64.', maxSessionsHelp: 'Default 8. Past it the least recently used session is closed. One browser process serves them all; this bounds pages (contexts).',
   args: 'Launch arguments', argsHint: 'Extra Chromium command-line arguments.', argsHelp: 'One argument per entry, for example --disable-gpu. Add only arguments whose effects you understand; Enter adds, × removes.',

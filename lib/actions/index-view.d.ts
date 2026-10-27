@@ -17,7 +17,8 @@ export interface IndexEnvironment {
     skillAvailable: boolean;
     /** Runtime facts worth surfacing at the root (undefined when unknown). */
     runtime?: {
-        chromiumInstalled?: boolean;
+        chromiumInstalled?: boolean; /** False when no browser can be launched at all (no Playwright Chromium, no system Chrome / Edge, no configured one). */
+        browserReady?: boolean;
         opencliInstalled?: boolean;
         opencliEnabled?: boolean;
     };

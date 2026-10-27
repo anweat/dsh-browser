@@ -29,22 +29,39 @@ export function SummaryBar({ card }: { card: Card }) {
     surface: snapshot.fields.toolSurface.text || 'indexed', opencli: snapshot.fields.opencliEnabled.text !== 'false',
   }))
   const warnings = useWarnings(card)
-  const count = warnings.config.length + (warnings.overlay ? 1 : 0)
+  const runtime = card.usePolicyStatus(snapshot => snapshot.runtime)
+  const noBrowser = runtime !== undefined && !runtime.browser.ready
+  const opencliMissing = view.opencli && runtime !== undefined && !runtime.opencli.installed
+  // Only "nothing can launch" counts as a warning; a system Chrome standing in, or the optional OpenCLI being absent, are notices.
+  const count = warnings.config.length + (warnings.overlay ? 1 : 0) + (noBrowser ? 1 : 0)
+  const notices = [
+    ...runtime && runtime.browser.ready && runtime.browser.note ? [runtime.browser.note] : [],
+    ...opencliMissing && runtime?.opencli.hint ? [runtime.opencli.hint] : [],
+  ]
   return <div className={css.summaryBar} role="group" aria-label={t('summaryTitle')} data-dsb-summary>
     <strong>{t('summaryTitle')}</strong>
     <Badge tone={view.enabled ? 'success' : 'neutral'}>{view.enabled ? t('summaryEnabledOn') : t('summaryEnabledOff')}</Badge>
     <Badge tone={MODE_TONE[view.mode] ?? 'neutral'}>{t('summaryMode')} {view.mode}</Badge>
     <Badge tone="neutral">{t('summarySurface')} {view.surface}</Badge>
-    <Badge tone="neutral">{view.opencli ? t('summaryOpencliOn') : t('summaryOpencliOff')}</Badge>
+    <Badge tone="neutral">{!view.opencli ? t('summaryOpencliOff') : opencliMissing ? t('summaryOpencliMissing') : t('summaryOpencliOn')}</Badge>
+    {noBrowser ? <Badge tone="warning">{t('summaryNoBrowser')}</Badge> : runtime?.browser.source === 'system-browser' ? <Badge tone="neutral">{t('summaryBrowserSystem')}</Badge> : null}
     {warnings.overlayActive ? <Badge tone="warning">{t('summaryOverlay')}</Badge> : null}
     <button type="button" className={css.link} onClick={() => setOpen(true)} data-dsb-warnings-count={count}>
       {count ? <Badge tone="warning">{fill(t('summaryWarnings'), { n: count })}</Badge> : <span className={css.muted}>{t('summaryNoWarnings')}</span>} · {t('summaryDetails')}
     </button>
     <Dialog open={open} title={t('warningsTitle')} closeLabel={t('close')} onClose={() => setOpen(false)} footer={<Btn onClick={() => setOpen(false)} primary>{t('close')}</Btn>}>
       {count === 0 ? <p className={css.rowHint}>{t('warningsNone')}</p> : null}
+      {noBrowser ? <div className={css.stack} data-dsb-runtime-warning>
+        <strong>{t('warningsNoBrowser')}</strong>
+        <p className={`${css.rowHint} dsb-bad`} role="alert">{runtime?.browser.installAdvice}</p>
+      </div> : null}
       {warnings.config.length ? <div className={css.stack} data-dsb-config-warnings>
         <strong>{t('warningsConfig')}</strong>
         <ul>{warnings.config.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+      </div> : null}
+      {notices.length ? <div className={css.stack} data-dsb-runtime-notices>
+        <strong>{t('noticesRuntime')}</strong>
+        <ul>{notices.map((notice, index) => <li key={index}>{notice}</li>)}</ul>
       </div> : null}
       {warnings.overlay ? <div className={css.stack} data-dsb-policy-warning>
         <strong>{t('warningsOverlay')}</strong>

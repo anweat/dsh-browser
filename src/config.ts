@@ -47,7 +47,7 @@ export interface PromptsInput {
 export interface Config {
   /** Whether the browser service is active. */
   enabled: boolean
-  /** Browser channel: 'chromium' (bundled, self-contained) or 'msedge'. */
+  /** Browser channel: 'chromium' (Playwright's Chromium; a system Chrome / Edge stands in when it is not installed), 'chrome' or 'msedge' (always that browser). */
   channel: string
   /** Browser driver/runtime implementation. Patchright is Chromium-only. */
   browserRuntime?: BrowserRuntime
@@ -62,7 +62,7 @@ export interface Config {
   rulePacks?: Record<string, RulePackConfig>
   /** Explicit browser executable path override (rare). */
   executablePath?: string
-  /** Whether the bundled OpenCLI is enabled. */
+  /** Whether OpenCLI (optional, installed separately) is used; with no OpenCLI installed this only affects what status reports. */
   opencliEnabled: boolean
   /** Model-facing tool exposure and approval level. */
   automationMode: AutomationMode
