@@ -159,6 +159,9 @@ test('Playwright and service errors map to contract codes and keep the original 
     ['browser recipe requires url or an active target.open page', 'automation.run_recipe', 'TARGET_CLOSED'],
     ['dsh-browser: chromium is not installed for playwright. Run the runtime.install action', 'target.open', 'CAPABILITY_UNAVAILABLE'],
     ['dsh-browser: browser service is disabled', 'target.open', 'CAPABILITY_UNAVAILABLE'],
+    ['dsh-browser: No browser is available to launch. Do one of: (1) install Google Chrome or Microsoft Edge', 'target.open', 'CAPABILITY_UNAVAILABLE'],
+    ['dsh-browser: channel is msedge but that browser is not installed. Install it', 'target.open', 'CAPABILITY_UNAVAILABLE'],
+    ['dsh-browser: Playwright Chromium is not installed, so Google Chrome is used. It could not be started: boom', 'target.open', 'CAPABILITY_UNAVAILABLE'],
     ['act.upload requires absolute file paths: a.txt', 'act.upload', 'INVALID_ARGS'],
     ['act.wait requires exactly one target, urlPattern, networkIdle=true, or timeMs', 'act.wait', 'INVALID_ARGS'],
     ['automation asset a1 is not allowed on evil.com', 'automation.run', 'POLICY_DENIED'],
@@ -338,9 +341,9 @@ test('indexed registers two tools; flat registers one per usable action; both sh
   assert.deepEqual([...collect({ automationMode: 'unrestricted' }).keys()], ['browser_index', 'browser_call'])
   assert.deepEqual([...collect({ enabled: false }).keys()], [])
   const flatAll = collect({ automationMode: 'unrestricted', toolSurface: 'flat' })
-  assert.equal(flatAll.size, 34)
-  assert.equal(collect({ automationMode: 'read-only', toolSurface: 'flat' }).size, 19)
-  assert.equal(collect({ automationMode: 'standard', toolSurface: 'flat', automationAssets: { modelDevelopmentEnabled: false } }).size, 33)
+  assert.equal(flatAll.size, 41)
+  assert.equal(collect({ automationMode: 'read-only', toolSurface: 'flat' }).size, 25)
+  assert.equal(collect({ automationMode: 'standard', toolSurface: 'flat', automationAssets: { modelDevelopmentEnabled: false } }).size, 40)
   assert.deepEqual([...flatAll.keys()].sort(), configuredBrowserTools('unrestricted', { modelDevelopmentEnabled: true }, true, 'flat').sort())
   const flatClick = flatAll.get('browser_act_click')
   assert.equal(flatClick.parameters.properties.locator.properties.role.type, 'string', 'flat tools carry the expanded locator schema')

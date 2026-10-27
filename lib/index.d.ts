@@ -1,8 +1,9 @@
 /**
  * dsh-browser — self-contained browser runtime plugin for DeepSeek Harness.
  *
- * Bundles Playwright (chromium) + OpenCLI as plugin-local npm dependencies and
- * provides a `browser` service for other plugins (web-search-pro injects it),
+ * Ships Playwright and Patchright as plugin-local npm dependencies (the browser itself is a system Chrome / Edge, or
+ * Playwright Chromium downloaded on demand); OpenCLI is optional and installed separately. Provides
+ * a `browser` service for other plugins (web-search-pro injects it),
  * plus model-facing interactive browser tools.
  * @module dsh-browser
  */

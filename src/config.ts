@@ -13,6 +13,14 @@ import { resolveUsagePolicy, type UsagePolicy, type UsagePolicyInput } from './u
 import { PROMPT_LIMITS } from './prompt-limits.ts'
 import { promptsSource, type PromptsSource } from './prompts.ts'
 import { resolveAutomationAssetPolicy, type AutomationAssetPolicy, type AutomationAssetPolicyInput } from './automation-assets.ts'
+import { VIEWPORT_LIMITS, VIEWPORT_MODES, configProblem, resolveContextDefaults, type ContextOptions, type ViewportMode } from './context-options.ts'
+import { MAX_DOWNLOAD_BYTES_LIMIT, checkAbsoluteDirectory } from './config-rules.ts'
+export { MAX_DOWNLOAD_BYTES_LIMIT }
+
+/** Schema keys that are not settings (see {@link MISPLACED_KEYS}); the settings card has no control for them. */
+export const MISPLACED_CONFIG_KEYS: readonly string[] = ['viewport', 'proxy', 'contextOptions', 'download', 'downloads']
+
+export const DEFAULT_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
 
 export const BROWSER_RUNTIMES = ['playwright', 'patchright'] as const
 export type BrowserRuntime = typeof BROWSER_RUNTIMES[number]
@@ -39,7 +47,7 @@ export interface PromptsInput {
 export interface Config {
   /** Whether the browser service is active. */
   enabled: boolean
-  /** Browser channel: 'chromium' (bundled, self-contained) or 'msedge'. */
+  /** Browser channel: 'chromium' (Playwright's Chromium; a system Chrome / Edge stands in when it is not installed), 'chrome' or 'msedge' (always that browser). */
   channel: string
   /** Browser driver/runtime implementation. Patchright is Chromium-only. */
   browserRuntime?: BrowserRuntime
@@ -54,7 +62,7 @@ export interface Config {
   rulePacks?: Record<string, RulePackConfig>
   /** Explicit browser executable path override (rare). */
   executablePath?: string
-  /** Whether the bundled OpenCLI is enabled. */
+  /** Whether OpenCLI (optional, installed separately) is used; with no OpenCLI installed this only affects what status reports. */
   opencliEnabled: boolean
   /** Model-facing tool exposure and approval level. */
   automationMode: AutomationMode
@@ -77,6 +85,35 @@ export interface Config {
   autoInstall: boolean
   /** Directory for browser screenshots; defaults to $DSH_HOME/data/browser/snapshots. */
   snapshotDir?: string
+  /**
+   * Whether a policy change made through the agent actions may name localhost, `.local`/`.internal` names and
+   * loopback or private-network IPv4 addresses as allowed domains. Off by default; cloud metadata and link-local
+   * addresses are refused regardless.
+   */
+  allowPrivateHosts?: boolean
+  /** Directory the downloads of `target.download` and browser-triggered downloads are saved to; defaults to $DSH_HOME/data/browser/downloads. */
+  downloadDir?: string
+  /** Largest single download in bytes; a bigger one is stopped and removed. Default 100 MiB. */
+  downloadMaxBytes?: number
+  /**
+   * Viewport of every context the plugin creates: `window` (default, Playwright's own default size),
+   * `720p` (1280x720), `1080p` (1920x1080) or `custom` (viewportWidth x viewportHeight).
+   */
+  viewportMode?: ViewportMode
+  /** Custom viewport width in CSS pixels; only read with viewportMode=custom. */
+  viewportWidth?: number
+  /** Custom viewport height in CSS pixels; only read with viewportMode=custom. */
+  viewportHeight?: number
+  /** User agent of every context; unset keeps the browser's own. */
+  userAgent?: string
+  /** BCP 47 locale of every context (en-US, zh-CN); unset keeps the browser's own. */
+  locale?: string
+  /** IANA time zone of every context (Asia/Shanghai); unset keeps the machine's. */
+  timezoneId?: string
+  /** Proxy of every context: `http://host:port`, `socks5://host:port`. No account or password is supported. */
+  proxyServer?: string
+  /** Comma-separated hosts that skip the proxy (`example.com,.internal.test`); needs proxyServer. */
+  proxyBypass?: string
   verbose: boolean
   /** Optional remote debugging port to expose CDP for external tools (e.g. 9222). */
   cdpPort?: number
@@ -184,6 +221,27 @@ export const Config = z.object({
   }).description('Overrides of the model-facing text. The settings card button Export default text (or `pnpm prompts:dump` in a repository checkout) prints every key with its default. Values over the length limits and unknown keys are ignored and reported by runtime.status. Tool descriptions apply after a restart; everything else applies on the next call.').volatile(),
   autoInstall: z.boolean().default(false).volatile(),
   snapshotDir: z.string().volatile(),
+  allowPrivateHosts: z.boolean().default(false).description('Let agent policy changes name localhost, .local/.internal names and private-network IPv4 addresses as allowed domains').volatile(),
+  downloadDir: z.string().description('Absolute directory downloads are saved to; defaults to $DSH_HOME/data/browser/downloads').volatile(),
+  downloadMaxBytes: z.number().default(DEFAULT_DOWNLOAD_MAX_BYTES).description('Largest single download in bytes (default 100 MiB); a bigger one is stopped and removed').volatile(),
+  viewportMode: z.string().default('window').description(`Viewport of every context: ${VIEWPORT_MODES.join(' | ')} (window = the browser default)`).volatile(),
+  viewportWidth: z.number().description(`Custom viewport width, ${VIEWPORT_LIMITS.minWidth}-${VIEWPORT_LIMITS.maxWidth}; only with viewportMode=custom`).volatile(),
+  viewportHeight: z.number().description(`Custom viewport height, ${VIEWPORT_LIMITS.minHeight}-${VIEWPORT_LIMITS.maxHeight}; only with viewportMode=custom`).volatile(),
+  userAgent: z.string().description('User agent of every context; unset keeps the browser\'s own').volatile(),
+  locale: z.string().description('BCP 47 locale such as en-US or zh-CN').volatile(),
+  timezoneId: z.string().description('IANA time zone such as Asia/Shanghai').volatile(),
+  proxyServer: z.string().description('Proxy such as http://127.0.0.1:7890 or socks5://127.0.0.1:1080; accounts and passwords are not supported').volatile(),
+  proxyBypass: z.string().description('Comma-separated hosts that skip the proxy; needs proxyServer').volatile(),
+  // The ranges of the numbers above are NOT part of the schema on purpose: schema parsing rejects a value outside a
+  // range with an error that stops the plugin from loading, while `resolveConfig` reports it and falls back (the
+  // settings card enforces the same ranges before a save).
+  // Not settings: these names exist so that the nested shape people expect fails loudly in `resolveConfig`
+  // instead of being dropped by schema parsing, which is how a nested `viewport` was once ignored without a word.
+  viewport: z.any(),
+  proxy: z.any(),
+  contextOptions: z.any(),
+  download: z.any(),
+  downloads: z.any(),
   verbose: z.boolean().default(false).volatile(),
   cdpPort: z.number().min(1).max(65_535).step(1).description('Optional remote debugging port to expose CDP for external tools (e.g. 9222)').volatile(),
   args: z.array(z.string()).default([]).description('Additional Chromium CLI launch arguments').volatile(),
@@ -209,15 +267,71 @@ export interface ResolvedConfig {
   prompts: PromptsSource
   autoInstall: boolean
   snapshotDir: string
+  downloadDir: string
+  downloadMaxBytes: number
+  allowPrivateHosts: boolean
+  /** `$DSH_HOME/data/browser`: where the plugin keeps the policy overlay and its auth state directory. */
+  dataDir: string
+  /** The only directory an agent-set storageStatePath may live in. */
+  authDir: string
+  /** The managed policy overlay file (see policy-overlay.ts). */
+  policyOverlayFile: string
+  /** Context options applied to every context the plugin creates (viewport, user agent, locale, time zone, proxy). */
+  contextDefaults: ContextOptions
+  /** Settings that were read but have no effect, shown in `runtime.status`. */
+  configWarnings: string[]
   verbose: boolean
   cdpPort?: number
   args: string[]
   maxSessions: number
 }
 
+/**
+ * Where each nested spelling people try belongs, for the error that replaces silently ignoring it. These names are
+ * in the schema only so schema parsing keeps them long enough for `resolveConfig` to refuse them; they are not settings.
+ */
+const MISPLACED_KEYS: Record<string, string> = {
+  viewport: 'viewportMode (window | 720p | 1080p | custom), viewportWidth and viewportHeight',
+  proxy: 'proxyServer and proxyBypass (flat keys; proxy accounts are not supported)',
+  contextOptions: 'the flat keys viewportMode, viewportWidth, viewportHeight, userAgent, locale, timezoneId, proxyServer, proxyBypass',
+  download: 'downloadDir and downloadMaxBytes',
+  downloads: 'downloadDir and downloadMaxBytes',
+}
+
 export function defaultSnapshotDir(): string {
   const home = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
   return path.join(home, 'data', 'browser', 'snapshots')
+}
+
+export function defaultBrowserDataDir(): string {
+  const home = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
+  return path.join(home, 'data', 'browser')
+}
+
+export function defaultDownloadDir(): string {
+  const home = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
+  return path.join(home, 'data', 'browser', 'downloads')
+}
+
+/**
+ * `downloadDir` must be an absolute path: a relative one would depend on the host process's working directory.
+ * A wrong value falls back to the default and is reported, never thrown: see {@link resolveConfig}.
+ */
+export function resolveDownloadDir(value: unknown): { dir: string; warning?: string } {
+  if (value === undefined || value === null || value === '') return { dir: defaultDownloadDir() }
+  const problem = (reason: string) => ({ dir: defaultDownloadDir(), warning: configProblem('downloadDir', value, reason, `the default ${defaultDownloadDir()} is used`, 'give an absolute directory path, or clear the field') })
+  if (typeof value !== 'string') return problem('it is not a string')
+  try { checkAbsoluteDirectory(value, 'downloadDir', message => { throw new Error(message) }) } catch (error) { return problem((error as Error).message) }
+  if (!path.isAbsolute(value)) return problem('it is not an absolute path on this system')
+  return { dir: path.normalize(value) }
+}
+
+export function resolveDownloadMaxBytes(value: unknown): { bytes: number; warning?: string } {
+  if (value === undefined || value === null) return { bytes: DEFAULT_DOWNLOAD_MAX_BYTES }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > MAX_DOWNLOAD_BYTES_LIMIT) {
+    return { bytes: DEFAULT_DOWNLOAD_MAX_BYTES, warning: configProblem('downloadMaxBytes', value, `it must be an integer from 1 to ${MAX_DOWNLOAD_BYTES_LIMIT}`, `the default ${DEFAULT_DOWNLOAD_MAX_BYTES} bytes (100 MiB) is used`, 'enter a whole number of bytes, or clear the field') }
+  }
+  return { bytes: value }
 }
 
 /**
@@ -253,6 +367,26 @@ export function resolveConfig(config: Config): ResolvedConfig {
   }
   const optional = <T>(field: string): T | undefined => plain(c[field] as T | undefined)
   const snapshotDir = optional<string>('snapshotDir') ?? defaultSnapshotDir()
+  // Nothing below throws for the settings added in 0.2.2: a plugin that fails to load takes its settings card with it,
+  // so a value that cannot be used falls back to its default and is reported through `configWarnings` instead.
+  const warnings: string[] = []
+  for (const [key, instead] of Object.entries(MISPLACED_KEYS)) {
+    const value = optional<unknown>(key)
+    if (value !== undefined) warnings.push(`config "${key}" is not a setting and was ignored; use ${instead}`)
+  }
+  const downloadDir = resolveDownloadDir(optional('downloadDir'))
+  const downloadMax = resolveDownloadMaxBytes(optional('downloadMaxBytes'))
+  warnings.push(...[downloadDir.warning, downloadMax.warning].filter((warning): warning is string => !!warning))
+  const context = resolveContextDefaults({
+    viewportMode: optional('viewportMode'),
+    viewportWidth: optional('viewportWidth'),
+    viewportHeight: optional('viewportHeight'),
+    userAgent: optional('userAgent'),
+    locale: optional('locale'),
+    timezoneId: optional('timezoneId'),
+    proxyServer: optional('proxyServer'),
+    proxyBypass: optional('proxyBypass'),
+  })
   return {
     enabled: read('enabled', true),
     channel: read('channel', 'chromium'),
@@ -268,6 +402,17 @@ export function resolveConfig(config: Config): ResolvedConfig {
     autoInstall: read('autoInstall', false),
     maxSessions: read('maxSessions', 8),
     snapshotDir,
+    downloadDir: downloadDir.dir,
+    downloadMaxBytes: downloadMax.bytes,
+    allowPrivateHosts: read('allowPrivateHosts', false),
+    // `browserDataDir` is not a setting (the schema drops it): it is how tests and embedders that hand `resolveConfig`
+    // a plain object keep the overlay out of the real DSH_HOME.
+    ...(() => {
+      const dataDir = optional<string>('browserDataDir') ?? defaultBrowserDataDir()
+      return { dataDir, authDir: path.join(dataDir, 'auth'), policyOverlayFile: path.join(dataDir, 'policy-overlay.json') }
+    })(),
+    contextDefaults: context.options,
+    configWarnings: [...warnings, ...context.warnings],
     verbose: read('verbose', false),
     authProfiles: read('authProfiles', {}),
     rulePacks: read('rulePacks', {}),

@@ -11,7 +11,7 @@ export const URL = 'https://example.com/search'
 const shot = async (): Promise<string> => '/tmp/shot.png'
 
 /** The real RPC handler over a real store and a service whose recipe() is the real runRecipe over a scripted page. */
-export function rpcFixture(behavior: () => Behavior = () => ({}), promptsStatus?: () => unknown) {
+export function rpcFixture(behavior: () => Behavior = () => ({}), promptsStatus?: () => unknown, runtimeStatus?: Record<string, unknown>) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-browser-rpc-'))
   const store = new AutomationAssetStore(resolveAutomationAssetPolicy({ directory, persistenceMode: 'manual' }))
   /** The steps each replay actually ran, so a test can tell which content was tested. */
@@ -19,6 +19,7 @@ export function rpcFixture(behavior: () => Behavior = () => ({}), promptsStatus?
   /** The options each replay was asked with (`isolated` for a fresh context). */
   const recipeOptions: Record<string, any>[] = []
   const service = {
+    async status() { return runtimeStatus ?? {} },
     async recipe(steps: AnyRecipeStep[], opts: Record<string, any>) {
       recipeRuns.push(structuredClone(steps))
       recipeOptions.push({ isolated: opts.isolated, session: opts.session })

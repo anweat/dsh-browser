@@ -21,7 +21,7 @@ export interface UsagePolicy extends Record<string, number> {
 }
 export declare function resolveUsagePolicy(input: UsagePolicyInput | undefined): UsagePolicy;
 export declare class UsageGovernor {
-    readonly policy: UsagePolicy;
+    policy: UsagePolicy;
     private active;
     private readonly globalWaiters;
     private readonly hosts;
@@ -30,6 +30,8 @@ export declare class UsageGovernor {
     private totalWaitMs;
     private backoffEvents;
     constructor(policy: UsagePolicy);
+    /** Replace the limits (a policy overlay change). Queued waits keep their place; the next acquisition reads the new values. */
+    setPolicy(policy: UsagePolicy): void;
     private host;
     private acquireGlobal;
     private releaseGlobal;

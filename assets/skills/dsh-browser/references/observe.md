@@ -22,10 +22,10 @@ A `truncation` field on the envelope means long text fields were shortened; the 
 {"action":"observe.read","args":{"sections":["controls"]}}
 ```
 
-Narrow it to part of the page with a `locator` (everything below that element is read; it must match exactly one element) or a viewport `region`, and bound it with `maxItems` (per section) and `maxBytes` (whole result):
+Narrow it to part of the page with a `locator` (everything below that element is read; it must match exactly one element; `role: "form"` only matches a form that has an accessible name, so use a `selector` for an unnamed one) or a viewport `region`, and bound it with `maxItems` (per section) and `maxBytes` (whole result):
 
 ```json call
-{"action":"observe.read","args":{"sections":["controls","tables"],"locator":{"role":"form"},"maxItems":20,"maxBytes":12000}}
+{"action":"observe.read","args":{"sections":["controls","tables"],"locator":{"selector":"form"},"maxItems":20,"maxBytes":12000}}
 ```
 
 Each control record has `role`, `name`, `type`, a `locator`, the `actions` that can work now, the states it has (`visible`, `disabled`, `readonly`, `checked`, `expanded`), `options` for a select or radio group, declared `constraints` (`required`, `min`, `max`, `step`, `pattern`, `minlength`, `maxlength`, `accept`, `multiple`), the browser's own `validity`, and a `source` (`dom` or `aria`). The full field list: `{"action":"observe.read.controls"}` in `browser_index`.

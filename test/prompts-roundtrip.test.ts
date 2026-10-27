@@ -117,9 +117,16 @@ test('the settings card gets the same JSON prompts:dump prints, through the RPC,
 
   const controller = new PromptsStatusController(rpc as never)
   await controller.refresh()
-  assert.equal(controller.snapshot().defaults, undefined, 'nothing is loaded until it is asked for')
+  await controller.loadDefaults()
+  // The card fetches the defaults itself when it opens (they feed the placeholders), exactly once.
+  assert.equal(requests.filter(request => request.endpoint === 'promptsDefaults').length, 1, 'fetched once, by the controller')
+  assert.deepEqual(controller.snapshot().defaultTexts?.texts.indexDescription, dumped.tools.browser_index.description)
+  assert.equal(controller.snapshot().defaultTexts?.texts.rootGuide, dumped.rootGuide)
+  assert.deepEqual(Object.keys(controller.snapshot().defaultTexts!.extras).sort(), ['actions', 'errorHints', 'groups'])
+  assert.equal(controller.snapshot().defaults, undefined, 'the export box is still closed until it is asked for')
+  const before = requests.length
   await controller.exportDefaults()
-  assert.equal(requests.at(-1)!.endpoint, 'promptsDefaults')
+  assert.equal(requests.length, before, 'exporting reuses what was loaded')
   assert.equal(controller.snapshot().defaults, reply.value.json)
   assert.ok(controller.snapshot().status === undefined || controller.snapshot().loading === false)
   controller.inject().hidePromptDefaults()
@@ -130,6 +137,7 @@ test('the settings card gets the same JSON prompts:dump prints, through the RPC,
   assert.equal(controller.snapshot().defaults, reply.value.json)
   const flaky = new PromptsStatusController({ call: async () => { throw new Error('plugin restarting') } } as never)
   await flaky.exportDefaults()
+  assert.equal(flaky.snapshot().defaultTexts, undefined)
   assert.equal(flaky.snapshot().defaultsFailed, true)
   assert.equal(flaky.snapshot().defaults, undefined)
   controller.dispose(); flaky.dispose()

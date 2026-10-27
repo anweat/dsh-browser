@@ -7,6 +7,7 @@ import type { BrowserService } from './browser-service.ts'
 import { executeAutomationAsset, executeDraftInputSets } from './automation-execution.ts'
 import { convertV1ToV2Draft } from './automation-convert.ts'
 import { promptsDumpText } from './prompts.ts'
+import { promptsDumpYaml } from './prompts-yaml.ts'
 import { stripAnsi } from './actions/errors.ts'
 
 /**
@@ -118,8 +119,31 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
             break
           }
           case 'prompts': value = promptsStatus ? promptsStatus() : null; break
+          // The policy overlay (see policy-overlay.ts): what the settings card's overlay section shows and clears.
+          case 'policy': value = service.policyReport({ auditLimit: 20 }); break
+          // Which browser a launch would use and whether OpenCLI is installed: the card's "runtime" notices. Read-only, launches nothing.
+          case 'runtime': {
+            const status = await service.status()
+            value = {
+              browser: status.browser, systemBrowsers: status.systemBrowsers, chromiumInstalled: status.chromiumInstalled,
+              opencli: { enabled: status.opencliEnabled, installed: status.opencliInstalled, ...status.opencliSource ? { source: status.opencliSource } : {}, ...status.opencliInstallHint ? { hint: status.opencliInstallHint } : {} },
+            }
+            break
+          }
+          case 'policyReset': {
+            const scope = payload.scope
+            if (scope !== 'all' && scope !== 'usagePolicy' && scope !== 'authProfile') throw new Error('scope must be all, usagePolicy or authProfile')
+            await service.changePolicy(
+              { kind: 'reset', scope, ...typeof payload.id === 'string' ? { id: payload.id } : {} },
+              { source: 'panel', action: 'panel.reset', reason: 'Cleared from the settings card', ...expectedRevision(payload) !== undefined ? { expectedRevision: expectedRevision(payload) } : {} },
+            )
+            value = service.policyReport({ auditLimit: 20 })
+            break
+          }
           // The same JSON `prompts:dump` prints, for installs that have no script environment.
           case 'promptsDefaults': value = { json: promptsDumpText() }; break
+          // The same defaults as commented YAML (every section says where the model reads it), in the card's language.
+          case 'promptsDefaultsYaml': value = { yaml: promptsDumpYaml(payload.lang === 'zh' ? 'zh' : 'en') }; break
           case 'status': value = store.setStatus(stringField(payload, 'id'), stringField(payload, 'status') as AutomationAssetStatus, { expectedRevision: expectedRevision(payload) }); break
           default: return { ok: false, error: { code: 'not-found' as const, message: `unknown automation asset endpoint: ${endpoint}`, details: {} } }
         }

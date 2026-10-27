@@ -1,8 +1,11 @@
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { Context } from './context-types.ts'
 import { BrowserSettingsController, type BrowserCardState } from './form.ts'
-import type { PromptTextFieldId } from './prompts-form.ts'
+import type { PromptExtraKind, PromptExtraValue, PromptTextFieldId } from './prompts-form.ts'
+import type { AuthProfileEntry } from './auth-profiles-form.ts'
+import type { PolicyFieldName } from './policy-fields.ts'
 import { PromptsStatusController, type PromptsStatusState } from './prompts-status-client.ts'
+import { PolicyStatusController, type PolicyStatusState } from './policy-status-client.ts'
 import { SettingsCard } from './SettingsCard.tsx'
 import { en, zh } from './locales.ts'
 import { ensureStyles } from './styles.ts'
@@ -26,15 +29,32 @@ export type BrowserSettingsCardProps = PropsLocale<typeof NS> & {
   resetField: (field: string) => void
   save: () => void
   discard: () => void
+  /** The default-parameters editor (one `key = value` text over the plugin-wide defaults). */
+  editProperties: (text: string) => void
+  /** The language of the comments in the advanced text (`zh` or `en`). */
+  setPropertyLanguage: (lang: string) => void
+  resetProperty: (key: string) => void
   // The "prompt text" section: views of the one staged `prompts` draft.
   editPromptText: (id: PromptTextFieldId, text: string) => void
   setPromptSkillEnabled: (enabled: boolean) => void
   editPromptExtras: (text: string) => void
   resetPromptExtras: () => void
+  /** One key of `usagePolicy` or `automationAssets` from its own control; an empty text puts the default back. */
+  editPolicyKey: (field: PolicyFieldName, key: string, text: string) => void
+  /** The login-profile list: add or replace one profile, or remove one, in the staged configuration. */
+  saveAuthProfile: (id: string, entry: AuthProfileEntry) => void
+  removeAuthProfile: (id: string) => void
   usePromptsStatus: <R>(selector: (snapshot: PromptsStatusState) => R) => R
   refreshPromptsStatus: () => void
   exportPromptDefaults: () => Promise<void>
+  /** The default texts as commented YAML, in the given language (`en` or `zh`). */
+  exportPromptYaml: (lang: string) => Promise<void>
+  /** One entry of the groups / actions / errorHints overrides: a group summary, an action's summary and notes, or an error hint. */
+  setPromptExtra: (kind: PromptExtraKind, key: string, value: PromptExtraValue | undefined) => void
   hidePromptDefaults: () => void
+  usePolicyStatus: <R>(selector: (snapshot: PolicyStatusState) => R) => R
+  refreshPolicyStatus: () => void
+  clearPolicyOverlay: (scope?: 'all' | 'usagePolicy' | 'authProfile', id?: string) => Promise<void>
   useAutomationAssets: <R>(selector: (snapshot: AutomationAssetsState) => R) => R
   refreshAutomationAssets: () => void
   selectAutomationAsset: (id?: string) => void
@@ -66,11 +86,15 @@ export function apply(ctx: Context): void {
 
   // The Host derives the settings page from the plugin entry's own Config
   // schema, keyed by the loader entry id; the shared form service reads it.
-  const controller = new BrowserSettingsController(ctx.configForms.get<Record<string, unknown>>(SETTINGS_NAMESPACE))
-  const assets = new AutomationAssetsController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
-  const prompts = new PromptsStatusController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
+  const rpc = (ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc
+  const assets = new AutomationAssetsController(rpc)
+  const prompts = new PromptsStatusController(rpc)
+  // The form compares prompt text with the plugin's own default text, which the prompts controller loads.
+  const controller = new BrowserSettingsController(ctx.configForms.get<Record<string, unknown>>(SETTINGS_NAMESPACE), () => prompts.promptDefaults())
+  const policy = new PolicyStatusController((ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc)
   ctx.effect(() => () => controller.dispose(), 'dsh-browser: settings controller')
   ctx.effect(() => () => prompts.dispose(), 'dsh-browser: prompts status controller')
+  ctx.effect(() => () => policy.dispose(), 'dsh-browser: policy status controller')
   ctx.effect(() => () => assets.dispose(), 'dsh-browser: automation assets controller')
 
   // External bundles own their keyed configuration on the bundle's detail
@@ -83,7 +107,8 @@ export function apply(ctx: Context): void {
           const settingsProps = controller.inject()
           const assetProps = assets.inject()
           const promptsProps = prompts.inject()
-          return { ...settingsProps, ...assetProps, ...promptsProps, hooks: { ...settingsProps.hooks, ...assetProps.hooks, ...promptsProps.hooks } }
+          const policyProps = policy.inject()
+          return { ...settingsProps, ...assetProps, ...promptsProps, ...policyProps, hooks: { ...settingsProps.hooks, ...assetProps.hooks, ...promptsProps.hooks, ...policyProps.hooks } }
         },
       }, SettingsCard))), 'dsh-browser: settings page')
 }

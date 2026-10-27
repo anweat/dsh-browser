@@ -8,7 +8,7 @@
  * - render / snapshot / searchResults are the drop-in replacements for
  *   web-search-pro's former PlaywrightManager (rules-aware page extraction and
  *   platform search-page list extraction run in the page itself).
- * - opencli(...) runs the bundled @jackwener/opencli (no global CLI).
+ * - opencli(...) runs @jackwener/opencli when it is installed (optional, see deps.ts).
  * - The interactive surface (open/click/type/hover/setFiles/evaluate/scroll/read/screenshot/closePage)
  *   drives ONE persistent context+page, giving the model multi-step browsing.
  *
@@ -18,7 +18,8 @@
  * doubled (\\s) so the evaluated page code sees a correct \s.
  * @module dsh-browser/browser-service
  */
-import { type CliResult } from './deps.ts';
+import { type CliResult, type OpencliSource } from './deps.ts';
+import { type BrowserPlan, type SystemBrowser } from './system-browser.ts';
 import type { ResolvedConfig } from './config.ts';
 import { type ResolvedAuthProfile } from './auth-profiles.ts';
 import { type ResolvedRulePack } from './rule-packs.ts';
@@ -28,9 +29,12 @@ import { type UserscriptValidation } from './scripts.ts';
 import { type AutomationMode } from './freedom.ts';
 import { type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts';
 import { UsageGovernor } from './usage-policy.ts';
+import { type AuditEntry, type ChangeMeta, type Direction, type PolicyChange, type PolicyDiff } from './policy-overlay.ts';
 import { type BrowserTarget } from './locator.ts';
 import { SessionJournal } from './journal.ts';
 import { type ObserveRegion, type ObserveSection } from './observe.ts';
+import { type CallContextInput, type ContextOptions } from './context-options.ts';
+import { type DownloadRecord } from './downloads.ts';
 export interface RenderRule {
     hostname: string;
     contentSelectors: string[];
@@ -76,6 +80,15 @@ export interface InteractiveState {
     screenshotPath?: string;
     /** The page the action ran on closed itself (a popup's own close button): url/title/text describe the page the session fell back to, or are empty. */
     closedPage?: true;
+    /** target.open only: the context options in effect, when the call set any or the context was rebuilt. */
+    contextOptions?: Record<string, unknown>;
+    /** target.open only: where each value of `contextOptions` comes from: `call` (this call), `session` (an earlier call kept by the context), `default` (configuration). */
+    contextSources?: Record<string, 'call' | 'session' | 'default'>;
+    /** target.open only: the session's context was replaced because the call needed different options (or login state); its pages are gone. */
+    contextRebuilt?: {
+        changed: string[];
+        note: string;
+    };
 }
 /** The page state after a recipe, plus what the run did ({@link RecipeRunResult}). */
 export interface RecipeServiceResult extends InteractiveState, RecipeRunResult {
@@ -99,6 +112,22 @@ export interface EvaluateResult {
 }
 export interface FileUploadResult extends InteractiveState {
     files: string[];
+}
+/** The outcome of `target.download`: where the file is and what it is. */
+export interface DownloadResult {
+    id: string;
+    /** The URL that was asked for. */
+    url: string;
+    /** The URL the bytes finally came from (after redirects), when it differs. */
+    finalUrl?: string;
+    /** Absolute path of the saved file, inside `downloadDir`. */
+    path: string;
+    /** The saved file's name (may carry a `-1` style suffix when the name was taken). */
+    filename: string;
+    bytes: number;
+    sha256: string;
+    suggestedFilename: string;
+    source: 'request' | 'browser';
 }
 export type { BrowserFrameSpec, BrowserLocatorSpec, BrowserTarget } from './locator.ts';
 export interface BrowserConsoleRecord {
@@ -160,6 +189,10 @@ export interface BrowserStatus {
     opencliEnabled: boolean;
     opencliInstalled: boolean;
     opencliEntryPath?: string;
+    /** Where OpenCLI was found (`plugin`, `path`, `global-npm`, ...). Absent when it is not installed. */
+    opencliSource?: OpencliSource;
+    /** Present while OpenCLI is enabled but not installed: how to install it. OpenCLI is optional; this is not a warning. */
+    opencliInstallHint?: string;
     automationMode: AutomationMode;
     /** Tool names registered for the model under the configured toolSurface. */
     exposedTools: string[];
@@ -170,9 +203,32 @@ export interface BrowserStatus {
     externalUserscriptPolicy: 'deny' | 'ask' | 'allow';
     pageEvaluatePolicy: 'deny' | 'ask' | 'allow';
     fileUploadPolicy: 'deny' | 'ask' | 'allow';
+    downloadPolicy: 'deny' | 'ask' | 'allow';
+    /** Directory downloads are saved to, and the size cap of one download. */
+    downloadDir: string;
+    downloadMaxBytes: number;
+    /** Context options applied to every context (viewport, user agent, locale, time zone, proxy server); only the ones that are set. */
+    contextDefaults: Record<string, unknown>;
     opencliRunPolicy: 'deny' | 'ask' | 'allow';
     chromiumInstalled: boolean;
     chromiumExecutablePath?: string;
+    /**
+     * The browser a launch will use, decided without launching one. `ready: false` means nothing can be launched yet and
+     * `installAdvice` says what to do; `source: system-browser` means the Playwright Chromium is missing and Chrome / Edge is used instead.
+     */
+    browser: {
+        ready: boolean;
+        source: BrowserPlan['source'];
+        path?: string;
+        note?: string;
+        installAdvice?: string;
+    };
+    /** System Chrome / Edge found on this machine (what the automatic fallback can use). */
+    systemBrowsers: {
+        channel: string;
+        name: string;
+        path: string;
+    }[];
     usagePolicy: ResolvedConfig['usagePolicy'];
     usageGovernor: ReturnType<UsageGovernor['snapshot']>;
     authProfiles: {
@@ -222,6 +278,16 @@ interface SessionState {
     generationClock: number;
     profile?: ResolvedAuthProfile;
     rulePack?: ResolvedRulePack;
+    /** Creation options of the live context (viewport, user agent, locale, time zone, proxy); compared on the next target.open. */
+    contextOptions?: ContextOptions;
+    /** Downloads this session saved or failed to save, newest last, capped. Memory only; the files are on disk. */
+    downloads: DownloadRecord[];
+    /** Counter behind the `d1`, `d2`, ... download ids of this session. */
+    nextDownload: number;
+    /** Save jobs of browser download events, so target.download can wait for the one its navigation triggered. */
+    downloadJobs: WeakMap<object, Promise<DownloadRecord>>;
+    /** Filename a running target.download wants for the download its navigation triggers (consumed by that one event). */
+    downloadFilename?: string;
     captureConsole: boolean;
     captureNetwork: boolean;
     capturedConsole: BrowserConsoleRecord[];
@@ -268,6 +334,7 @@ export interface SessionIdentity {
 }
 export declare class BrowserService {
     private readonly config;
+    private readonly probe;
     private browser;
     private launching?;
     /** Per-session interactive state. Replaces the former global activePage. */
@@ -277,13 +344,53 @@ export declare class BrowserService {
     private clock;
     private readonly authProfiles;
     private readonly usageGovernor;
+    /** The managed policy overlay merged over the configured authProfiles and usagePolicy (see policy-overlay.ts). */
+    private readonly policyStore;
     private opencliCatalogCache?;
     /** Per-session exploration journals (see src/journal.ts). Released with the session, never written to disk. */
     private readonly journals;
     /** How many sessions may hold a context+page at once before LRU eviction. */
     private readonly sessionLimit;
-    constructor(config: ResolvedConfig);
+    /**
+     * `probe` replaces what the service reads from the machine (system browsers, file existence); tests use it, the
+     * plugin never passes it.
+     */
+    constructor(config: ResolvedConfig, probe?: {
+        systemBrowsers?: () => SystemBrowser[];
+        exists?: (file: string) => boolean;
+    });
     available(): boolean;
+    /** Pick up an overlay file that changed on disk (another process, the panel). Cheap: one stat. */
+    private refreshPolicy;
+    private applyEffectivePolicy;
+    /** What a policy change would do, without doing it; `ok: false` carries why it is invalid. */
+    previewPolicyChange(change: PolicyChange): {
+        ok: true;
+        direction: Direction;
+        lines: string[];
+    } | {
+        ok: false;
+        message: string;
+    };
+    /**
+     * Apply a policy change: validated, written atomically with an audit entry, effective at once. Sessions whose
+     * context holds a login state this change took away are closed, so a revoked domain stops working immediately
+     * instead of at the next page load.
+     */
+    changePolicy(change: PolicyChange, meta: ChangeMeta): Promise<{
+        revision: number;
+        direction: Direction;
+        diff: PolicyDiff;
+        audit: AuditEntry;
+        sessionsClosed: number;
+        before: Record<string, unknown>;
+        after: Record<string, unknown>;
+    }>;
+    /** The effective policy, where each value comes from, and the newest audit entries. */
+    policyReport(opts?: {
+        auditLimit?: number;
+        viewerSession?: string;
+    }): Record<string, unknown>;
     /**
      * This session's exploration journal, created on first use. It outlives `target.close` (the session is
      * still the same) and is released when the session is evicted or the service closes. A session that never
@@ -339,9 +446,24 @@ export declare class BrowserService {
     private handleBrowserDisconnected;
     private trackBrowser;
     private ensure;
+    private systemBrowsers;
+    /** What a launch would use right now. `pw` is the loaded runtime; without it (not installed) the Playwright Chromium path is unknown. */
+    private browserPlan;
+    /** The message for a launch that found no browser. Says which setting was wrong when the user chose one. */
+    private launchFailure;
     /** Run `playwright install chromium` from the bundled playwright CLI. */
     installChromium(): Promise<CliResult>;
     private navigate;
+    /**
+     * `newContext()` arguments that do not depend on the login state: the configured viewport, user agent, locale,
+     * time zone and proxy (or the per-call override that replaced them), plus downloads for interactive contexts.
+     *
+     * Proxy: Playwright applies `proxy` at context level on its own. Measured on Chromium 1243 (headless shell) with
+     * Playwright 1.62 and Patchright 1.62, a context created with `proxy` and a browser launched WITHOUT any launch
+     * `proxy` sent both page navigation and `context.request` through the proxy, so no `proxy: { server: 'per-context' }`
+     * launch option is set. (Chromium bypasses the proxy for loopback hosts regardless; that is the browser's rule.)
+     */
+    private contextCreationOptions;
     private transientContext;
     private persistAndClose;
     render(url: string, rules: readonly RenderRule[], opts?: {
@@ -416,6 +538,13 @@ export declare class BrowserService {
      */
     private ensureActivePage;
     /**
+     * {@link ensureActivePage} plus what it had to do to the session's context. `context` carries the per-call creation
+     * options of `target.open`: an option the call leaves out keeps what the live context has (a context is only
+     * rebuilt for a value that is different, never because a later call said nothing), and a new context starts from
+     * the configured defaults. `rebuilt` names what differed when a live page was closed to make room for the new context.
+     */
+    private ensurePage;
+    /**
      * Add a page to the session's list and wire its capture and close handling.
      * Idempotent: the context 'page' event and the explicit call both land here.
      */
@@ -443,7 +572,7 @@ export declare class BrowserService {
         rulePack?: string;
         capture?: readonly ('console' | 'network')[];
         session?: string;
-    }): Promise<InteractiveState>;
+    } & CallContextInput): Promise<InteractiveState>;
     click(target: BrowserTarget, opts?: {
         expectGeneration?: number;
         timeoutMs?: number;
@@ -557,6 +686,38 @@ export declare class BrowserService {
         session?: string;
     }): Promise<Record<string, unknown>>;
     private observeOnce;
+    private pushDownload;
+    private failedDownload;
+    /**
+     * Save one browser download event (navigation to an attachment, a click, a script-created link) into the
+     * download directory and record the outcome in the session that owns the page. Never rejects: a failure is a
+     * `failed` record with the partial file removed, so nothing half-written is ever reported as a result.
+     */
+    private saveBrowserDownload;
+    /**
+     * `target.download`: save a URL into the download directory.
+     *
+     * First an HTTP request made through the session's own context (its cookies and login state, its proxy and
+     * user agent); if that does not produce bytes, the URL is opened in a throwaway page of the same context and the
+     * attachment download that navigation triggers is captured. A request that returns nothing is an error, never a
+     * zero-byte file. The session's own page is not navigated.
+     */
+    download(url: string, opts?: {
+        filename?: string;
+        timeoutMs?: number;
+        signal?: AbortSignal;
+        session?: string;
+    }): Promise<DownloadResult>;
+    /** `inspect.downloads`: this session's download records (newest last); reading never creates a session bucket. */
+    downloadRecords(opts?: {
+        limit?: number;
+        clear?: boolean;
+        session?: string;
+    }): {
+        downloadDir: string;
+        records: DownloadRecord[];
+        total: number;
+    };
     consoleMessages(opts?: {
         level?: string;
         limit?: number;

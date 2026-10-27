@@ -4,7 +4,9 @@
 
 自包含的浏览器运行时插件 for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）。
 
-把 **Playwright / Patchright（可选 Chromium 驱动）** 与 **OpenCLI** 作为插件自身的 npm 依赖打包（优先插件本地，缺省回退全局复用），对外提供一个 `browser` 服务 + 一组交互式浏览器工具。`dsh-web-search-pro` 通过 `inject: ['browser']` 注入该服务，驱动它的浏览器 / OpenCLI 后端——**不再依赖全局 CLI**。
+把 **Playwright / Patchright（可选 Chromium 驱动）** 作为插件自身的 npm 依赖，对外提供一个 `browser` 服务 + 一组交互式浏览器工具。`dsh-web-search-pro` 通过 `inject: ['browser']` 注入该服务，驱动它的浏览器 / OpenCLI 后端。
+
+**浏览器本身不随插件下载**：装了 Google Chrome 或 Microsoft Edge 就直接用（自动检测，不用配置）；都没有时才需要装 Playwright 的 Chromium（`runtime.install`，下载约 190 MB）。**OpenCLI 是可选的、需要单独安装**（`npm i -g @jackwener/opencli`）：只有 `opencli.*` 动作和 Web Search Pro 的 `browser-opencli` 后端用到它，不装也不影响其他浏览器工具，也不会让 `dsh plugin add` 报失败（见「第一次使用」与「升级到 0.2.2」）。
 
 ## 兼容与发布通道
 
@@ -16,6 +18,15 @@
 | `0.2.0-rc.1`（预发布，历史记录） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 325 项测试、64 项真实浏览器 e2e 与真实 Web profile 验证 |
 | `0.2.0` | `dsh-v0.2.0-rc.2` | 第一个面向 DSH 桌面版 0.2.0 线的正式版，也是后续开发的基底。**只支持 `dsh-v0.2.0-rc.2` 这一条线**（peer `>=0.2.0-rc.2 <0.2.1-0`）：去掉为更旧宿主保留的兼容分支（`settings.register` 的 live scope 回退等），并去掉对 `settings` 服务的必需依赖（只声明 `inject: ['tools']`，没有 Settings 服务的组合里也能启动）；不改工具、动作、schema、文本与审批规则。在 `0.2.0-rc.2` 上完成 327 项测试、64 项真实浏览器 e2e 与 peer 双解析模式检查。旧宿主（0.1.7 线，`dsh-v0.1.7-rc.2`）继续使用 `0.1.17` |
 | `0.2.1` | `dsh-v0.2.0-rc.2`（不变） | 相对 `0.2.0` 的补丁版，DSH 基线与 peer 范围（`>=0.2.0-rc.2 <0.2.1-0`）不变，只含两项：(1) 参数无效的调用不再先弹审批：审批钩子先判断动作是否被当前 `automationMode` 禁用（禁用仍直接拒绝），再用与 `runAction` 相同的校验检查参数，无效则不询问，执行层再校验一次并返回带精简 schema 的 `INVALID_ARGS`，不执行任何页面动作；参数有效时的审批规则与理由不变。(2) “探索转草稿”（`draft_from_journal`）的指导文本补充。不改动作、参数 schema 与审批规则。在 `0.2.0-rc.2` 上完成 337 项测试与 66 项真实浏览器 e2e |
+| `0.2.2` | `dsh-v0.2.0-rc.2`，`dsh-v0.2.1-rc.2` / `rc.3` / `rc.4` | 同时支持两条线（受管 peer `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`，Cordis peer `~4.0.4`，`devDependencies` 锁在 `0.2.1-rc.3`，schemastery 3.18.5）。**源码不为任何一个宿主版本改动**：在真实安装的 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4 宿主上都完成了干净安装、Web 设置卡片渲染与保存、skill 注册、资产 RPC、`tools/pre-execute` 审批钩子的验证（见 `docs/validation/2026-10-28-compat-dist.md`）。**安装行为变化**：OpenCLI 不再是依赖（它的安装脚本会让 pnpm 11 的 `dsh plugin add` 失败），Playwright 的 Chromium 缺失时自动改用系统 Chrome / Edge（见「第一次使用」）。功能面新增 context 创建期选项、下载落盘与策略覆盖层（见「升级到 0.2.2」）。0.2.0 线宿主此前只能用 `0.2.1`，现在也可以装 `0.2.2` |
+
+`0.2.2` 的范围是**两段**：`>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`，各对应一条实测过的线（0.2.0 线只有 `0.2.0-rc.2`，
+0.2.1 线是 `rc.2` / `rc.3` / `rc.4`）。`0.2.0-rc.1`、`0.2.1-alpha.*`、`0.2.1-rc.1` 与 `0.2.2` 及以上（含它的预发布）一律拒绝。
+Cordis peer 是 `~4.0.4`：0.2.0-rc.2 宿主声明 `~4.0.4`，0.2.1-rc.2 起声明 `~4.0.5`，两个小版本在本插件用到的契约上没有差别
+（插件只把 Cordis 当类型用；在把 Cordis 固定成 4.0.4 的 0.2.0-rc.2 宿主上也验证了加载与工具注册）。schemastery 3.18.5 仍被 `>=3.18.2 <4` 覆盖。
+把 `0.2.0` 线放回范围的依据：插件在 0.2.0-rc.2 上用到的宿主接口（`tools` 注册与 `tools/pre-execute` 钩子、`Config` 的 `.volatile()` 与
+`settings/mutate` 原子保存、`connection.rpc.handle` + `webServer`、`skills.registerProvider`、客户端模块表里的 primitives / slots /
+plugin-manager）与 0.2.1 线逐项一致，真实宿主上的差别只有 Cordis 小版本。`test:peers` 把四个基线并入受支持矩阵，并断言被拒绝的版本。
 
 `0.1.17` 把 DSH 运行时依赖由精确锁定改为范围声明（`^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.1-0`），
 使同一份包可装在 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代宿主上。`0.2.0-rc.1` 起的新功能（动作体系、skill、recipe v2、
@@ -26,33 +37,33 @@
 
 - 宿主的组装期校验用的是 `semver.satisfies(host, range, { includePrerelease: true })`，所以「单范围能不能过宿主」不是关键。
   真正决定装机成败的是 npm/pnpm 的**默认** semver：预发布版本只有在某个比较符自带同号（同 major.minor.patch）预发布时才被判为满足。
-  于是 `>=0.1.7-rc.2 <0.2.1-0` 这种写法过得了宿主校验，却会让 `dsh plugin add` 报 ERESOLVE（下界 tuple 是 0.1.7，接不住 0.2.0-rc.2）；
-  `>=0.2.0-rc.2` 这个比较符自带 `0.2.0` 的预发布，是**承重**的，必须保留。
-- 上界是 `<0.2.1-0` 而不是 `<0.2.1`：后者放行 `0.2.1-alpha.1` 这类 0.2.1 的预发布。收口后，若 0.2.1 真出现破坏，
-  会在**组装期**直接报 `is incompatible with dsh 0.2.1` 并点名，而不是拖到用户机器上变成运行期怪错
+  于是一段式的 `>=0.2.0-rc.2 <0.2.2-0` 过得了宿主校验，却会让 `dsh plugin add` 报 ERESOLVE（下界 tuple 是 0.2.0，接不住 0.2.1-rc.2）；
+  所以写成两段，每一段的下界（`>=0.2.0-rc.2`、`>=0.2.1-rc.2`）都自带该线的同号预发布，是**承重**的，必须保留。
+- 上界是 `<0.2.2-0` 而不是 `<0.2.2`：后者放行 `0.2.2-alpha.1` 这类 0.2.2 的预发布。收口后，若 0.2.2 真出现破坏，
+  会在**组装期**直接报 `is incompatible with dsh 0.2.2` 并点名，而不是拖到用户机器上变成运行期怪错
   （`0.1.5 → 0.1.7` 曾一次性打断所有按 `0.1.5-alpha.1` 构建的插件）。
 - 范围只表示「测过哪些」，不等于承诺不破坏；真正的防线是每换一个 DSH 版本重跑一遍这套验证。
-  `pnpm run test:peers`（已并入 `pnpm verify`）用两种解析模式逐个断言受管 peer：`0.2.0-rc.2` 必须通过，
-  `0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.1-alpha.1` 必须被拒绝；并自带 `--selftest` 已知行为自校验。
+  `pnpm run test:peers`（已并入 `pnpm verify`）用两种解析模式逐个断言受管 peer：`0.2.0-rc.2`、`0.2.1-rc.2` / `rc.3` / `rc.4` 必须通过，
+  `0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.1-alpha.*`、`0.2.1-rc.1`、`0.2.2-alpha.1`、`0.2.2` 必须被拒绝；并自带 `--selftest` 已知行为自校验。
 
 `0.1.15` 使用 DSH 新客户端分包：状态存储来自
 `dsh-client-store`，设置契约来自 `dsh-client-ui-settings`，客户端 Context
 来自 Cordis。npm 上 `0.1.15-alpha.2` 仍声明旧版 DSH peer，不能与本版混用。
 
 设置的读取不再对宿主版本做适配：Host 半边直接使用 Loader 传给 `apply` 的条目配置（设置页由条目的 `Config` schema 派生，
-条目 id 为 `browser`），浏览器设置卡片使用 `ConfigForm`/`ctx.configForms`，`devDependencies` 锁定 `0.2.0-rc.2`。
+条目 id 为 `browser`），浏览器设置卡片使用 `ConfigForm`/`ctx.configForms`，`devDependencies` 锁定 `0.2.1-rc.3`（类型与单测按这一版；0.2.0-rc.2 与 0.2.1-rc.4 靠真实宿主验证，不在 devDependencies 里）。
 可编辑字段都是 `.volatile()`：保存后新值写入运行中的引用，但浏览器进程、工具暴露与审批规则在启动时一次读取，
 所以保存后仍需重启 profile 才生效（只有提示文本覆盖里的目录、错误提示等按调用实时读取，见「自定义提示文本」）。
 
-插件只声明 `inject: ['tools']`，**不依赖宿主的 `settings` 服务**：Cordis 4.0.4 把声明了的 `inject` 一律当作必需，若声明 `settings`，
+插件只声明 `inject: ['tools']`，**不依赖宿主的 `settings` 服务**：Cordis 4.0.5 把声明了的 `inject` 一律当作必需，若声明 `settings`，
 在没有该服务的组合（如 sdk-minimal，或关了 settings 行的 profile）里插件会一直挂起。插件的 Host 半边从不读取 `ctx.settings`，
 配置来自 Loader 条目；没有 Settings 服务时按 `Config` 默认值运行，设置卡片只是不显示（客户端只在宿主提供 `browser` 命名空间时才挂载它）。
 
 ## 安装
 
 ```bash
-# 默认安装（新的 browser_index / browser_call 工具体系，面向 dsh-v0.2.0-rc.2 宿主）：
-dsh plugin --profile web add @anweat/dsh-browser@0.2.1
+# 默认安装（新的 browser_index / browser_call 工具体系，面向 dsh-v0.2.0-rc.2 与 dsh-v0.2.1-rc.2 ~ rc.4 宿主）：
+dsh plugin --profile web add @anweat/dsh-browser@0.2.2
 # 宿主仍是 0.1.7 线（dsh-v0.1.7-rc.2）时，固定安装 0.1.17（旧的 browser_* 工具体系）：
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17
 # 或本地目录 / tarball：
@@ -61,13 +72,46 @@ dsh plugin --profile web add ./dsh-browser
 dsh --profile web
 ```
 
-> `0.2.0` 与 `0.2.1` 只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`）；范围之外的宿主版本未经验证，
+> `0.2.0` 与 `0.2.1` 只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`），`0.2.2` 支持 `dsh-v0.2.0-rc.2` 与
+> `dsh-v0.2.1-rc.2` ~ `rc.4`（peer `>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`）；范围之外的宿主版本未经验证，
 > 旧宿主（`dsh-v0.1.7-rc.2` 线）请固定使用 `0.1.17`。预发布通道 `@next` 不再用于安装，`0.2.0-rc.1` 仅作历史记录。
 > 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
+## 第一次使用
+
+1. **安装插件**（上一节）。pnpm 11 下 `dsh plugin add` 应当直接成功、退出码 0，不需要改 `pnpm-workspace.yaml`。`0.2.1` 及更早的版本把 OpenCLI 作为依赖，它的安装脚本会被 pnpm 11 拦下，`dsh plugin add` 报 `ERR_PNPM_IGNORED_BUILDS` 失败——而且包其实已经装上、插件却没有被加入 profile 的 bundles，之后再 `add` 一次也不会补上。`0.2.2` 不再把 OpenCLI 作为依赖，这个问题不会出现。
+2. **重启 profile**（web profile 关闭了 HMR）。设置卡片在「设置 → 插件 → Browser automation」；顶部状态摘要会直接说明运行环境：
+   - 没有任何可启动的浏览器：红色徽章“没有可用浏览器”，点“查看详情”有可照做的步骤；
+   - 用的是系统 Chrome / Edge（Playwright 的 Chromium 没下载过）：徽章“浏览器：系统 Chrome / Edge”，这是正常状态，什么都不用做；
+   - 开着 OpenCLI 但没装：徽章“OpenCLI 未安装”，不是警告。
+3. **浏览器**。让模型调用 `browser_call({action:"runtime.status"})`（或看设置卡片）确认 `browser.ready` 为 `true`：
+   - 有 Google Chrome / Microsoft Edge：自动使用，不下载任何东西（`channel` 保持默认 `chromium` 即可）。Playwright 的 Chromium 一旦下载过，就改用它；填了 `executablePath`，或把 `channel` 设为 `chrome` / `msedge`，则固定用你指定的那个，找不到就报错、不会悄悄换别的；
+   - 都没有：选一条——① 装 Chrome 或 Edge；② 让模型调用 `runtime.install` 动作（下载 Playwright Chromium，约 190 MB，磁盘占用约 600 MB，会询问审批）；③ 终端里 `node "<profile>/node_modules/playwright/cli.js" install chromium`（准确路径写在错误信息和 `runtime.status.browser.installAdvice` 里；如果设置了 `PLAYWRIGHT_BROWSERS_PATH`，命令里会带上它）；④ 在设置里填 `executablePath`。
+   - 开了 `autoInstall: true` 的人：缺 Chromium 时仍然自动下载（不会改用系统 Chrome），行为同以前。
+4. **OpenCLI（可选）**。要用站点 adapter（`opencli.*`）或 Web Search Pro 的 `browser-opencli` 后端时：`npm i -g @jackwener/opencli`，装完重启 DSH，再调用 `opencli.status`。插件按这个顺序找它：环境变量 `DSH_BROWSER_OPENCLI`（`main.js`、`opencli` 启动器或包目录）→ profile 里自己装的 → `PATH` 上的 `opencli` → `npm root -g` → 常见全局目录（Homebrew、`~/.npm-global`、nvm / fnm / Volta 的各个 Node 版本）。从程序坞启动的桌面版没有 shell 的 `PATH`，所以最后两步专门兜这种情况；找不到时设 `DSH_BROWSER_OPENCLI`。
+   想把 OpenCLI 装进 profile 里（而不是全局）：先在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: { '@jackwener/opencli': false }`（它的安装脚本只做 shell 补全和清理测试文件，不运行也不影响功能），再 `dsh plugin --profile <name> add @jackwener/opencli`。
+
 ## 从旧版本升级
+
+### 升级到 0.2.2
+
+- **设置界面重做**（用户反馈“文字和框体太多，不知道怎么配，没有注释”）：状态摘要 + 九个可折叠分组（默认只展开“常用”）+ 一直在视野里的保存条（“N 项未保存 / 放弃 / 保存”）；下拉、开关、数字加单位、chips、列表和弹窗取代了整页文本框。登录 profile、提示词、自动化资产都是“列表 + 编辑弹窗”，提示词弹窗左右对照“默认文本｜我的覆盖”。每个键都有注释：字段旁一句话 + `?` 里的长说明，properties 文本模式每个键前一行注释，示例配置与导出的提示词默认文本（新的带注释 YAML）同样如此。保存结构、`Config` schema 与运行时行为不变（`authProfiles` 现在也能在卡片里改，它在 schema 里本来就可写）。详见“配置”一节。
+
+- **同时支持 `dsh-v0.2.0-rc.2` 与 `dsh-v0.2.1-rc.2` ~ `rc.4`**：受管 peer 为 `>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`
+  （今天的桌面端是 0.2.1 线，`0.2.1` 的 peer 会拒绝它；仍在 0.2.0-rc.2 上的用户同样可以装），Cordis peer 为 `~4.0.4`，
+  `devDependencies` 锁到 `0.2.1-rc.3`（schemastery 3.18.5）。源码不需要为任何一个宿主版本改动（见上文兼容表与
+  `docs/validation/2026-10-28-compat-dist.md`）。验证：typecheck、构建、peer 双解析模式检查、单测、真实 Chromium e2e 与
+  client bundle 检查全绿，三个宿主版本上分别做了干净安装与设置卡片保存。
+- **干净安装不再失败：OpenCLI 不再是依赖，改为可选并单独安装。** 旧版本把 `@jackwener/opencli` 列为 `dependencies`，它的 install 脚本（只做 shell 补全和清理测试文件）在新用户的 profile 里被 pnpm 11 拦下，`dsh plugin add` 以 `ERR_PNPM_IGNORED_BUILDS` 失败；更糟的是宿主只在“新增的依赖”上把插件加入 bundles，那次失败之后再 `add` 也不会补上，插件从来没有被启用。改成 `optionalDependencies` 没用（pnpm 11 仍然拦）。现在：包里没有 OpenCLI；`opencli.*` 动作在找到 OpenCLI 时照常工作（`PATH`、全局 npm 目录、nvm / fnm / Volta、profile 里自己装的、`DSH_BROWSER_OPENCLI`），找不到时返回带 `npm i -g @jackwener/opencli` 的说明；`runtime.status` 多了 `opencliSource` 与 `opencliInstallHint`，未安装不再是 `runtimeWarnings`。**已经在用内置 OpenCLI 的人**：升级后它会从 profile 里消失，如果你需要它，`npm i -g @jackwener/opencli` 并重启即可（已经全局装过的不用做任何事）。Web Search Pro 优先使用独立的 `opencli`，它的 `browser-opencli` 后备后端同样依赖这份安装。
+- **新用户第一次使用不再卡在“没有 Chromium”：** 默认 `channel: chromium` 在 Playwright 的 Chromium 没有下载过时，自动改用本机的 Google Chrome 或 Microsoft Edge（macOS、Windows、Linux 的常见安装位置；不下载、不联网）；都没有时，`runtime.status` 的 `browser.ready` 为 `false`，`browser.installAdvice`、启动失败的错误信息、`browser_index` 根视图、设置卡片的状态摘要都给出同一组可照做的选项（装 Chrome / Edge、`runtime.install`、终端命令、`executablePath`）。`runtime.status` 新增 `browser`（`ready`、`source`、`path`、`note`、`installAdvice`）与 `systemBrowsers`；`chromiumInstalled` 与 `chromiumExecutablePath` 照旧。显式配置的 `executablePath` / `channel` 永远照你写的用，不会被悄悄替换，写错了会点名是哪个设置错了。
+- 行为、配置键与审批规则与 `0.2.1` 相同；从 `0.2.1` 直接升级即可，不配置新键时行为不变（除上面两条）。
+- 新增 context 创建期选项：配置键 `viewportMode` / `viewportWidth` / `viewportHeight` / `userAgent` / `locale` / `timezoneId` / `proxyServer` / `proxyBypass`，以及 `target.open` 的按次参数 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer`（见下文“浏览器上下文选项”）。
+- 新增 `target.download` 与 `inspect.downloads`，以及配置 `downloadDir`、`downloadMaxBytes`（见下文“下载落盘”）。新增 `target.download` / `inspect.downloads` 使动作总数从 34 变为 36。
+- **嵌套写法不再被静默忽略**：配置里写 `viewport: {width, height}`、`proxy: {...}`、`contextOptions`、`download(s)` 会被忽略，并在 `runtime.status` 的 `runtimeWarnings` 里说明应使用哪些扁平键。**配置错误不会让插件加载失败**（否则设置卡片也会一起消失）：无效的值回退到默认并同样出现在 `runtimeWarnings`。
+- 带 `proxyServer` 或 `userAgent` 的 `target.open` 在 `standard` / `autonomous` 下需要审批，`read-only` 拒绝，`unrestricted` 放行；`target.download` 与 `act.upload` 同档。
+- 新增“策略覆盖层”：agent 可经 `inspect.policy` 与 `runtime.set_auth_profile` / `remove_auth_profile` / `set_usage_policy` / `reset_policy` 编辑限制类设置（authProfile 的域名、新建/删除，usagePolicy 限流项），不必用户手填。**`unrestricted` 下 agent 可自行放宽限制**，见“策略覆盖层与风险”。动作总数 36 变 41；新增配置 `allowPrivateHosts`（默认关）。
 
 ### 升级到 0.2.1
 
@@ -134,10 +178,10 @@ DSH 会话示例：
 
 | 层 | 实际是什么 | 打包还是复用 |
 |---|---|---|
-| **chromium 内核** | 共享缓存 `%LOCALAPPDATA%\ms-playwright`（约 400MB） | **永远复用共享缓存**，不塞进插件、不重复下载；缺失时 `runtime.install` 一键补 |
+| **浏览器** | 系统 Google Chrome / Edge，或共享缓存 `%LOCALAPPDATA%\ms-playwright` 里的 Playwright Chromium（约 400MB） | **安装插件时不下载任何浏览器**。优先 Playwright Chromium，没有就用系统 Chrome / Edge；都没有时 `runtime.install` 一键补 |
 | **playwright 驱动**（JS 包） | `playwright` npm 依赖 | 插件本地 node_modules 优先，缺省回退全局 npm |
 | **patchright 驱动**（可选） | 与 Playwright 同版本的 Chromium 兼容驱动 | 插件内置；配置 `browserRuntime: patchright` 才启用 |
-| **opencli**（纯 Node CLI） | `@jackwener/opencli` npm 依赖 | 同上，本地优先 / 全局复用 |
+| **opencli**（纯 Node CLI，可选） | `@jackwener/opencli`，**不是**本包依赖 | 不打包：它的安装脚本会让 pnpm 11 的 `dsh plugin add` 报失败。要用就 `npm i -g @jackwener/opencli`，插件在 `PATH`、全局 npm 目录和 profile 里找它 |
 
 ### 把共享浏览器缓存放到别的盘（可选）
 
@@ -193,6 +237,8 @@ cookie 与 storage，跨 session 串号正是要防的事。
 |---|---|
 | `target.open` / `act.*` / `script.evaluate` / `observe.*` / `target.close` | 仅调用方 session |
 | `inspect.console` / `inspect.requests` | 仅返回调用方 session 抓到的记录 |
+| `inspect.policy` / `runtime.*_policy` / `runtime.set_auth_profile` | 策略覆盖层是全局的（所有 session 共用一份生效策略），不属于任何 session；审计里的 session id 只对产生它的 session 可见，别的 session 看到 `another session` |
+| `target.download` / `inspect.downloads` | 下载走调用方 session 的 context 与登录态；下载记录只在该 session 的内存里，互不可见 |
 | `runtime.status` 的 `activeUrl` | 仅报告调用方 session 的页面 |
 | `render` / `snapshot` / `searchResults` / `crawl` / OpenCLI | 每次调用自建临时 context，本就无共享状态 |
 
@@ -200,7 +246,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 `close()` 才整体拆掉所有 session 的 context 与进程。
 
 会话槽位上限由 `maxSessions`（默认 8）控制，超出后关闭最久未使用的 session。
-读取类调用（`runtime.status` / `inspect.console` / `inspect.requests`）**不会**
+读取类调用（`runtime.status` / `inspect.console` / `inspect.requests` / `inspect.downloads`）**不会**
 创建槽位，也不会触发淘汰——否则一次查询就会挤掉别人的页面。
 
 不带 `exec.agent` 的调用方（例如其他插件直接消费服务）落在共享桶里，行为与
@@ -217,6 +263,8 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `autonomous` | 页面交互、写 Recipe、缓存清理和规则写入可直接执行 | 外部 UserScript、通用 OpenCLI、浏览器/后端安装仍强制审批 | 所有安全校验持续启用 |
 | `unrestricted` | 所有上述工具均不触发审批，适合隔离环境中的无人值守测试 | 无审批提示 | 仍执行域名、元数据、参数、大小和步骤数校验 |
 
+**策略动作**（`runtime.set_auth_profile` 等）：收紧在所有模式下直接执行，放宽在 `read-only` 拒绝、`standard` / `autonomous` 询问、`unrestricted` 直接执行（见“策略覆盖层与风险”）。
+
 `unrestricted` 会允许模型直接运行外部脚本、通用 CLI 和安装命令，只应在隔离的测试 profile 或明确授权的自动化环境中使用；日常 profile 保持 `standard`。它只取消人工确认，**不会取消 `usagePolicy` 的并发、突发、页数、深度、重试与冷却保护**。模式改变后需要重启 DSH profile，工具目录才会按新配置重新注册。
 
 ## 工具与动作
@@ -226,7 +274,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `toolSurface` | 注册的工具 | 常驻上下文 | 用途 |
 |---|---|---|---|
 | `indexed`（默认） | `browser_index`、`browser_call` 两个 | 约 0.3k token | 渐进披露：先看目录，再按需查看单个动作的 schema |
-| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 14.5k token（34 个工具；recipe 的 v2 schema 在 `automation.develop` / `automation.run_recipe` 里内联展开） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
+| `flat` | 每个可用动作一个工具，名为 `browser_<group>_<action>` | 约 17.4k token（41 个工具；recipe 的 v2 schema 在 `automation.develop` / `automation.run_recipe` 里内联展开） | 对照与调试；与 `indexed` 共用同一份动作注册表和同一个分发入口 |
 
 `indexed` 下：`browser_index()` 列出能力组和当前环境状态（`automationMode`、Chromium 是否已安装）；`browser_index({group})` 列出该组动作；`browser_index({action})` 给出完整参数 schema；`browser_index({query})` 按关键词检索。`browser_call({action, args})` 执行动作，服务端按 schema 校验参数，校验失败返回 `INVALID_ARGS` 并附上精简 schema。所有动作的返回值使用同一信封：
 
@@ -258,7 +306,8 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 | 动作 | 作用 |
 |---|---|
-| `target.open` | 打开 URL，返回标题/可读文本/全页截图路径；可显式启用 console/network 内存捕获 |
+| `target.open` | 打开 URL，返回标题/可读文本/全页截图路径；可显式启用 console/network 内存捕获；可选 `viewport`、`userAgent`、`locale`、`timezoneId`、`proxyServer`（context 创建期选项，见“浏览器上下文选项”） |
+| `target.download` | 把 URL 的文件保存到 `downloadDir`（带本 session 登录态），返回绝对路径、字节数、sha256；失败即报错，不留 0 字节文件 |
 | `target.close` | 关闭当前页（下次 open 全新） |
 | `target.list` | 列出本 session 的页面（自己打开的页加上弹窗），含 `id`、`url`、`title`、`active` |
 | `target.select` | 把本 session 的某个页面（`target.list` 里的 id）切换为当前页；弹窗不会自动成为当前页 |
@@ -277,6 +326,12 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `act.upload` | 把现有本地文件设置到 `input[type=file]`；绝对路径、数量和总大小受限 |
 | `inspect.console` | 读取本次显式捕获的脱敏 console 记录 |
 | `inspect.requests` | 读取本次显式捕获的失败及 HTTP 4xx/5xx 请求；无 body/header |
+| `inspect.policy` | 读生效的 authProfile 与限流项、覆盖层改了什么、最近的审计；`revision` 供写动作作乐观锁 |
+| `runtime.set_auth_profile` | 新建或修改 authProfile 的 `allowedDomains` / `persistState` / `storageStatePath`；收紧不询问，放宽按模式处理 |
+| `runtime.remove_auth_profile` | 删除 authProfile（总是允许，用到它的 session 立即关闭） |
+| `runtime.set_usage_policy` | 修改 `usagePolicy` 限流项；更严不询问，更松按模式处理 |
+| `runtime.reset_policy` | 把覆盖层回滚到基线（全部、仅限流项或某个 profile） |
+| `inspect.downloads` | 列出本 session 的下载记录（含点击/导航触发的），只含内存记录，`clear` 只清记录不删文件 |
 | `script.evaluate` | 在当前页执行最长 20,000 字符的 JavaScript 表达式，返回最多 100,000 字符 JSON |
 | `script.catalog` | 列出内置只读脚本及其 SHA-256 |
 | `script.validate` | 解析外部 UserScript 的元数据、域名、grant、能力与哈希，不执行 |
@@ -374,11 +429,86 @@ return [...document.querySelectorAll('.result')].slice(0, 20).map(card => ({
 - `authProfile` 从配置的 `storageStatePath` 载入 Cookie、localStorage 等登录态。只有 `persistState: true` 才在 context 关闭时原子回写该文件；全局兼容路径默认不会被交互会话改写。
 - `script.evaluate` 可读取 `document.cookie`，因此能看到当前来源的非 HttpOnly Cookie；浏览器不会向页面 JavaScript 暴露 HttpOnly Cookie。除 `unrestricted` 外，每次执行都需要确认。
 - `act.upload` 只读取调用中列出的绝对路径并交给当前页面上传控件，不修改源文件，也不会遍历目录。除 `unrestricted` 外，即使在 `autonomous` 模式也需要确认。
-- `observe.screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；自定义截图名只允许普通文件名，拒绝绝对路径、目录分隔符和 `..`。持久登录态只写配置的状态文件。`script.evaluate` 触发的浏览器下载不会由该工具保存或返回，下载落盘需要后续单独设计显式目录和文件名规则。
+- `observe.screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；自定义截图名只允许普通文件名，拒绝绝对路径、目录分隔符和 `..`。持久登录态只写配置的状态文件。下载文件只写入 `downloadDir`，见下一节。`script.evaluate` 触发的浏览器下载不由该动作保存或返回：那个下载事件虽然会被同一个监听器按下面的规则落盘并出现在 `inspect.downloads`，但 `script.evaluate` 的结果里不会带路径；需要文件时直接用 `target.download`。
 - console/network 捕获必须由 `target.open.capture` 显式启用，只在内存保留最多 200 条；记录文本和 URL 查询中的常见 token/cookie/password 字段会脱敏，网络只保留方法、URL、失败原因或 4xx/5xx 状态，不保存 header/body。
 
 常见读取任务优先用内置脚本：`article-clean`、`links`、`jsonld`、`forms`。它们不返回表单当前值，
 也不触发点击或网络写操作。
+
+## 策略覆盖层与风险
+
+“限制类”设置（authProfile 的域名与登录态文件、`usagePolicy` 限流项）现在可以由 agent 经动作编辑，用户不必手填。机制是一层受管理的**覆盖文件** `$DSH_HOME/data/browser/policy-overlay.json`（原子写、`0600`，带 `revision`、`updatedAt` 和最近 50 条审计），合并在设置面板的配置（基线）之上，**覆盖层优先**。它只能保存两类字段：`authProfiles` 和 `usagePolicy`。
+
+**动作与审批**——按方向判断，不按动作名：
+
+| 变更 | `read-only` | `standard` / `autonomous` | `unrestricted` |
+|---|---|---|---|
+| 收紧：删域名、缩小范围、删 profile、`persistState` 关闭、限流更严 | 直接执行 | 直接执行 | 直接执行 |
+| 放宽：加域名、新建 profile、`persistState` 开启（写磁盘）、换状态文件、限流更松、回滚到更宽的基线 | 拒绝 | 询问，理由里写出 diff | 直接执行，结果带 `risk` |
+
+- 每次修改必须带 `reason`（3–300 字符），返回 `before` / `after` / `changes`，并写入审计（来源、session、时间、reason、方向、变更行）。可选 `expectedRevision` 作乐观锁，过期则报错且什么都不改。
+- 变更立即生效：用到被收回登录态的 session 会被关闭（`sessionsClosed`），下一次 `target.open` 重新开始；撤销的域名在下一次调用就被拒绝，不是等到下次启动。放宽后，已经持有该登录态 context 的 session 在下一次 `target.open` 会重建 context（`contextRebuilt.changed` 含 `authProfileScope`），新域名的 Cookie 才会注入；不重建的话旧 context 里没有那个域名的 Cookie。
+- **风险与 unrestricted 行为**：`unrestricted` 不会询问，所以 agent 可以自行加域名、新建 profile、把限流放宽到配置允许的上限。放宽的结果里总带 `risk: {level: "elevated", loosened, approval, note}`，设置卡片的“策略覆盖层”分区列出生效值、每项的来源（基线 / 来自覆盖层 / 覆盖层新建）和审计。要避免 agent 自行放宽，请不要对该 profile 使用 `unrestricted`（`autonomous` 下放宽仍然询问）。
+- 面板里“清除覆盖 / 回滚到基线”按钮与每个 profile 的“回滚此项”只动覆盖层，不改基线配置，同样写审计。
+
+**校验**（agent 写入时和每次加载覆盖文件时各做一遍，任何一项不过，写入被拒；已有文件则整体被忽略）：
+
+- **域名**：规范化为小写 punycode；拒绝 `*`、裸 TLD、公共后缀（内置的小列表：`co.uk`、`com.cn`、`github.io`、`vercel.app`、`pages.dev` 等加 ccTLD 二级的结构规则，不是完整的 PSL）、IP 字面量（含 `127.1`、`2130706433` 这类写法和通配 IP）、含端口/路径/协议/凭据/空白/控制字符的输入、重复项（`*.a.com` 与 `a.com` 视为同一范围）；通配只允许 `*.example.com` 且根必须可注册；每个 profile 最多 50 个。localhost、`.local`/`.internal` 等内网名和回环/RFC1918 IPv4 只有在配置 `allowPrivateHosts: true` 时才接受；云元数据和链路本地地址（`169.254.0.0/16`）始终拒绝。
+- **profile id**：字母数字开头，只含字母数字、`_`、`-`，≤40；禁止 `__proto__`、`constructor`、`prototype` 等对象原型键。
+- **storageStatePath**：必须是绝对路径、`.json`，位于 `$DSH_HOME/data/browser/auth/` 内（拒绝 `..`、符号链接逃逸、已存在的非普通文件、`snapshotDir` / `downloadDir` 内的路径、别的 profile 正在用的文件）；auth 目录与这两个目录重叠时 agent 设置的路径一律拒绝。`persistState: false` 的新 profile 要求状态文件已存在（agent 无法创建它，需要用户放置，或开启 `persistState` 让它在登录后生成）。基线里配置的路径不受 auth 目录限制，agent 不改它就保持原样。
+- **usagePolicy**：与配置相同的整数范围（如 `maxConcurrency` 1–8、`minDelayMs` 0–60000），且不能超出；未知键拒绝。
+- **覆盖文件本身**：解析失败、校验和不符（被手工编辑过）、含被校验拒绝的值或被拒绝的未知键时，整个文件被忽略，**回退到基线**，并在 `runtime.status` 的 `runtimeWarnings` 和设置卡片里给出警告，不会半应用；此时写动作被拒绝，直到用 `runtime.reset_policy` 或面板按钮清除（坏文件改名为 `policy-overlay.json.corrupt-<时间>` 保留）。覆盖文件由插件管理，不要手工编辑。
+
+校验和只能发现意外修改，不是防止有本机文件写权限的攻击者的措施：这类攻击者能同时改文件和校验和，但仍过不了加载时对域名、路径和数值的重新校验。
+
+## 下载落盘
+
+`target.download({url, filename?, timeoutMs?})` 把一个 HTTP(S) URL 的文件保存到 `downloadDir`：
+
+- **带登录态**：使用调用方 session 自己的 context（它的 Cookie、auth profile、代理和 UA）。session 没有页面时按 `defaultAuthProfile` 规则新建 context。session 的 auth profile 只允许发往其 `allowedDomains`：URL（以及重定向落点）在域名之外会被拒绝（`POLICY_DENIED`），不会带着登录态发出去。
+- **两步**：先用 context 发 HTTP 请求取回内容；请求失败（非 2xx、网络错误、空内容）再回退为在同一 context 的临时页面里导航，捕获 attachment 下载事件。当前页面不会被导航走。
+- **失败即报错**：0 字节结果删除文件并报错，绝不当成功；两步都失败时错误里同时给出两步的原因。失败也会记入 `inspect.downloads`。
+- **调用缓冲**：与 `target.open` 一样经过 `usagePolicy`（并发、突发、429/503 退避）。
+- **审批**：与 `act.upload` 同档——`read-only` 拒绝，`unrestricted` 放行，其余模式询问，理由里写出 URL。
+
+文件名与位置：
+
+- 默认取服务器建议的名字（`Content-Disposition`，否则 URL 最后一段，否则 `download`），也可用 `filename` 指定。只取 basename：来自服务器的名字会截掉目录部分并替换不可用字符；**你指定的 `filename` 更严格**——绝对路径、含 `/` 或 `\`、`..`、空名、Windows 保留名（`CON`、`NUL`、`COM1`…）以及含 `< > : " | ? *` 都会被拒绝（`INVALID_ARGS`）。控制字符一律去掉，扩展名保留，过长的名字被截断且保留扩展名。
+- **不覆盖**：重名时自动加递增后缀（`report.pdf` → `report-1.pdf`），先写到 `downloadDir` 内的临时文件，再用硬链接/独占复制原子地占用最终名字。文件只可能落在 `downloadDir` 内。
+- `downloadDir` 默认为 `$DSH_HOME/data/browser/downloads`（与 `snapshotDir` 的默认值同级），必须是绝对路径；`downloadMaxBytes` 默认 100 MiB（上限 10 GiB），超限即中止、删除半成品并报错。
+- 返回值：`path`（最终绝对路径）、`filename`、`bytes`、`sha256`、`suggestedFilename`、`source`（`request` 或 `browser`）、`finalUrl`（重定向后与请求不同时）。
+
+`inspect.downloads({limit?, clear?})` 读取**本 session** 的下载记录，除了 `target.download`，也包含点击、导航或脚本触发的下载（浏览器的 download 事件挂在 session 的页面上，统一按同样的规则落盘）。记录只在内存里，每个 session 最多 50 条，`clear` 只清记录不删文件；一个 session 看不到另一个 session 的记录，关闭或重建 context 不会清掉记录（文件还在磁盘上）。状态放在每个 session 自己的状态桶里，不存在会泄漏到别的调用结果里的全局“最近下载”标记；`target.open` 等动作的结果不会附带下载路径。
+
+PDF：本插件不抽取 PDF 文本。用 `target.download` 落盘后取返回的 `path` 交给其他工具处理。
+
+已知限制：第一步的 HTTP 请求由 Playwright 把响应体整体读入内存后再检查大小（`Content-Length` 超限会立即拒绝，但无法在读取途中中止）；浏览器下载事件那一步是流式写盘并按 `downloadMaxBytes` 中止的。把 `downloadMaxBytes` 调得很大时请留意内存。
+
+## 浏览器上下文选项
+
+视口、User-Agent、语言区域、时区和代理只能在 context **创建时**指定，因此有两层：
+
+1. **配置默认值**（扁平键，作用于插件创建的每一个 context，包括 `render`、`snapshot`、`crawl` 的临时 context）：
+
+| 键 | 含义 |
+|---|---|
+| `viewportMode` | `window`（默认，不传 viewport，保持现状）、`720p`（1280×720）、`1080p`（1920×1080）、`custom` |
+| `viewportWidth` / `viewportHeight` | 仅 `custom`：200–7680 / 200–4320 的整数；`custom` 缺任一项时回退为 `window` 并给出警告，其他模式下写了宽高会提示并忽略 |
+| `userAgent` | 不带控制字符，≤512 字符 |
+| `locale` | BCP 47，如 `en-US`、`zh-CN` |
+| `timezoneId` | IANA 时区，如 `Asia/Shanghai`、`UTC` |
+| `proxyServer` | `http://host:port`、`https://…`、`socks5://…`、`socks4://…`（缺省协议按 http）；**不支持账号密码**，带用户名/密码的地址会被拒绝 |
+| `proxyBypass` | 逗号分隔的主机列表（需要先有 `proxyServer`，否则提示并忽略） |
+
+非法值**不会让插件加载失败**：该键回退到默认值，`runtime.status` 的 `runtimeWarnings` 与设置卡片顶部状态摘要里的警告数（点开看详情）给出一条警告（键名、原值摘要、原因、如何修，代理地址里的账号密码会被遮蔽）。设置卡片的“默认参数”编辑区在保存前用同一套规则逐行校验，非法行显示行号与原因并禁用保存。这些键在插件挂载时解析，保存后需重启 profile。
+
+2. **按次参数**：`target.open` 的 `viewport {width,height}`、`userAgent`、`locale`、`timezoneId`、`proxyServer`。语义沿用 `authProfile` / `rulePack` 的先例：
+
+- 选项属于 session 的 context，直到 `target.close`。**省略的选项保持 context 当前值**（不会因为后一次调用没写而重建）；值与 context 已应用的不同，才会关闭旧 context 并用新选项重建。重建后原页面（含弹窗）已关闭，登录态只按 auth profile 的 `persistState` 规则持久化，其余 Cookie 丢失。结果里带 `contextRebuilt: {changed, note}` 和 `contextOptions`（当前生效的选项）。要回到配置默认值，先 `target.close` 再 `target.open`。
+- 参数在创建或关闭任何东西之前就校验，无效值返回 `INVALID_ARGS` 且不动当前页面。
+- **审批**：`proxyServer` 改变出口、`userAgent` 改变浏览器指纹，所以带这两项的 `target.open` 在 `read-only` 拒绝、`unrestricted` 放行、其余模式询问（理由里写出被改的项）；`viewport`、`locale`、`timezoneId` 不需要额外审批。配置里的默认值是部署方自己的设置，不再逐次审批。
+
+**代理实测（macOS，Chromium 1243 headless shell，Playwright 1.62.1 与 Patchright 1.62.1）**：启动浏览器时不带任何全局 `proxy`，仅在 `newContext({proxy})` 里设置，页面导航和 `context.request` 都确实经过了该代理，两个运行时表现一致，所以插件**没有**设置 `proxy: { server: 'per-context' }` 这个启动选项。注意 Chromium 对回环地址（`localhost`、`127.0.0.1`）本来就不走代理，这是浏览器自己的规则，不是配置失效；Windows 与 Linux 未在本机验证——若在某平台上发现 context 级代理不生效，需要在 `args` 里加 `--proxy-server=per-context` 之类的启动参数（尚未实测，不要当成已验证的方案）。
 
 ## Playwright Recipe
 
@@ -405,53 +535,55 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
 
 ## 配置（cordis.yml / patch config）
 
+下面是一份**每个键都带注释**的完整示例：注释说明用途、可选值或范围、默认值与风险；去掉不需要的键即回到默认值。设置卡片的“高级：文本模式”打印的是同样带注释的文本（注释行以 `#` 开头，读取时忽略）。
+
 ```yaml
 - insert:
     - id: browser
       name: '@anweat/dsh-browser'
       config:
-        automationMode: standard # read-only | standard | autonomous | unrestricted
-        toolSurface: indexed     # indexed（默认，browser_index + browser_call）| flat（每个动作一个工具）
-        browserRuntime: playwright # playwright | patchright
-        channel: chromium        # 'chromium'（打包内核）| 'msedge'（系统 Edge）
-        headless: true
-        opencliEnabled: true
-        usagePolicy:             # 所有模式都生效；无审批模式也不会绕过
-          minDelayMs: 750
-          maxConcurrency: 2
-          burst: 3
-          maxPagesPerRun: 20
-          maxDepth: 2
-          retryLimit: 2
-          backoffBaseMs: 1000
-          cooldownMs: 30000
-        automationAssets:
-          enabled: true
-          persistenceMode: suggest # off | manual | suggest | auto-draft
-          activationMode: manual   # 当前推荐值；不会因静态校验自动激活
-          minSuccessfulRuns: 3
-          minDistinctSessions: 2
-          successWindowDays: 14
-          minSuccessRate: 0.8
-          maxCandidates: 20
-          candidateTtlDays: 14
-          maxSuggestionsPerDay: 2
-          maxDrafts: 10
-          maxActiveAssets: 50
-          retrievalTopK: 5
-          catalogTokenBudget: 800
-          modelDevelopmentEnabled: true
-          maxModelDraftWritesPerSession: 3
-          maxTestCredentials: 5     # 每个资产保留最近 N 条测试凭据（激活只认绑定当前 revision 与内容哈希的 passed 凭据）
-          minInputSetsForActivation: 2  # 声明了输入的资产，激活要求当前版本的通过凭据至少覆盖 N 组输入（1–5）；无输入的资产不受影响
-        maxSessions: 8           # 同时持有 context+page 的 session 上限，超出淘汰最久未使用者
-        storageStatePath: ''     # Playwright 登录态 JSON（复用已登录会话）
-        authProfiles:
+        # ── 常用 ────────────────────────────────────────────────────────────
+        enabled: true            # 是否启用浏览器服务；false 时 agent 没有浏览器工具。默认 true
+        automationMode: standard # 自动化模式：read-only 只读 | standard 写操作逐次询问（默认）| autonomous 页面交互直接执行 | unrestricted 全部免审批（风险最高：agent 还能自行放宽登录域名与限流）
+        toolSurface: indexed     # 工具面：indexed（默认）= 只常驻 browser_index + browser_call，约 325 token | flat = 每个动作一个工具，常驻上下文大得多。改后需重启
+        opencliEnabled: true     # OpenCLI（站点 adapter 与 Chrome Browser Bridge）总开关。默认 true；OpenCLI 需要另外安装（npm i -g @jackwener/opencli），没装时只是 opencli.* 不可用
+
+        # ── 浏览器 ──────────────────────────────────────────────────────────
+        browserRuntime: playwright # 驱动：playwright（默认）| patchright（仅 Chromium，对反爬检测更友好）
+        channel: chromium        # 浏览器：chromium（默认：Playwright 的 Chromium，没下载过时自动用本机 Chrome / Edge）| chrome | msedge（固定用本机已装的那个）；Patchright 推荐 chrome
+        headless: true           # true 不显示窗口（默认）| false 显示；Patchright 通常关闭无头兼容性最好
+        autoInstall: false       # 缺 Playwright Chromium 时是否自动下载（下载约 190 MB，开启后不再改用系统 Chrome）。默认 false：有 Chrome / Edge 就直接用，没有再用 runtime.install
+        # executablePath: ''     # 自定义浏览器的绝对路径；留空：Playwright Chromium，缺失时用系统 Chrome / Edge
+        # cdpPort: 9222          # 本机 CDP 调试端口 1–65535；留空关闭。风险：同机其它程序可借此控制浏览器
+        maxSessions: 8           # 同时持有 context+page 的 session 上限 1–64，超出淘汰最久未使用者。默认 8
+        # args: ['--disable-gpu'] # 追加的 Chromium 启动参数；只加你理解的。默认 []
+        # snapshotDir: ''        # 截图目录（绝对路径）；默认 $DSH_HOME/data/browser/snapshots
+        verbose: false           # 输出启动与诊断信息。默认 false
+
+        # ── 页面环境（每个新 context 的起点；target.open 可按次覆盖，省略即沿用）──
+        viewportMode: window     # 视口：window（浏览器默认）| 720p | 1080p | custom；custom 时必须再写 viewportWidth / viewportHeight
+        # viewportWidth: 1280    # custom 的宽度 200–7680（像素）
+        # viewportHeight: 720    # custom 的高度 200–4320（像素）
+        # userAgent: ''          # User-Agent；留空 = 浏览器自带。风险：改变站点看到的指纹；agent 按次改它需要审批（unrestricted 除外）
+        # locale: en-US          # 语言标签（BCP 47）；留空 = 浏览器自带
+        # timezoneId: Asia/Shanghai # IANA 时区；留空 = 本机时区
+        # proxyServer: http://127.0.0.1:7890   # 代理；不支持账号密码，勿写凭据；留空 = 直连。agent 按次指定代理需要审批
+        # proxyBypass: example.com,.internal.test # 不走代理的主机，逗号分隔；需先设 proxyServer
+
+        # ── 下载 ────────────────────────────────────────────────────────────
+        # downloadDir: D:/dsh/downloads        # 下载目录（绝对路径）；默认 $DSH_HOME/data/browser/downloads
+        downloadMaxBytes: 104857600            # 单个下载上限（字节），1 到 10 GiB；默认 100 MiB，超出会中止并删除
+
+        # ── 登录与权限 ──────────────────────────────────────────────────────
+        allowPrivateHosts: false # true 时 agent 才能把 localhost/.internal/内网 IP 写进 allowedDomains。风险：扩大 agent 可授权的范围。默认 false
+        storageStatePath: ''     # 旧版全局登录态 JSON（对所有站点生效，无域名限制）；新配置请用 authProfiles
+        defaultAuthProfile: forum # 未显式选择时使用的 profile 名（必须存在）；crawl 始终匿名
+        authProfiles:            # 按域名限定的命名登录态；设置卡片里是“登录 profile”列表，可在弹窗里增删改
           forum:
-            storageStatePath: 'D:/secrets/forum.json'
-            allowedDomains: [example.com]
-            persistState: false  # 默认只读；true 才会原子回写刷新后的状态
-        rulePacks:
+            storageStatePath: 'D:/secrets/forum.json' # Playwright storageState JSON；含 cookie，不要提交到仓库
+            allowedDomains: [example.com]             # 只有这些域名（含子域）能用它；至少一个
+            persistState: false  # 默认只读（文件须已存在）；true 才会在 context 关闭时原子回写刷新后的状态，文件可先不存在
+        rulePacks:               # 域名限定、哈希固定的页面增强包；结构复杂，只在配置文件里编辑
           forum-enhanced:
             matches: [example.com]
             initScriptPath: 'D:/dsh/rules/forum.js'
@@ -459,16 +591,82 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
             steps:
               - { type: waitFor, selector: '#results', timeoutMs: 10000 }
               - { type: scroll, deltaY: 1600, repeat: 2, waitMs: 300 }
-        autoInstall: false       # 缺内核时是否自动 install chromium
-        verbose: false
+
+        # ── 使用限流（所有模式都生效；无审批模式也不会绕过）──────────────────────
+        usagePolicy:
+          minDelayMs: 750        # 同一主机两次请求之间至少等待，0–60000 毫秒。默认 750
+          maxConcurrency: 2      # 同时进行的请求数 1–8。默认 2
+          burst: 3               # 短时间内允许连续发出的请求数 1–20。默认 3
+          maxPagesPerRun: 20     # 一次 crawl 最多访问的页面数 1–100。默认 20
+          maxDepth: 2            # crawl 最多跟进的链接层数 0–5。默认 2
+          retryLimit: 2          # 可重试错误的最大重试数 0–5。默认 2
+          backoffBaseMs: 1000    # 重试等待的起始时长（逐次加倍）1–60000 毫秒。默认 1000
+          cooldownMs: 30000      # 收到 429/503 后暂停该主机的时长 100–300000 毫秒。默认 30000
+
+        # ── 自动化资产（可复用的 recipe 与脚本，实验性）─────────────────────────
+        automationAssets:
+          enabled: true          # 关闭后不记录、不检索资产。默认 true
+          # directory: ''        # 资产目录（绝对路径）；默认 $DSH_HOME/data/browser/automations
+          persistenceMode: suggest # off 不记录 | manual 仅手动 | suggest 记录并建议总结（默认）| auto-draft 自动生成草稿
+          activationMode: manual   # manual 必须手动激活（默认，推荐）| auto-tested 通过测试后自动激活；不会因静态校验自动激活
+          minSuccessfulRuns: 3   # 同一操作成功多少次才建议总结 2–20。默认 3
+          minDistinctSessions: 2 # 这些成功分布在至少几个会话 1–10。默认 2
+          successWindowDays: 14  # 只统计最近多少天的成功 1–90。默认 14
+          minSuccessRate: 0.8    # 最低成功率 0.5–1。默认 0.8
+          maxCandidates: 20      # 同时保留的候选数 1–100。默认 20
+          candidateTtlDays: 14   # 候选多久没再出现就丢弃 1–90 天。默认 14
+          maxSuggestionsPerDay: 2 # 每天最多提示几次“是否总结”，0–20（0 = 不提示）。默认 2
+          maxDrafts: 10          # 草稿上限 1–100。默认 10
+          maxActiveAssets: 50    # 同时激活的资产上限 1–200。默认 50
+          retrievalTopK: 5       # 每次向模型展示几条相关资产摘要 1–20。默认 5
+          catalogTokenBudget: 800 # 资产摘要占用模型上下文的上限 100–4000 token。默认 800
+          modelDevelopmentEnabled: true # false 时 agent 看不到 automation.develop（需重启）。默认 true
+          maxModelDraftWritesPerSession: 3 # 一个会话里模型保存草稿的次数上限 1–20。默认 3
+          maxTestCredentials: 5     # 每个资产保留最近 N 条测试凭据 1–20（激活只认绑定当前 revision 与内容哈希的 passed 凭据）。默认 5
+          minInputSetsForActivation: 2  # 声明了输入的资产，激活要求当前版本的通过凭据至少覆盖 N 组输入（1–5）；无输入的资产不受影响。默认 2
+
+        # ── 提示词（覆盖模型看到的文字；不写 = 全部用默认）──────────────────────
+        # prompts: { ... }       # 结构见“自定义提示文本”；设置卡片“提示词”分区的“导出默认文本”给出带注释的 YAML
 ```
 
-这些字段同时进入 Host settings 命名空间和专用可视化卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`，可调整工具自由度、Playwright/Patchright、OpenCLI、`usagePolicy`、自动化资产策略与限域登录态；同一卡片包含候选提示、脚本列表、JSON 编辑器、测试、激活和归档操作。
+这些字段同时进入 Host settings 命名空间和专用设置卡片：打开 `设置 → 插件 → 插件配置 → 浏览器自动化`。0.2.2 起卡片不再是“一个大文本框加一长串提示词框”，而是**状态摘要 + 分组 + 底部保存条**：
 
-- **卡片覆盖全部公开配置字段**：`maxSessions`（会话上限）和 `args`（Chromium 启动参数，JSON 字符串数组）在“浏览器运行时”分区；`authProfiles`、`rulePacks` 结构较复杂，卡片里不提供表单，只列出名称并注明“在配置文件中编辑”。“调用缓冲 JSON”和“自动化资产策略 JSON”的提示由代码生成，列出全部可用键名。
+- **顶部状态摘要**：启用开关状态、自动化模式（按风险着色）、工具面、OpenCLI、警告数（“查看详情”弹窗列出运行时报告的被忽略配置和覆盖层告警）。
+- **九个分组，默认只展开“常用”**，每个分组头显示一句话说明和“N 项已覆盖”徽标：
+  1. **常用**：启用开关、自动化模式（下拉，`standard` 为默认并标注风险等级，所选项下一行说明）、工具面（下拉）、OpenCLI 开关。
+  2. **浏览器**：运行时、通道（下拉）、无头与自动安装（开关）；可执行文件、CDP 端口、会话上限、启动参数（chips）、快照目录、详细日志折叠在“高级”里。
+  3. **页面环境**（原 context 默认值）：视口模式（下拉，选 `custom` 才出现宽高）、User-Agent（预设下拉 + 自定义）、语言区域与时区（带建议的输入）、“使用代理”开关（展开地址与绕过列表）。
+  4. **下载**：下载目录、单个文件上限（数字 + B / KiB / MiB / GiB 单位）。
+  5. **登录与权限**：登录 profile **列表**（名称、域名数、是否回写状态、来自覆盖层的标记），“编辑 / 新增 profile”在**弹窗**里改域名（chips）和 persistState，状态文件路径只读显示并写明规则；默认 profile 从列表下拉选；允许内网域名开关带风险标注；策略覆盖层是一行状态，变更记录（含每个 profile 的来源、限流生效值和最近 20 条审计）在“查看变更记录”弹窗里，旁边是“清除覆盖 / 回滚到基线”。上面的 `authProfiles` / `usagePolicy` 始终是基线；覆盖层优先，所以生效值可能与输入框里不同。
+  6. **使用限流**：`usagePolicy` 八项、`automationAssets` 十九项都是带单位、范围和默认值的数字输入（资产策略折叠在“资产策略（高级）”里）；超出范围的值会被说明并禁用保存（插件对资产数字会悄悄截断，所以这里不让它发生）；原始 JSON 折叠在“高级：原始 JSON”里，与输入框是同一份数据。
+  7. **提示词**：每段可覆盖的文字是一行（名称、`默认`/`已覆盖`、字数），“编辑”弹窗左右（窄屏上下）对照“默认文本｜我的覆盖”，有“以默认为起点”“恢复默认”和字数上限；分组 / 动作 / 错误提示覆盖是只列出改过的条目的列表，“新增条目 / 编辑”弹窗同样对照默认；顶部是 L0 预算与诊断；“导出默认文本”弹窗给出**带注释的 YAML**（推荐）和 JSON。
+  8. **自动化资产**：候选与资产是列表行，编辑器、测试、激活、归档在一个弹窗里（逻辑不变，有未保存修改时关闭弹窗仍会先确认）。
+  9. **高级：文本模式**：把默认参数当作 `key = value` 文本查看和编辑（见下）。
+- **底部保存条一直在视野里**：显示“N 项未保存”（点开不需要，直接保存即可）、“放弃”和“保存”；有无效值时说明原因并禁用保存。每个弹窗自己的“完成 / 保存”只把修改放进暂存，写入仍由页面的“保存”完成。
+- **每个字段**：标签 + 一句话说明；长说明、风险说明和选项含义在 `?` 里点开；已覆盖的字段有“已覆盖”徽标和就地“恢复默认”，未覆盖时灰色显示当前生效值。
+
+- **高级：文本模式（默认参数 properties）**：运行时、窗口、语言、代理、目录、限额这些“默认值”也可以当一个 `key = value` 文本来读和改，它是上面控件的**视图**——改文本就是改对应字段，改控件文本会重新打印。每个键前一行是注释，写明用途、可选值或范围、默认值和风险，例如：
+
+  ```properties
+  # 视口：window = 浏览器默认 | 720p（1280x720）| 1080p（1920x1080）| custom（需同时填宽高）。默认 window
+  viewportMode = custom
+  # 自定义视口宽度（像素），200–7680；仅 viewportMode = custom 时生效。默认 空
+  viewportWidth = 1280
+  # 单个下载的字节上限，1 到 10737418240（10 GiB）；超出会中止并删除。默认 104857600（100 MiB）
+  # downloadMaxBytes = 104857600
+  ```
+
+  - **格式**：每行 `key = value`，值是第一个 `=` 之后的全部内容（去掉首尾空白，可用一对双引号包裹以保留空白）；`#` 开头的行是注释，**保存时一律忽略，不当作数据**；没有行内注释（值里的 `#` 就是 `#`）；数组写成一行 JSON，例如 `args = ["--disable-gpu"]`。值为空等同未设置。注释语言随界面语言（中 / 英）。
+  - **被注释的 `# key = 值` 行**显示当前生效的值（部署值或内置默认）；注释掉或删掉一行即恢复默认；写成与当前生效值相同的值不构成覆盖（不会被保存）。往返不丢键：打印、解析、再打印得到同一份文本（有测试保证）。“复制为文本”按钮复制整段带注释的文本，可作为当前配置的导出。
+  - **即时校验**：逐行用与服务端同一套规则校验（`src/config-rules.ts`），错误带行号和键名，例如 `line 5: proxyServer scheme must be one of http, https, socks5, socks4`；任一行非法则禁用保存。`viewportMode = custom` 缺宽或缺高也是错误（部署值里已有的算数；现在从任何控件改都会拦截，而不只是文本里）。**未知键、以及别处编辑的键（`enabled`、`usagePolicy`、`prompts` 等）给出行级警告并被忽略**，不会静默丢弃；同一键重复出现时以后一行为准并提示。
+  - **保存结果**：与改版前完全一样——同样的扁平键，同样的 `set` / `unset` 操作（有测试保证同一份配置经控件、文本两条路径写出相同的配置行），不改 `Config` schema，不改运行时行为。唯一新增的可写字段是 `authProfiles`（它在 schema 里本来就是 `.volatile()`，此前只能在配置文件里改）。`rulePacks` 结构复杂且带哈希固定的脚本，卡片里只列名称并注明“在配置文件中编辑”。
+
+  **默认值与每次操作的关系**：默认参数是“新 context 的起点”。`target.open` 的 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer` 是对它的按次覆盖，省略的参数沿用当前默认，只需写要改的键；结果里的 `contextOptions` 总是列出本次生效的完整参数集，`contextSources` 标明每个值来自 `call`（本次调用）、`session`（同一 context 里更早调用的覆盖）还是 `default`（配置默认）。`browser_index({action:"target.open"})` 的详情层写出当前生效的默认值摘要（`target.download` 写 `downloadDir` 与 `downloadMaxBytes`），常驻层不受影响。
 - **测试输入 JSON** 填一个对象是在当前页面运行一次；填 2 到 5 个对象组成的数组是逐组在全新上下文中回放（等价于 `inputSets`）。卡片逐组显示结果和 `PARAMETERIZATION_SUSPECT` 警告；声明了输入的资产在通过凭据覆盖的输入组数不足 `minInputSetsForActivation` 时，“激活”按钮旁给出说明并保持禁用。
 - **新建 recipe** 从 v2 模板开始（带 `schemaVersion: 2`、locator 步骤、`inputSchema` 和 `postconditions` 占位），模板本身可以直接保存。v1 recipe 有“转换为 v2”按钮：生成新草稿并选中，显示仍取第一个匹配的步骤数（`pendingDisambiguation`），原资产不变；有未保存修改时会先确认。
-- “提示文本”分区的“导出默认文本”按钮在只读文本框里显示全部默认值（与 `pnpm prompts:dump` 相同的 JSON），复制后按需改写。
+- **提示词分区显示默认长什么样**：打开卡片时自动取得默认文本（不必先点“导出”）。每段文字一行，“编辑”弹窗里**左边是只读的默认文本，右边是你的覆盖**（窄屏上下排列）；“以默认为起点”把默认文本复制进右边再改，“恢复默认”清空覆盖；skill 正文文件和 skill 追加文本没有默认文本，左边写明“留空表示不设置”。分组 / 动作 / 错误提示覆盖是只列改过的条目的列表，“新增条目”可从建议里选键，弹窗同样把该键的默认并排给出。
+- **与默认文本完全相同 = 没有覆盖**：弹窗里的文本与默认文本相同（或某个条目与默认相同）时不会被保存，只保存真正改动的部分，这样以后默认文本升级会自动跟进，不会被旧默认值冻结。更早的版本如果已经存了与默认相同的文本，列表会标出“与默认文本相同”，点“恢复默认”即可清除。
+- “提示词”分区底部的“导出默认文本”打开一个弹窗：**带注释的 YAML**（推荐）和 JSON（与 `node scripts/dump-prompts.mjs` 相同）两个页签，可复制。YAML 在每段前注明它属于哪一层（L0 工具描述 / L1 目录 / L2 动作详情 / 错误结果 / skill）、模型何时读到、字数上限和生效方式（工具描述需重启），每个分组、动作和错误码也各有一行；解析后与 JSON 完全相同，所以原样粘回不改变任何东西。仓库里同样可用 `node scripts/dump-prompts.mjs --yaml --lang zh`。
 - 估算的常驻 L0 token 数与 `node scripts/measure-tool-surface.mjs` 使用同一个估算函数和同一份工具定义，两处数字一致。保存运行时配置后需要重启 profile；资产 CRUD 通过 loopback-only Host RPC 即时落盘。若没有看到卡片，先确认浏览器插件已同步升级并完整重启，而不是只刷新 Web Search Pro 页面。
 
 ### Patchright 可选内核
@@ -519,7 +717,7 @@ Camoufox 当前没有硬集成：截至本版，其 JS 包要求 Node 22 且 pee
 
 动作键可以是 `group.action`、子动作（`automation.develop.save`）或详情页（`observe.read.controls`，其 `notes` 即该页正文）。空字符串等于不覆盖。
 
-**导出全部默认文本**：设置面板“提示文本”分区的“导出默认文本”按钮会在只读文本框里显示一份 JSON，结构与 `prompts` 完全一致，包含每个可覆盖项的内置文本，安装包用户不需要任何脚本环境。在仓库检出里也可以运行 `pnpm prompts:dump`（`node scripts/dump-prompts.mjs`），输出与按钮完全相同。复制它，删掉保持默认的部分，改写其余部分，放进配置即可；原样放回不改变任何输出（有测试保证）。
+**导出全部默认文本**：设置面板“提示词”分区的“导出默认文本”按钮会打开弹窗，给出带注释的 YAML 与一份 JSON，结构与 `prompts` 完全一致，包含每个可覆盖项的内置文本，安装包用户不需要任何脚本环境。在仓库检出里也可以运行 `pnpm prompts:dump`（`node scripts/dump-prompts.mjs`），输出与按钮完全相同。复制它，删掉保持默认的部分，改写其余部分，放进配置即可；原样放回不改变任何输出（有测试保证）。
 
 **长度上限**（超限的值整条忽略，不会被截断，并写入诊断）：
 
@@ -555,11 +753,11 @@ Camoufox 当前没有硬集成：截至本版，其 JS 包要求 Node 22 且 pee
 - `target.open` 和 web-search-pro 的平台搜索可选择 `authProfile` / `rulePack`。`runtime.status` 只显示 profile 名称、域名和回写状态，不显示文件路径或 Cookie。
 - RulePack 仍只允许有界动作；init script 必须是本地、SHA-256 固定且不超过 64KB。外部模型 JavaScript 使用独立的 UserScript 工具，不能冒充 RulePack；除 `unrestricted` 外需一次性审批。
 - 生成登录态：`npx playwright codegen --save-storage=storageState.json`（或复用 `dsh-web-search-pro` 的 `scripts/save-login.mjs`），把产物路径填进 `storageStatePath`。
-- opencli 的社交平台后端（小红书/推特/Reddit/IG/FB）仍需浏览器扩展 + 登录态在线，即使 opencli 已打包为依赖也绕不开扩展。
+- opencli 的社交平台后端（小红书/推特/Reddit/IG/FB）仍需浏览器扩展 + 登录态在线，装好 opencli 也绕不开扩展。
 
 ### OpenCLI 连接检查
 
-插件运行时优先使用自己依赖的 OpenCLI。需要在终端排查 Browser Bridge 时，可全局安装同一 CLI 并检查：
+OpenCLI 是可选组件，不随插件安装（见「第一次使用」）。先全局安装它，再用同一个 CLI 在终端排查 Browser Bridge：
 
 ```bash
 npm i -g @jackwener/opencli
@@ -569,7 +767,7 @@ opencli doctor
 
 健康状态应同时包含 daemon running、extension connected 和一个 connected Chrome profile。仅安装 npm 包不等于 Browser Bridge 可用；Chrome 扩展断开时，OpenCLI 社区搜索会明确失败，而普通 Playwright 浏览器工具不受影响。
 
-在 DSH Desktop（Electron）中，插件会从 `PATH` 查找真正的 Node.js 可执行文件来运行内置 OpenCLI 和浏览器运行时 CLI。若 `opencli.status` 报告找不到 Node.js，可在启动 DSH Desktop 的环境中设置 `DSH_BROWSER_NODE` 为 `node.exe` 的绝对路径，然后重启 Desktop。
+在 DSH Desktop（Electron）中，插件会从 `PATH` 查找真正的 Node.js 可执行文件来运行 OpenCLI 和浏览器运行时 CLI。若 `opencli.status` 报告找不到 Node.js，可在启动 DSH Desktop 的环境中设置 `DSH_BROWSER_NODE` 为 `node.exe` 的绝对路径，然后重启 Desktop。
 
 插件内先调用 `opencli.status`，不要只看 `runtime.status.opencliEnabled`。后者表示配置开关，
 前者才是真实连接。通用调用以 argv 数组传入，不经过 shell，也不会自行拼接引号：

@@ -51,3 +51,11 @@ test('observe sections and generations add nothing to the always-on tools; they 
   assert.match(renderIndex({ group: 'act' }, env).text, /expectGeneration\?: number/)
   assert.match(renderIndex({ action: 'observe.read' }, env).text, /observe\.read\.controls/)
 })
+
+test('observe.read: no documented example addresses a form by bare role (a form without an accessible name has no form role, so it times out)', () => {
+  const action = findAction('observe.read')!
+  for (const example of action.examples ?? []) {
+    const locator = (example.args as { locator?: { role?: string; name?: string } }).locator
+    assert.ok(!(locator?.role === 'form' && locator.name === undefined), `example ${JSON.stringify(example.args)} uses role form without a name`)
+  }
+})

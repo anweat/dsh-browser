@@ -14,12 +14,21 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SettingsFormModel, settingsNumberField, settingsTextField } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsFieldSpec, SettingsFormScope, SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ASSET_POLICY_BOOLEAN_KEYS, ASSET_POLICY_ENUMS, ASSET_POLICY_INTEGER_RANGES, ASSET_POLICY_KEYS, ASSET_POLICY_STRING_KEYS, USAGE_POLICY_BOUNDS, type AssetPolicyKey } from '../policy-keys.ts'
-import { PROMPT_TEXT_FIELDS, canonicalPrompts, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
+import { crossFieldProblems, fieldProblem } from './field-rules.ts'
+import {
+  PROPERTY_FIELDS, checkProperties, commentOutProperty, parseProperties, serializeProperties, type LineIssue, type PropertyField,
+} from './properties-form.ts'
+import { propertyDocs, type DocLang } from './property-docs.ts'
+import { POLICY_SPECS, defaultOf, parsePolicyText, valueText, type PolicyFieldName } from './policy-fields.ts'
+import { parseProfiles, validAuthProfiles, type AuthProfileEntry } from './auth-profiles-form.ts'
+import { PROMPT_TEXT_FIELDS, extraEntries, withExtraEntry, canonicalPrompts, pruneDefaultExtras, type PromptDefaults, type PromptExtraEntry, type PromptExtraKind, type PromptExtraValue, extrasText, getAt, setAt, validExtras, validPrompts, withExtras, type PromptTextFieldId } from './prompts-form.ts'
 
 export type SectionField =
   | 'enabled' | 'automationMode' | 'toolSurface' | 'browserRuntime' | 'channel' | 'headless' | 'opencliEnabled'
   | 'autoInstall' | 'storageStatePath' | 'defaultAuthProfile'
   | 'executablePath' | 'snapshotDir' | 'verbose' | 'cdpPort' | 'maxSessions'
+  | 'downloadDir' | 'downloadMaxBytes' | 'allowPrivateHosts'
+  | 'viewportMode' | 'viewportWidth' | 'viewportHeight' | 'userAgent' | 'locale' | 'timezoneId' | 'proxyServer' | 'proxyBypass'
 
 /** Retained name for callers that predate the section/JSON split. */
 export type SettingField = SectionField
@@ -34,13 +43,39 @@ export interface BrowserCardState extends SettingsFormShell {
   jsonFields: Record<string, CardFieldState>
   /** The "prompt text" section: views of the one staged `prompts` draft. */
   prompts: PromptsCardState
+  /** The "default parameters" editor: one properties text over the plugin-wide default fields. */
+  properties: PropertiesCardState
+  /** The policy objects as one control per key: the text shown, whether it differs from the default, and why a typed text is refused. */
+  policies: Record<PolicyFieldName, Record<string, PolicyKeyState>>
+  /** Problems that involve several fields (a custom viewport needs both sizes), by the field that is missing something. They block the save. */
+  problems: Record<string, string>
+  /** The configuration fields a save would write (staged and different from what is stored), in field order. */
+  changes: string[]
+}
+
+export interface PolicyKeyState {
+  text: string
+  overridden: boolean
+  problem?: 'invalidNumber' | 'invalidChoice' | 'invalidRange'
+}
+
+export interface PropertiesCardState {
+  /** What the editor shows: what was typed (kept verbatim while it has problems), else the text printed from the fields. */
+  text: string
+  /** Line-level problems of the text. Errors block the save. */
+  issues: LineIssue[]
+  /** The keys that carry an override right now, in display order. */
+  overridden: { key: string; value: string }[]
+  invalid: boolean
 }
 
 export interface PromptsCardState {
-  texts: Record<PromptTextFieldId, { text: string; invalid: boolean }>
+  texts: Record<PromptTextFieldId, { text: string; invalid: boolean; /** The stored override is exactly the default text, so it changes nothing. */ sameAsDefault: boolean }>
   skillEnabled: boolean
   /** The JSON box for groups, actions and errorHints. */
   extras: { text: string; invalid: boolean }
+  /** The overridden group, action and error-hint entries of the staged draft, for the list. */
+  entries: PromptExtraEntry[]
   /** Whether saving would leave a `prompts` entry in the user layer. */
   overridden: boolean
   /** Whether the whole `prompts` draft is one the plugin would refuse to take. */
@@ -49,6 +84,15 @@ export interface PromptsCardState {
 
 /** A free-text field that clears when emptied, so blanking the control resets it. */
 const textField = (field: SectionField): SettingsFieldSpec => settingsTextField(field)
+
+/**
+ * A free-text field with a value rule (`field-rules.ts`, the rules the server applies): text the rule refuses is
+ * invalid, which blocks the save, instead of being written and dropped at the next start.
+ */
+const checkedTextField = (field: SectionField): SettingsFieldSpec => {
+  const base = settingsTextField(field)
+  return { field, format: base.format, parse: text => text.trim() !== '' && fieldProblem(field, text) !== undefined ? undefined : base.parse(text) }
+}
 
 /**
  * A boolean field. The card renders a checkbox, so the conversion is explicit
@@ -157,6 +201,17 @@ export const FIELD_SPECS: readonly SettingsFieldSpec[] = [
   textField('defaultAuthProfile'),
   textField('executablePath'),
   textField('snapshotDir'),
+  checkedTextField('downloadDir'),
+  booleanField('allowPrivateHosts'),
+  rangedNumberField('downloadMaxBytes', 1, 10 * 1024 * 1024 * 1024),
+  enumField('viewportMode', ['window', '720p', '1080p', 'custom']),
+  rangedNumberField('viewportWidth', 200, 7680),
+  rangedNumberField('viewportHeight', 200, 4320),
+  checkedTextField('userAgent'),
+  checkedTextField('locale'),
+  checkedTextField('timezoneId'),
+  checkedTextField('proxyServer'),
+  checkedTextField('proxyBypass'),
   booleanField('verbose'),
 ] as const
 
@@ -165,6 +220,7 @@ export const JSON_FIELD_SPECS: readonly SettingsFieldSpec[] = [
   jsonField('usagePolicy', validUsagePolicy),
   jsonField('automationAssets', validAssetPolicy),
   jsonField('prompts', validPrompts),
+  jsonField('authProfiles', validAuthProfiles),
   stringArrayField('args'),
 ] as const
 
@@ -173,7 +229,7 @@ export const JSON_FIELD_SPECS: readonly SettingsFieldSpec[] = [
  * hash-pinned scripts) that are safer to edit in the profile config file. The card names each one and says so, instead
  * of leaving it out without a word. `rulePacks` is not `.volatile()` in the Host schema, so no form could write it.
  */
-export const CONFIG_FILE_ONLY_FIELDS = ['authProfiles', 'rulePacks'] as const
+export const CONFIG_FILE_ONLY_FIELDS = ['rulePacks'] as const
 
 /** Section fields rendered as JSON code editors rather than single inputs. */
 export const JSON_FIELDS: ReadonlySet<string> = new Set(JSON_FIELD_SPECS.map(spec => spec.field))
@@ -187,8 +243,21 @@ export class BrowserSettingsController {
   /** What the person typed in the groups/actions/errorHints box, kept verbatim while it is not valid JSON yet. */
   private extrasRaw: string | undefined
   private extrasInvalid = false
+  /** The properties text as typed; undefined shows the text printed from the staged fields. */
+  private propsRaw: string | undefined
+  private propsIssues: LineIssue[] = []
+  /** The language of the comments printed in the advanced text; the card sets it from its own language. */
+  private docsLang: DocLang = 'en'
+  /** What was typed in each prompt control while it differs from what is staged (a text equal to the default stages nothing). */
+  private readonly promptRaw: Partial<Record<PromptTextFieldId, string>> = {}
+  /** What was typed in a policy key's control while it is not a value the key accepts. */
+  private readonly policyRaw: Record<PolicyFieldName, Record<string, string>> = { usagePolicy: {}, automationAssets: {} }
 
-  constructor(private readonly scope: SettingsFormScope<Record<string, unknown>>) {
+  /** `promptDefaults` reads the plugin's own prompt texts once they are loaded; until then nothing is "equal to default". */
+  constructor(
+    private readonly scope: SettingsFormScope<Record<string, unknown>>,
+    private readonly promptDefaults: () => PromptDefaults | undefined = () => undefined,
+  ) {
     this.form = new SettingsFormModel<Record<string, unknown>>(scope, [...ALL_FIELD_SPECS])
     this.store = this.form.bind(() => this.project())
   }
@@ -198,21 +267,115 @@ export class BrowserSettingsController {
     return {
       hooks: { browserSettings: this.store },
       ...actions,
+      // A control edit replaces whatever was typed in the advanced text: the text is a view of the fields, printed again.
+      edit: (field: string, text: string) => { this.dropTypedProperties(); if (field in this.policyRaw) this.policyRaw[field as PolicyFieldName] = {}; actions.edit(field, text) },
+      resetField: (field: string) => { this.dropTypedProperties(); actions.resetField(field) },
       // A save is refused while the groups/actions/errorHints box holds something that is not valid.
       save: () => this.save(),
-      discard: () => { this.extrasRaw = undefined; this.extrasInvalid = false; actions.discard() },
+      discard: () => { this.clearPolicyRaw(); this.extrasRaw = undefined; this.extrasInvalid = false; this.propsRaw = undefined; this.propsIssues = []; this.clearPromptRaw(); actions.discard() },
+      editProperties: (text: string) => this.editProperties(text),
+      setPropertyLanguage: (lang: string) => this.setPropertyLanguage(lang),
+      resetProperty: (key: string) => this.resetProperty(key),
       editPromptText: (id: PromptTextFieldId, text: string) => this.editPromptText(id, text),
       setPromptSkillEnabled: (enabled: boolean) => this.setPromptSkillEnabled(enabled),
       editPromptExtras: (text: string) => this.editPromptExtras(text),
+      editPolicyKey: (field: PolicyFieldName, key: string, text: string) => this.editPolicyKey(field, key, text),
+      saveAuthProfile: (id: string, entry: AuthProfileEntry) => this.saveAuthProfile(id, entry),
+      removeAuthProfile: (id: string) => this.removeAuthProfile(id),
       resetPromptExtras: () => this.resetPromptExtras(),
+      setPromptExtra: (kind: PromptExtraKind, key: string, value: PromptExtraValue | undefined) => this.setPromptExtra(kind, key, value),
     }
   }
 
+  /** Forget the advanced text as typed, so it is printed again from the fields (their edits are already staged). */
+  private dropTypedProperties(): void { this.propsRaw = undefined; this.propsIssues = [] }
+
+  /** Rules that span fields, read from the texts the fields hold now (the deployed sizes count when a control does not set them). */
+  private crossProblems(): Record<string, string> {
+    const text = (key: string) => this.form.field(key).text
+    return crossFieldProblems({ viewportMode: text('viewportMode'), viewportWidth: text('viewportWidth'), viewportHeight: text('viewportHeight') })
+  }
+
+  /** The fields a save would write: the text differs from the stored one, or a reset leaves the stored override. */
+  private changedFields(): string[] {
+    const value = this.scope.getSnapshot().value as Record<string, unknown> | undefined
+    return ALL_FIELD_SPECS.filter(spec => {
+      const state = this.form.field(spec.field)
+      return state.text !== spec.format(value?.[spec.field]) || (!state.overridden && this.isStored(spec.field))
+    }).map(spec => spec.field)
+  }
+
   private async save(): Promise<void> {
-    if (this.extrasInvalid) return
+    if (this.extrasInvalid || this.policyHasRaw() || this.propsIssues.some(issue => issue.level === 'error') || Object.keys(this.crossProblems()).length) return
     await this.form.save()
     // What was typed is now the stored value, so the box shows that again. (A failed save keeps the draft and its flag.)
-    if (!this.form.shell().failed && this.extrasRaw !== undefined) { this.extrasRaw = undefined; this.refresh() }
+    if (!this.form.shell().failed && (this.extrasRaw !== undefined || this.propsRaw !== undefined || Object.keys(this.promptRaw).length)) {
+      this.extrasRaw = undefined
+      this.propsRaw = undefined
+      this.propsIssues = []
+      this.clearPromptRaw()
+      this.refresh()
+    }
+  }
+
+  // --- the default parameters editor: one text over the plugin-wide default fields ------------------------------
+
+  private spec(key: string): SettingsFieldSpec { return ALL_FIELD_SPECS.find(spec => spec.field === key)! }
+
+  /** The text of a field as the plugin has it now (stored, deployed, or default), ignoring anything staged. */
+  private storedText(key: string): string { return this.spec(key).format(this.scope.getSnapshot().value?.[key]) }
+
+  private isStored(key: string): boolean {
+    const user = this.scope.getSnapshot().user
+    return user !== undefined && user !== null && Object.hasOwn(user, key)
+  }
+
+  /** Print the text from the fields as they are (staged edits included). */
+  private printProperties(): string {
+    return serializeProperties(PROPERTY_FIELDS.map(field => {
+      const state = this.form.field(field.key)
+      return { key: field.key, text: state.text, overridden: state.overridden }
+    }), propertyDocs(this.docsLang))
+  }
+
+  /**
+   * Stage the fields to match a properties text: a key with a value is edited to it, a key without one (commented,
+   * deleted, blank) goes back to the default. The staged result is the same per-field `set` / `unset` the one-control
+   * form produced, so the saved configuration has the same flat keys and nothing else.
+   */
+  editProperties(text: string): void {
+    this.propsRaw = text
+    const parsed = parseProperties(text)
+    this.propsIssues = checkProperties(parsed, key => this.form.field(key).text)
+    const actions = this.form.actions()
+    for (const field of PROPERTY_FIELDS) {
+      const entry = parsed.values.get(field.key)
+      if (entry) actions.edit(field.key, entry.value)
+      else if (this.isStored(field.key)) actions.resetField(field.key)
+      else actions.edit(field.key, this.storedText(field.key))
+    }
+  }
+
+  /** Print the comments of the advanced text in this language (`zh`, anything else is English). Text the person typed is not touched. */
+  setPropertyLanguage(lang: string): void {
+    const next: DocLang = lang === 'zh' ? 'zh' : 'en'
+    if (next === this.docsLang) return
+    this.docsLang = next
+    this.refresh()
+  }
+
+  /** Comment out one key's line: that parameter goes back to the default. */
+  resetProperty(key: string): void {
+    const current = this.propsRaw ?? this.printProperties()
+    const base = this.scope.getSnapshot().base?.[key]
+    this.editProperties(commentOutProperty(current, key, this.spec(key).format(base) || (PROPERTY_FIELDS.find(field => field.key === key)?.defaultText ?? '')))
+  }
+
+  private projectProperties(): PropertiesCardState {
+    const text = this.propsRaw ?? this.printProperties()
+    const parsed = parseProperties(text)
+    const overridden = PROPERTY_FIELDS.filter(field => parsed.values.has(field.key)).map((field: PropertyField) => ({ key: field.key, value: parsed.values.get(field.key)!.value }))
+    return { text, issues: this.propsIssues, overridden, invalid: this.propsIssues.some(issue => issue.level === 'error') }
   }
 
   // --- the prompt text section: one staged `prompts` draft, several views of it ----------------------------------
@@ -238,9 +401,19 @@ export class BrowserSettingsController {
 
   private refresh(): void { this.form.actions().edit('prompts', this.form.field('prompts').text) }
 
+  private clearPromptRaw(): void { for (const key of Object.keys(this.promptRaw)) delete this.promptRaw[key as PromptTextFieldId] }
+
+  /**
+   * A prompt text: blank, or exactly the plugin's default text, is NO override. Saving the default as an override
+   * would freeze today's wording and hide every later improvement, so the box keeps what was typed (an author may
+   * have copied the default to edit it) while nothing is staged for it.
+   */
   editPromptText(id: PromptTextFieldId, text: string): void {
     const field = PROMPT_TEXT_FIELDS.find(entry => entry.id === id)!
-    this.stagePrompts(setAt(this.promptsDraft(), field.path, text.trim() === '' ? undefined : text))
+    const base = this.promptDefaults()?.texts[id]
+    const none = text.trim() === '' || (base !== undefined && text === base)
+    if (text === '' || !none) delete this.promptRaw[id]; else this.promptRaw[id] = text
+    this.stagePrompts(setAt(this.promptsDraft(), field.path, none ? undefined : text))
   }
 
   setPromptSkillEnabled(enabled: boolean): void {
@@ -254,7 +427,10 @@ export class BrowserSettingsController {
     try {
       const value = JSON.parse(text) as unknown
       if (value && typeof value === 'object' && !Array.isArray(value) && validExtras(value as Record<string, unknown>)) {
-        this.stagePrompts(withExtras(this.promptsDraft(), value as Record<string, unknown>))
+        // Entries equal to the plugin's own text are not overrides (see editPromptText).
+        const defaults = this.promptDefaults()?.extras
+        const effective = defaults ? pruneDefaultExtras(value as Record<string, unknown>, defaults) : value as Record<string, unknown>
+        this.stagePrompts(withExtras(this.promptsDraft(), effective))
         return
       }
     } catch { /* reported below */ }
@@ -262,11 +438,111 @@ export class BrowserSettingsController {
     this.refresh()
   }
 
+  /**
+   * One entry of the groups / actions / errorHints lists, from the entry dialog. An entry equal to the plugin's own
+   * text is no override (see editPromptText), so it leaves the list instead of freezing today's wording.
+   */
+  setPromptExtra(kind: PromptExtraKind, key: string, value: PromptExtraValue | undefined): void {
+    this.extrasRaw = undefined
+    this.extrasInvalid = false
+    const next = withExtraEntry(this.promptsDraft(), kind, key, value)
+    const defaults = this.promptDefaults()?.extras
+    const extras = Object.fromEntries((['groups', 'actions', 'errorHints'] as const).filter(name => next[name] !== undefined).map(name => [name, next[name]]))
+    const effective = defaults ? pruneDefaultExtras(extras, defaults) : extras
+    this.stagePrompts(withExtras(next, effective))
+  }
+
   /** Back to the plugin's own text for groups, actions and error hints. */
   resetPromptExtras(): void {
     this.extrasRaw = undefined
     this.extrasInvalid = false
     this.stagePrompts(withExtras(this.promptsDraft(), {}))
+  }
+
+  // --- the policy objects, one control per key ---------------------------------------------------------------------
+
+  private clearPolicyRaw(): void { this.policyRaw.usagePolicy = {}; this.policyRaw.automationAssets = {} }
+  private policyHasRaw(): boolean { return Object.values(this.policyRaw).some(entries => Object.keys(entries).length > 0) }
+
+  /** The staged policy object (empty when its text is not a JSON object yet). */
+  private policyDraft(field: PolicyFieldName): Record<string, unknown> {
+    const text = this.form.field(field).text
+    if (text.trim() === '') return {}
+    try {
+      const value = JSON.parse(text) as unknown
+      return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+    } catch { return {} }
+  }
+
+  /** `value` without the keys that equal their default (and without anything the policy does not know), keys in the card's order. */
+  private minimalPolicy(field: PolicyFieldName, value: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {}
+    for (const spec of POLICY_SPECS[field]) {
+      const entry = value[spec.key]
+      if (entry !== undefined && entry !== defaultOf(field, spec.key)) out[spec.key] = entry
+    }
+    return out
+  }
+
+  /**
+   * One key of a policy object, from its own control. A text the key does not accept is kept as typed (and blocks the
+   * save); an empty text, or the default itself, removes the key so the object holds only what differs.
+   */
+  editPolicyKey(field: PolicyFieldName, key: string, text: string): void {
+    const spec = POLICY_SPECS[field].find(entry => entry.key === key)
+    if (!spec) return
+    const parsed = parsePolicyText(field, spec, text)
+    if (!parsed.ok) { this.policyRaw[field][key] = text; this.form.actions().edit(field, this.form.field(field).text); return }
+    delete this.policyRaw[field][key]
+    const next = { ...this.policyDraft(field) }
+    if (parsed.value === undefined) delete next[key]; else next[key] = parsed.value
+    const minimal = this.minimalPolicy(field, next)
+    const spec2 = ALL_FIELD_SPECS.find(entry => entry.field === field)!
+    const stored = this.scope.getSnapshot().value?.[field]
+    const same = JSON.stringify(this.minimalPolicy(field, stored && typeof stored === 'object' ? stored as Record<string, unknown> : {})) === JSON.stringify(minimal)
+    this.form.actions().edit(field, same ? spec2.format(stored) : JSON.stringify(minimal, null, 2))
+  }
+
+  private projectPolicies(): BrowserCardState['policies'] {
+    const out = { usagePolicy: {}, automationAssets: {} } as BrowserCardState['policies']
+    for (const field of Object.keys(POLICY_SPECS) as PolicyFieldName[]) {
+      const draft = this.policyDraft(field)
+      for (const spec of POLICY_SPECS[field]) {
+        const raw = this.policyRaw[field][spec.key]
+        const value = draft[spec.key] ?? defaultOf(field, spec.key)
+        const parsed = raw === undefined ? undefined : parsePolicyText(field, spec, raw)
+        out[field][spec.key] = {
+          text: raw ?? valueText(value),
+          overridden: draft[spec.key] !== undefined && draft[spec.key] !== defaultOf(field, spec.key),
+          ...parsed && !parsed.ok ? { problem: parsed.problem } : {},
+        }
+      }
+    }
+    return out
+  }
+
+  // --- login profiles: the list's dialog stages one edit of the `authProfiles` map ------------------------------
+
+  /** Stage a whole `authProfiles` map; the stored map itself is staged back when they are equal, so the form is clean again. */
+  private stageProfiles(next: Record<string, AuthProfileEntry>): void {
+    const spec = ALL_FIELD_SPECS.find(entry => entry.field === 'authProfiles')!
+    const stored = this.scope.getSnapshot().value?.authProfiles
+    const canonical = (map: Record<string, AuthProfileEntry>) => JSON.stringify(Object.keys(map).sort().map(id => [id, map[id]!.storageStatePath, [...map[id]!.allowedDomains], map[id]!.persistState]))
+    const same = canonical(next) === canonical(parseProfiles(spec.format(stored)))
+    this.form.actions().edit('authProfiles', same ? spec.format(stored) : JSON.stringify(next, null, 2))
+  }
+
+  /** Add or replace one profile. A profile's state-file path is kept as given: the card never rewrites a path it did not create. */
+  saveAuthProfile(id: string, entry: AuthProfileEntry): void {
+    const current = parseProfiles(this.form.field('authProfiles').text)
+    this.stageProfiles({ ...current, [id]: { storageStatePath: entry.storageStatePath, allowedDomains: [...entry.allowedDomains], persistState: entry.persistState } })
+  }
+
+  /** Remove one profile from the baseline configuration. */
+  removeAuthProfile(id: string): void {
+    const current = parseProfiles(this.form.field('authProfiles').text)
+    delete current[id]
+    this.stageProfiles(current)
   }
 
   snapshot(): BrowserCardState { return this.store.getSnapshot() }
@@ -279,7 +555,9 @@ export class BrowserSettingsController {
     const jsonFields: Record<string, CardFieldState> = {}
     for (const spec of JSON_FIELD_SPECS) jsonFields[spec.field] = this.form.field(spec.field)
     const shell = this.form.shell()
-    return { ...shell, invalid: shell.invalid || this.extrasInvalid, fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!) }
+    const properties = this.projectProperties()
+    const problems = this.crossProblems()
+    return { ...shell, invalid: shell.invalid || this.extrasInvalid || this.policyHasRaw() || properties.invalid || Object.keys(problems).length > 0, problems, policies: this.projectPolicies(), fields, jsonFields, prompts: this.projectPrompts(jsonFields.prompts!), properties, changes: this.changedFields() }
   }
 
   private projectPrompts(field: CardFieldState): PromptsCardState {
@@ -287,13 +565,16 @@ export class BrowserSettingsController {
     const texts = {} as PromptsCardState['texts']
     for (const entry of PROMPT_TEXT_FIELDS) {
       const value = getAt(draft, entry.path)
-      const text = typeof value === 'string' ? value : ''
-      texts[entry.id] = { text, invalid: text.length > entry.limit }
+      const stored = typeof value === 'string' ? value : ''
+      const text = this.promptRaw[entry.id] ?? stored
+      const base = this.promptDefaults()?.texts[entry.id]
+      texts[entry.id] = { text, invalid: text.length > entry.limit, sameAsDefault: stored !== '' && stored === base }
     }
     return {
       texts,
       skillEnabled: getAt(draft, ['skill', 'enabled']) !== false,
       extras: { text: this.extrasRaw ?? extrasText(draft), invalid: this.extrasInvalid },
+      entries: extraEntries(draft),
       overridden: field.overridden,
       invalid: field.invalid,
     }

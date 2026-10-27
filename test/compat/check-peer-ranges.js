@@ -3,7 +3,7 @@
  * 断言 package.json 里所有受管 peer 范围在**两种解析模式**下都成立：
  *
  *   runtime —— DSH 组装期校验：semver.satisfies(host, range, { includePrerelease: true })
- *              （@deepseek-ai/dsh-app-boot 的 plugin-compatibility.ts，0.1.7-rc.2 与 0.2.0-rc.2 同）
+ *              （@deepseek-ai/dsh-app-boot 的 plugin-compatibility.ts，0.2.1-rc.2 上仍是这条）
  *   install —— npm/pnpm 解析 peer：**默认** semver。预发布版本只有在某个比较符
  *              自带同号（同 major.minor.patch）预发布时才被判为满足。
  *
@@ -12,7 +12,7 @@
  *
  * 用法：
  *   node test/compat/check-peer-ranges.js                    # 检查本仓库：受支持基线必须通过，已放弃/未验证的版本必须被拒绝
- *   node test/compat/check-peer-ranges.js 0.2.0-rc.2         # 只检查指定宿主版本（必须通过）
+ *   node test/compat/check-peer-ranges.js 0.2.1-rc.2         # 只检查指定宿主版本（必须通过）
  *   node test/compat/check-peer-ranges.js --selftest         # 自校验（含本文档引用的行为矩阵）
  *   node test/compat/check-peer-ranges.js --json             # 机器可读输出
  *
@@ -155,17 +155,21 @@ function satisfies(version, range, options = {}) {
 }
 
 // ── 策略与检查 ────────────────────────────────────────────────────────────────
-/** 本仓库声明支持、并已在真实 profile 上跑过的 DSH 基线：只有这一条线。 */
-const SUPPORTED_BASELINES = ['0.2.0-rc.2']
+/**
+ * 本仓库声明支持、并已在真实宿主上跑过的 DSH 基线，分两条线：
+ *   0.2.0 线：0.2.0-rc.2（npm 上 0.2.0 线只有 rc.1 / rc.2，rc.1 没有验证过）
+ *   0.2.1 线：0.2.1-rc.2、rc.3、rc.4（devDependencies 固定在 rc.3，rc.2 / rc.4 靠真实宿主验证，见 docs/validation）
+ */
+const SUPPORTED_BASELINES = ['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4']
 /**
  * 必须被拒绝的宿主版本（runtime 与 install 两种模式都不能满足）：
  * 已放弃的旧线、功能未在其上验证过的前一个预发布、以及不放行的下一个次版本的预发布。
  */
-const REJECTED_BASELINES = ['0.1.7-rc.2', '0.2.0-rc.1', '0.2.1-alpha.1']
+const REJECTED_BASELINES = ['0.1.7-rc.2', '0.2.0-rc.1', '0.2.1-alpha.1', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.2-alpha.1', '0.2.2']
 /** 用于说明范围宽窄的代表性版本（只做展示，不影响退出码）。 */
 const MATRIX_VERSIONS = [
-  '0.1.7-rc.2', '0.1.8', '0.2.0-alpha.1', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.0-rc.3', '0.2.0',
-  '0.2.1-alpha.1', '0.2.1', '0.3.0-rc.1',
+  '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.0', '0.2.1-alpha.1', '0.2.1-rc.1',
+  '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1', '0.2.2-alpha.1', '0.2.2', '0.3.0-rc.1',
 ]
 
 const gatedPeers = (manifest) =>
@@ -185,27 +189,34 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..')
 
 function selftest() {
-  const pinned = '>=0.2.0-rc.2 <0.2.1-0'
-  const looseCaret = '^0.2.0-rc.2'
-  const wide = '>=0.2.0-rc.2 <0.3.0'
-  const foreignLower = '>=0.1.7-rc.2 <0.2.1-0'
+  const pinned = '>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0'
+  const single = '>=0.2.1-rc.2 <0.2.2-0'
+  const looseCaret = '^0.2.1-rc.2'
+  const wide = '>=0.2.1-rc.2 <0.3.0'
+  const foreignLower = '>=0.2.0-rc.2 <0.2.2-0'   // 一段范围横跨两条线：0.2.1 的预发布在 install 模式下不成立
   const cases = [
     // range, version, runtime, install —— 期望值与真实 semver 7（npm/pnpm 默认解析、includePrerelease 解析）实测一致
     [pinned, '0.1.7-rc.2', false, false],     // 已放弃的旧线
-    [pinned, '0.1.8', false, false],
-    [pinned, '0.2.0-alpha.1', false, false],
-    [pinned, '0.2.0-rc.1', false, false],     // 新功能没有在 rc.1 宿主上验证过
-    [pinned, '0.2.0-rc.2', true, true],       // 受支持基线；`>=0.2.0-rc.2` 这个比较符自带同号预发布，是承重的
-    [pinned, '0.2.0-rc.3', true, true],
-    [pinned, '0.2.0', true, true],
-    [pinned, '0.2.1-alpha.1', false, false],  // 上界是 <0.2.1-0，不是 <0.2.1：连 0.2.1 的预发布也挡掉
-    [pinned, '0.2.1', false, false],          // cap 生效：未实测的 0.2.1 不声称兼容
-    [pinned, '0.3.0-rc.1', false, false],
-    [looseCaret, '0.2.1', true, true],        // ^0.2.0-rc.2 把未实测的 0.2.1 也算兼容
-    [looseCaret, '0.3.0-rc.1', false, false], // ^ 的上界是 <0.3.0-0
-    [wide, '0.2.0-rc.2', true, true],
+    [pinned, '0.2.0-rc.1', false, false],     // 0.2.0 线的第一个预发布：没有验证过，下界是 rc.2
+    [pinned, '0.2.0-rc.2', true, true],       // 两段范围的第一段：下界自带同号预发布，是承重的
+    [pinned, '0.2.0-rc.9', true, true],
+    [pinned, '0.2.0', true, true],            // 0.2.0 正式版与基线同 tuple
+    [single, '0.2.0-rc.2', false, false],     // 单段范围拒绝 0.2.0 线（0.2.2 之前的基线）
+    [pinned, '0.2.1-alpha.1', false, false],  // 新功能没有在 0.2.1 的 alpha 宿主上验证过
+    [pinned, '0.2.1-rc.1', false, false],
+    [pinned, '0.2.1-rc.2', true, true],       // 受支持基线；`>=0.2.1-rc.2` 这个比较符自带同号预发布，是承重的
+    [pinned, '0.2.1-rc.3', true, true],       // 第二个受支持基线（rc.2→rc.3 只有导航入口自定义等 4 个功能提交）
+    [pinned, '0.2.1-rc.4', true, true],       // 第三个 0.2.1 基线
+    [pinned, '0.2.1-rc.9', true, true],
+    [pinned, '0.2.1', true, true],            // 0.2.1 正式版与基线同 tuple，声明兼容
+    [pinned, '0.2.2-alpha.1', false, false],  // 上界是 <0.2.2-0，不是 <0.2.2：连 0.2.2 的预发布也挡掉
+    [pinned, '0.2.2', false, false],          // cap 生效：未实测的 0.2.2 不声称兼容
+    [looseCaret, '0.2.1', true, true],
+    [looseCaret, '0.2.2-alpha.1', true, false], // install 毒药：宿主校验放行、npm 默认解析拒绝
+    [looseCaret, '0.3.0-rc.1', false, false],   // ^ 的上界是 <0.3.0-0
+    [wide, '0.2.1-rc.2', true, true],
     [wide, '0.3.0-rc.1', true, false],        // 手写 <0.3.0 挡不住 0.3.0-rc.1（宿主放行）
-    [foreignLower, '0.2.0-rc.2', true, false], // 下界写成别条线的预发布：宿主校验放行、npm 拒绝（install 毒药）
+    [foreignLower, '0.2.1-rc.2', true, false], // 下界写成别条线的预发布：宿主校验放行、npm 拒绝（install 毒药）
   ]
   let failed = 0
   for (const [range, version, runtime, install] of cases) {
@@ -278,11 +289,11 @@ for (const version of rejected) {
   if (!json) console.log(`  ${rows.length} 个 dsh peer 在 ${version} 上两种模式均拒绝（符合预期）`)
 }
 
-if (!json && targets.includes('0.2.0-rc.2')) {
+if (!json && targets.includes('0.2.1-rc.2')) {
   const ranges = [...new Set(gated.map(([, range]) => range))]
-  const capped = ranges.every((range) => /<0\.2\.1-0/.test(range))
+  const capped = ranges.every((range) => /<0\.2\.2-0/.test(range))
   console.log('\n  代表性宿主版本（runtime / install）：')
-  const header = '    ' + 'range'.padEnd(44) + MATRIX_VERSIONS.map((v) => v.padEnd(14)).join('')
+  const header = '    ' + 'range'.padEnd(72) + MATRIX_VERSIONS.map((v) => v.padEnd(14)).join('')
   console.log(header)
   for (const range of ranges) {
     const cells = MATRIX_VERSIONS.map((version) => {
@@ -290,10 +301,10 @@ if (!json && targets.includes('0.2.0-rc.2')) {
       const install = satisfies(version, range)
       return `${runtime ? 'rt+' : 'rt-'}/${install ? 'npm+' : 'npm-'}`.padEnd(14)
     })
-    console.log('    ' + range.padEnd(44) + cells.join(''))
+    console.log('    ' + range.padEnd(72) + cells.join(''))
   }
   if (!capped) {
-    console.log('\n  提示：上界未收口（缺少 <0.2.1-0）。0.2.x 后续版本一旦破坏，会在用户机器上表现为')
+    console.log('\n  提示：上界未收口（缺少 <0.2.2-0）。0.2.x 后续版本一旦破坏，会在用户机器上表现为')
     console.log('        组装日志正常、`dsh plugin add` ERESOLVE —— 加 cap 可让问题在组装期点名报错。')
   }
 }
@@ -301,7 +312,7 @@ if (!json && targets.includes('0.2.0-rc.2')) {
 if (json) console.log(JSON.stringify(report, null, 2))
 if (bad > 0) {
   console.error(`\n  ${bad} 处 peer 与支持声明不符（受支持版本不可用，或不受支持的版本被放行）。预发布宿主必须用“显式点出该线”的范围，`)
-  console.error('  例如 >=0.2.0-rc.2 <0.2.1-0；比较符的同号预发布是承重的，只满足 runtime 的范围是 install 毒药。')
+  console.error('  例如 >=0.2.1-rc.2 <0.2.2-0；比较符的同号预发布是承重的，只满足 runtime 的范围是 install 毒药。')
   process.exit(1)
 }
 console.log(`\n  peer 范围检查通过（基线：${targets.join(', ')}${rejected.length > 0 ? `；拒绝：${rejected.join(', ')}` : ''}）`)

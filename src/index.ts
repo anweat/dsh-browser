@@ -1,8 +1,9 @@
 /**
  * dsh-browser — self-contained browser runtime plugin for DeepSeek Harness.
  *
- * Bundles Playwright (chromium) + OpenCLI as plugin-local npm dependencies and
- * provides a `browser` service for other plugins (web-search-pro injects it),
+ * Ships Playwright and Patchright as plugin-local npm dependencies (the browser itself is a system Chrome / Edge, or
+ * Playwright Chromium downloaded on demand); OpenCLI is optional and installed separately. Provides
+ * a `browser` service for other plugins (web-search-pro injects it),
  * plus model-facing interactive browser tools.
  * @module dsh-browser
  */
@@ -16,6 +17,7 @@ import { BrowserService } from './browser-service.ts'
 import { registerTools } from './tools.ts'
 import { browserCallDecision, browserPolicyDecision } from './approval-policy.ts'
 import { resolveBrowserCall } from './actions/surface.ts'
+import { policyChangeFor } from './actions/policy.ts'
 import { registerSkillWhenAvailable } from './skill.ts'
 import { installErrorHints } from './actions/errors.ts'
 import { describePrompts } from './prompts.ts'
@@ -92,7 +94,9 @@ export function apply(ctx: Context, config: Config): void {
       const callArgs = (call.args ?? {}) as { id?: unknown; action?: unknown }
       const replaysAsset = call.action === 'automation.run' || (call.action === 'automation.develop' && callArgs.action === 'test')
       const target = replaysAsset && typeof callArgs.id === 'string' ? assets.get(callArgs.id) : undefined
-      return browserCallDecision(call.action, call.args, resolved.automationMode, target?.kind, call.action === 'automation.develop' ? target?.recipe : undefined, target ? { id: target.id, name: target.name, revision: target.revision } : undefined)
+      const policyChange = policyChangeFor(call.action, call.args)
+      const preview = policyChange ? service.previewPolicyChange(policyChange) : undefined
+      return browserCallDecision(call.action, call.args, resolved.automationMode, target?.kind, call.action === 'automation.develop' ? target?.recipe : undefined, target ? { id: target.id, name: target.name, revision: target.revision } : undefined, preview)
     }
     return browserPolicyDecision(exec.name, exec.arguments, resolved.automationMode)
   })

@@ -28,3 +28,42 @@ export declare const USAGE_POLICY_BOUNDS: {
     readonly cooldownMs: readonly [100, 300000];
 };
 export declare const USAGE_POLICY_KEYS: (keyof typeof USAGE_POLICY_BOUNDS)[];
+/** The name of a login profile: starts with a letter or digit, then letters, digits, `_` and `-`, at most 40 characters. The policy overlay and the settings card use this one rule. */
+export declare const AUTH_PROFILE_ID: RegExp;
+/** `usagePolicy` defaults (what a missing key means). test/policy-keys.test.ts holds them equal to the resolver's. */
+export declare const USAGE_POLICY_DEFAULTS: {
+    readonly minDelayMs: 750;
+    readonly maxConcurrency: 2;
+    readonly burst: 3;
+    readonly maxPagesPerRun: 20;
+    readonly maxDepth: 2;
+    readonly retryLimit: 2;
+    readonly backoffBaseMs: 1000;
+    readonly cooldownMs: 30000;
+};
+/**
+ * `automationAssets` defaults and the inclusive range of each number. The resolver CLAMPS a value outside its range
+ * without a word; the card shows the range and refuses such a value instead. `directory` has no default (the plugin
+ * picks one under $DSH_HOME).
+ */
+export declare const ASSET_POLICY_DEFAULTS: {
+    readonly enabled: true;
+    readonly persistenceMode: "suggest";
+    readonly activationMode: "manual";
+    readonly minSuccessfulRuns: 3;
+    readonly minDistinctSessions: 2;
+    readonly successWindowDays: 14;
+    readonly minSuccessRate: 0.8;
+    readonly maxCandidates: 20;
+    readonly candidateTtlDays: 14;
+    readonly maxSuggestionsPerDay: 2;
+    readonly maxDrafts: 10;
+    readonly maxActiveAssets: 50;
+    readonly retrievalTopK: 5;
+    readonly catalogTokenBudget: 800;
+    readonly modelDevelopmentEnabled: true;
+    readonly maxModelDraftWritesPerSession: 3;
+    readonly maxTestCredentials: 5;
+    readonly minInputSetsForActivation: 2;
+};
+export declare const ASSET_POLICY_BOUNDS: Partial<Record<AssetPolicyKey, readonly [number, number]>>;

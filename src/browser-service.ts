@@ -8,7 +8,7 @@
  * - render / snapshot / searchResults are the drop-in replacements for
  *   web-search-pro's former PlaywrightManager (rules-aware page extraction and
  *   platform search-page list extraction run in the page itself).
- * - opencli(...) runs the bundled @jackwener/opencli (no global CLI).
+ * - opencli(...) runs @jackwener/opencli when it is installed (optional, see deps.ts).
  * - The interactive surface (open/click/type/hover/setFiles/evaluate/scroll/read/screenshot/closePage)
  *   drives ONE persistent context+page, giving the model multi-step browsing.
  *
@@ -22,7 +22,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { browserRuntimeCliPath, loadBrowserRuntime, opencliEntryPath, runOpencli, runNode, type CliResult } from './deps.ts'
+import { browserRuntimeCliPath, loadBrowserRuntime, opencliLocation, opencliMissingMessage, runOpencli, runNode, type CliResult, type OpencliSource } from './deps.ts'
+import { browserInstallAdvice, detectSystemBrowsers, planBrowser, type BrowserPlan, type SystemBrowser } from './system-browser.ts'
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-profiles.ts'
 import { applyRuleSteps, resolveRulePack, type ResolvedRulePack } from './rule-packs.ts'
@@ -32,10 +33,16 @@ import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, 
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
+import { PolicyOverlayStore, domainBase, type AuditEntry, type ChangeMeta, type Direction, type PolicyChange, type PolicyDiff } from './policy-overlay.ts'
 import { installDialogGuard } from './dialogs.ts'
 import { TargetStaleError, resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
 import { SENSITIVE_NAME, SessionJournal } from './journal.ts'
 import { describeScan, fitObservation, normalizeObserve, scanPage, scopeBase, type ObserveRegion, type ObserveSection } from './observe.ts'
+import { contextSources, describeContextOptions, differingContextOptions, effectiveContextOptions, resolveCallOptions, sameContextOptions, toPlaywrightOptions, type CallContextInput, type ContextOptions } from './context-options.ts'
+import {
+  DOWNLOAD_HISTORY_LIMIT, DownloadLimitError, claimDownloadPath, contentDispositionFilename, removeQuietly, resolveDownloadFilename, sanitizeDownloadName,
+  streamToFile, temporaryDownloadPath, writeBufferToFile, type DownloadRecord,
+} from './downloads.ts'
 
 /**
  * How many sessions may hold a browser context+page at once. Past this, the
@@ -94,6 +101,12 @@ export interface InteractiveState {
   screenshotPath?: string
   /** The page the action ran on closed itself (a popup's own close button): url/title/text describe the page the session fell back to, or are empty. */
   closedPage?: true
+  /** target.open only: the context options in effect, when the call set any or the context was rebuilt. */
+  contextOptions?: Record<string, unknown>
+  /** target.open only: where each value of `contextOptions` comes from: `call` (this call), `session` (an earlier call kept by the context), `default` (configuration). */
+  contextSources?: Record<string, 'call' | 'session' | 'default'>
+  /** target.open only: the session's context was replaced because the call needed different options (or login state); its pages are gone. */
+  contextRebuilt?: { changed: string[]; note: string }
 }
 
 /** The page state after a recipe, plus what the run did ({@link RecipeRunResult}). */
@@ -121,6 +134,37 @@ export interface EvaluateResult {
 
 export interface FileUploadResult extends InteractiveState {
   files: string[]
+}
+
+/** The outcome of `target.download`: where the file is and what it is. */
+export interface DownloadResult {
+  id: string
+  /** The URL that was asked for. */
+  url: string
+  /** The URL the bytes finally came from (after redirects), when it differs. */
+  finalUrl?: string
+  /** Absolute path of the saved file, inside `downloadDir`. */
+  path: string
+  /** The saved file's name (may carry a `-1` style suffix when the name was taken). */
+  filename: string
+  bytes: number
+  sha256: string
+  suggestedFilename: string
+  source: 'request' | 'browser'
+}
+
+function downloadResult(record: DownloadRecord, requestedUrl: string): DownloadResult {
+  return {
+    id: record.id,
+    url: requestedUrl,
+    ...record.url !== redactCaptureUrl(requestedUrl) ? { finalUrl: record.url } : {},
+    path: record.path!,
+    filename: path.basename(record.path!),
+    bytes: record.bytes!,
+    sha256: record.sha256!,
+    suggestedFilename: record.suggestedFilename,
+    source: record.source,
+  }
 }
 
 export type { BrowserFrameSpec, BrowserLocatorSpec, BrowserTarget } from './locator.ts'
@@ -173,6 +217,10 @@ export interface BrowserStatus {
   opencliEnabled: boolean
   opencliInstalled: boolean
   opencliEntryPath?: string
+  /** Where OpenCLI was found (`plugin`, `path`, `global-npm`, ...). Absent when it is not installed. */
+  opencliSource?: OpencliSource
+  /** Present while OpenCLI is enabled but not installed: how to install it. OpenCLI is optional; this is not a warning. */
+  opencliInstallHint?: string
   automationMode: AutomationMode
   /** Tool names registered for the model under the configured toolSurface. */
   exposedTools: string[]
@@ -183,9 +231,28 @@ export interface BrowserStatus {
   externalUserscriptPolicy: 'deny' | 'ask' | 'allow'
   pageEvaluatePolicy: 'deny' | 'ask' | 'allow'
   fileUploadPolicy: 'deny' | 'ask' | 'allow'
+  downloadPolicy: 'deny' | 'ask' | 'allow'
+  /** Directory downloads are saved to, and the size cap of one download. */
+  downloadDir: string
+  downloadMaxBytes: number
+  /** Context options applied to every context (viewport, user agent, locale, time zone, proxy server); only the ones that are set. */
+  contextDefaults: Record<string, unknown>
   opencliRunPolicy: 'deny' | 'ask' | 'allow'
   chromiumInstalled: boolean
   chromiumExecutablePath?: string
+  /**
+   * The browser a launch will use, decided without launching one. `ready: false` means nothing can be launched yet and
+   * `installAdvice` says what to do; `source: system-browser` means the Playwright Chromium is missing and Chrome / Edge is used instead.
+   */
+  browser: {
+    ready: boolean
+    source: BrowserPlan['source']
+    path?: string
+    note?: string
+    installAdvice?: string
+  }
+  /** System Chrome / Edge found on this machine (what the automatic fallback can use). */
+  systemBrowsers: { channel: string; name: string; path: string }[]
   usagePolicy: ResolvedConfig['usagePolicy']
   usageGovernor: ReturnType<UsageGovernor['snapshot']>
   authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]
@@ -353,6 +420,16 @@ interface SessionState {
   generationClock: number
   profile?: ResolvedAuthProfile
   rulePack?: ResolvedRulePack
+  /** Creation options of the live context (viewport, user agent, locale, time zone, proxy); compared on the next target.open. */
+  contextOptions?: ContextOptions
+  /** Downloads this session saved or failed to save, newest last, capped. Memory only; the files are on disk. */
+  downloads: DownloadRecord[]
+  /** Counter behind the `d1`, `d2`, ... download ids of this session. */
+  nextDownload: number
+  /** Save jobs of browser download events, so target.download can wait for the one its navigation triggered. */
+  downloadJobs: WeakMap<object, Promise<DownloadRecord>>
+  /** Filename a running target.download wants for the download its navigation triggers (consumed by that one event). */
+  downloadFilename?: string
   captureConsole: boolean
   captureNetwork: boolean
   capturedConsole: BrowserConsoleRecord[]
@@ -373,6 +450,9 @@ function newSessionState(): SessionState {
     pages: [],
     nextTarget: 1,
     generationClock: 0,
+    downloads: [],
+    nextDownload: 1,
+    downloadJobs: new WeakMap(),
     captureConsole: false,
     captureNetwork: false,
     capturedConsole: [],
@@ -431,20 +511,126 @@ export class BrowserService {
   private clock = 0
   private readonly authProfiles: AuthProfileStore
   private readonly usageGovernor: UsageGovernor
+  /** The managed policy overlay merged over the configured authProfiles and usagePolicy (see policy-overlay.ts). */
+  private readonly policyStore: PolicyOverlayStore
   private opencliCatalogCache?: OpencliCatalogItem[]
   /** Per-session exploration journals (see src/journal.ts). Released with the session, never written to disk. */
   private readonly journals = new Map<string, SessionJournal>()
   /** How many sessions may hold a context+page at once before LRU eviction. */
   private readonly sessionLimit: number
 
-  constructor(private readonly config: ResolvedConfig) {
-    this.authProfiles = new AuthProfileStore(config.authProfiles)
-    this.usageGovernor = new UsageGovernor(config.usagePolicy)
+  /**
+   * `probe` replaces what the service reads from the machine (system browsers, file existence); tests use it, the
+   * plugin never passes it.
+   */
+  constructor(private readonly config: ResolvedConfig, private readonly probe: { systemBrowsers?: () => SystemBrowser[]; exists?: (file: string) => boolean } = {}) {
+    this.policyStore = new PolicyOverlayStore({
+      file: config.policyOverlayFile,
+      authDir: config.authDir,
+      snapshotDir: config.snapshotDir,
+      downloadDir: config.downloadDir,
+      allowPrivateHosts: config.allowPrivateHosts,
+      baseline: { authProfiles: config.authProfiles, usagePolicy: config.usagePolicy },
+    })
+    const effective = this.policyStore.effective()
+    this.authProfiles = new AuthProfileStore(effective.authProfiles)
+    this.usageGovernor = new UsageGovernor(effective.usagePolicy)
     this.sessionLimit = Math.max(1, Number.isInteger(config.maxSessions) ? config.maxSessions : DEFAULT_MAX_SESSIONS)
   }
 
   available(): boolean {
     return this.config.enabled
+  }
+
+  // -- policy overlay: restriction settings an agent may edit ---------------------------------
+
+  /** Pick up an overlay file that changed on disk (another process, the panel). Cheap: one stat. */
+  private refreshPolicy(): void {
+    if (this.policyStore.refresh()) this.applyEffectivePolicy()
+  }
+
+  private applyEffectivePolicy(): void {
+    const effective = this.policyStore.effective()
+    this.authProfiles.replace(effective.authProfiles)
+    this.usageGovernor.setPolicy(effective.usagePolicy)
+  }
+
+  /** What a policy change would do, without doing it; `ok: false` carries why it is invalid. */
+  previewPolicyChange(change: PolicyChange): { ok: true; direction: Direction; lines: string[] } | { ok: false; message: string } {
+    try {
+      this.refreshPolicy()
+      const planned = this.policyStore.plan(change)
+      return { ok: true, direction: planned.diff.direction, lines: planned.diff.lines }
+    } catch (error) {
+      return { ok: false, message: String(error instanceof Error ? error.message : error) }
+    }
+  }
+
+  /**
+   * Apply a policy change: validated, written atomically with an audit entry, effective at once. Sessions whose
+   * context holds a login state this change took away are closed, so a revoked domain stops working immediately
+   * instead of at the next page load.
+   */
+  async changePolicy(change: PolicyChange, meta: ChangeMeta): Promise<{
+    revision: number; direction: Direction; diff: PolicyDiff; audit: AuditEntry; sessionsClosed: number
+    before: Record<string, unknown>; after: Record<string, unknown>
+  }> {
+    this.assertEnabled()
+    this.refreshPolicy()
+    const applied = this.policyStore.apply(change, meta)
+    this.applyEffectivePolicy()
+    let closed = 0
+    for (const state of [...this.sessions.values()]) {
+      const profile = state.profile
+      if (!profile) continue
+      const now = this.authProfiles.get(profile.id)
+      const lost = !now
+        || now.storageStatePath !== profile.storageStatePath
+        || profile.allowedDomains.some(domain => !hostAllowed(domainBase(domain), now.allowedDomains))
+      if (lost) { await this.closePage(state).catch(() => {}); closed++ }
+    }
+    const summary = (policy: typeof applied.before) => ({
+      authProfiles: Object.fromEntries(applied.diff.profiles.map(entry => [entry.id, policy.authProfiles[entry.id] ? { allowedDomains: policy.authProfiles[entry.id]!.allowedDomains, persistState: policy.authProfiles[entry.id]!.persistState ?? false } : null])),
+      usagePolicy: Object.fromEntries(applied.diff.usage.map(entry => [entry.key, policy.usagePolicy[entry.key]])),
+    })
+    return { revision: applied.revision, direction: applied.diff.direction, diff: applied.diff, audit: applied.audit, sessionsClosed: closed, before: summary(applied.before), after: summary(applied.after) }
+  }
+
+  /** The effective policy, where each value comes from, and the newest audit entries. */
+  policyReport(opts: { auditLimit?: number; viewerSession?: string } = {}): Record<string, unknown> {
+    this.refreshPolicy()
+    const overlay = this.policyStore.current()
+    const effective = this.policyStore.effective()
+    const baseline = this.policyStore.baseline
+    const profiles = Object.entries(effective.authProfiles).sort(([a], [b]) => a.localeCompare(b)).map(([id, profile]) => {
+      const entry = overlay.authProfiles[id]
+      const origin = !baseline.authProfiles[id] ? 'overlay-created' : entry ? 'overlay-changed' : 'baseline'
+      return {
+        id, origin,
+        allowedDomains: profile.allowedDomains,
+        persistState: profile.persistState ?? false,
+        // Only a path the overlay chose (or one inside the auth directory) is shown: a baseline path is the user's own layout.
+        ...entry?.storageStatePath || profile.storageStatePath.startsWith(this.config.authDir) ? { storageStatePath: profile.storageStatePath } : {},
+        ...entry ? { overriddenFields: Object.keys(entry) } : {},
+      }
+    })
+    const limit = Math.min(Math.max(Math.trunc(opts.auditLimit ?? 10), 1), 50)
+    return {
+      revision: overlay.revision,
+      ...overlay.revision > 0 ? { updatedAt: overlay.updatedAt } : {},
+      overlayActive: Object.keys(overlay.authProfiles).length > 0 || Object.keys(overlay.usagePolicy).length > 0,
+      ...this.policyStore.warning ? { warning: this.policyStore.warning } : {},
+      allowPrivateHosts: this.config.allowPrivateHosts,
+      authDir: this.config.authDir,
+      ...this.config.configWarnings.length ? { configWarnings: this.config.configWarnings } : {},
+      authProfiles: profiles,
+      removedByOverlay: Object.entries(overlay.authProfiles).filter(([, entry]) => entry === null).map(([id]) => id).sort(),
+      usagePolicy: Object.fromEntries(Object.entries(effective.usagePolicy).map(([key, value]) => [key, { value, baseline: baseline.usagePolicy[key], overridden: Object.hasOwn(overlay.usagePolicy, key) }])),
+      // An agent sees which session made a change only for its own; the settings card (no viewer) sees all.
+      audit: overlay.audit.slice(-limit).map(entry => opts.viewerSession === undefined || entry.session === undefined || entry.session === opts.viewerSession
+        ? entry
+        : { ...entry, session: 'another session' }),
+    }
   }
 
   /**
@@ -572,6 +758,8 @@ export class BrowserService {
     state.context = undefined
     state.profile = undefined
     state.rulePack = undefined
+    state.contextOptions = undefined
+    state.downloads = []
     state.capturedConsole = []
     state.capturedRequests = []
     state.captureConsole = false
@@ -610,9 +798,8 @@ export class BrowserService {
     if (!this.launching) {
       this.launching = (async () => {
         const pw = loadBrowserRuntime(this.config.browserRuntime)
-        const launchOptions: Record<string, unknown> = { headless: this.config.headless }
-        if (this.config.channel) launchOptions.channel = this.config.channel
-        if (this.config.executablePath) launchOptions.executablePath = this.config.executablePath
+        const plan = this.browserPlan(pw)
+        const launchOptions: Record<string, unknown> = { headless: this.config.headless, ...plan.launch }
         const args: string[] = [...(this.config.args ?? [])]
         if (this.config.cdpPort) {
           args.push(`--remote-debugging-port=${this.config.cdpPort}`)
@@ -624,13 +811,13 @@ export class BrowserService {
           return this.trackBrowser(await pw.chromium.launch(launchOptions))
         } catch (error) {
           const msg = String(error)
-          if (/Executable doesn't exist|playwright install|not found/i.test(msg)) {
-            if (this.config.autoInstall) {
+          if (/Executable doesn't exist|playwright install|not found|distribution .* is not found/i.test(msg)) {
+            // Only the default Playwright Chromium can be downloaded; a configured channel / executablePath is the user's own choice.
+            if (this.config.autoInstall && plan.source === 'playwright-chromium') {
               await this.installChromium()
               return this.trackBrowser(await pw.chromium.launch(launchOptions))
-            } else {
-              throw new Error('dsh-browser: chromium is not installed for ' + this.config.browserRuntime + '. Run the runtime.install action, or: node "' + browserRuntimeCliPath(this.config.browserRuntime) + '" install chromium')
             }
+            throw new Error('dsh-browser: ' + this.launchFailure(plan, msg))
           } else {
             throw error
           }
@@ -645,6 +832,37 @@ export class BrowserService {
     }
   }
 
+  private systemBrowsers(): SystemBrowser[] {
+    return this.probe.systemBrowsers ? this.probe.systemBrowsers() : detectSystemBrowsers()
+  }
+
+  /** What a launch would use right now. `pw` is the loaded runtime; without it (not installed) the Playwright Chromium path is unknown. */
+  private browserPlan(pw: any): BrowserPlan {
+    let bundledPath: string | undefined
+    try {
+      const expected = pw?.chromium?.executablePath?.()
+      if (typeof expected === 'string' && expected.trim()) bundledPath = expected
+    } catch { /* an unsupported platform has no bundled path */ }
+    return planBrowser({
+      channel: this.config.channel,
+      ...this.config.executablePath ? { executablePath: this.config.executablePath } : {},
+      ...bundledPath ? { bundledPath } : {},
+      autoInstall: this.config.autoInstall,
+      systemBrowsers: this.systemBrowsers(),
+      exists: this.probe.exists ?? (file => { try { return fs.existsSync(file) } catch { return false } }),
+    })
+  }
+
+  /** The message for a launch that found no browser. Says which setting was wrong when the user chose one. */
+  private launchFailure(plan: BrowserPlan, cause?: string): string {
+    if (plan.source === 'system-browser') return `${plan.note ?? 'A system browser is used.'} It could not be started${cause ? `: ${cause.split('\n')[0]}` : ''}. Install Playwright Chromium instead (run the runtime.install action), or set executablePath to a working Chrome / Chromium.`
+    if (plan.source === 'custom-executable') return `executablePath does not exist or is not a browser: ${this.config.executablePath}. Fix or clear executablePath in the browser plugin settings.`
+    if (plan.source === 'channel') return `channel is ${this.config.channel} but that browser is not installed. Install it, or set channel to chromium (and run runtime.install, or let Google Chrome / Microsoft Edge be picked up automatically).`
+    let cliPath: string | undefined
+    try { cliPath = browserRuntimeCliPath(this.config.browserRuntime) } catch { /* runtime not installed */ }
+    return browserInstallAdvice({ runtime: this.config.browserRuntime, ...cliPath ? { cliPath } : {}, ...process.env.PLAYWRIGHT_BROWSERS_PATH ? { browsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH } : {} })
+  }
+
   /** Run `playwright install chromium` from the bundled playwright CLI. */
   installChromium(): Promise<CliResult> {
     this.assertEnabled()
@@ -653,7 +871,7 @@ export class BrowserService {
 
   private async navigate(page: any, url: string, options: Record<string, unknown>, signal?: AbortSignal): Promise<any> {
     let response: any
-    for (let attempt = 0; attempt <= this.config.usagePolicy.retryLimit; attempt++) {
+    for (let attempt = 0; attempt <= this.usageGovernor.policy.retryLimit; attempt++) {
       response = await this.usageGovernor.run(url, () => page.goto(url, options), signal)
       const status = Number(response?.status?.() ?? 0)
       if (status >= 200 && status < 400) this.usageGovernor.noteResponse(url, status)
@@ -663,13 +881,27 @@ export class BrowserService {
         ? Number(rawRetryAfter) * 1000
         : (Number.isFinite(Date.parse(rawRetryAfter)) ? Math.max(Date.parse(rawRetryAfter) - Date.now(), 0) : undefined)
       this.usageGovernor.noteResponse(url, status, retryAfterMs)
-      if (attempt === this.config.usagePolicy.retryLimit) return response
+      if (attempt === this.usageGovernor.policy.retryLimit) return response
     }
     return response
   }
 
-  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack }> {
+  /**
+   * `newContext()` arguments that do not depend on the login state: the configured viewport, user agent, locale,
+   * time zone and proxy (or the per-call override that replaced them), plus downloads for interactive contexts.
+   *
+   * Proxy: Playwright applies `proxy` at context level on its own. Measured on Chromium 1243 (headless shell) with
+   * Playwright 1.62 and Patchright 1.62, a context created with `proxy` and a browser launched WITHOUT any launch
+   * `proxy` sent both page navigation and `context.request` through the proxy, so no `proxy: { server: 'per-context' }`
+   * launch option is set. (Chromium bypasses the proxy for loopback hosts regardless; that is the browser's rule.)
+   */
+  private contextCreationOptions(options: ContextOptions, interactive: boolean): Record<string, unknown> {
+    return { ...toPlaywrightOptions(options), ...interactive ? { acceptDownloads: true } : {} }
+  }
+
+  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean; context?: ContextOptions; interactive?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack; contextOptions: ContextOptions }> {
     if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
+    this.refreshPolicy()
     const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
     const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
@@ -684,7 +916,8 @@ export class BrowserService {
         origins: (state.origins ?? []).filter((origin: { origin: string }) => hostAllowed(new URL(origin.origin).hostname, profile.allowedDomains)),
       }
     }
-    const contextOptions = { ...stateOptions, ...(scopedState ? { storageState: scopedState } : {}) }
+    const applied = opts.context ?? this.config.contextDefaults
+    const contextOptions = { ...stateOptions, ...(scopedState ? { storageState: scopedState } : {}), ...this.contextCreationOptions(applied, opts.interactive === true) }
     let context: any
     for (let attempt = 0; attempt < 2; attempt++) {
       const browser = await this.ensure()
@@ -703,7 +936,7 @@ export class BrowserService {
       await context.close().catch(() => {})
       throw error
     }
-    return { context, ...profile ? { profile } : {}, ...rulePack ? { rulePack } : {} }
+    return { context, contextOptions: applied, ...profile ? { profile } : {}, ...rulePack ? { rulePack } : {} }
   }
 
   private async persistAndClose(session: { context: any; profile?: ResolvedAuthProfile }): Promise<void> {
@@ -839,17 +1072,17 @@ export class BrowserService {
     }
   }
 
-  // ── bundled opencli ───────────────────────────────────────────────────────
+  // ── opencli (optional) ───────────────────────────────────────────────────────
 
   opencliAvailable(): boolean {
     if (!this.config.enabled || !this.config.opencliEnabled) return false
-    try { return fs.existsSync(opencliEntryPath()) } catch { return false }
+    return opencliLocation() !== undefined
   }
 
   opencli(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
     if (!this.config.enabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: browser service is disabled', timedOut: false })
     if (!this.config.opencliEnabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI is disabled', timedOut: false })
-    if (!this.opencliAvailable()) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI entry is not installed', timedOut: false })
+    if (!this.opencliAvailable()) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: ' + opencliMissingMessage(), timedOut: false })
     if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
       return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
     }
@@ -884,13 +1117,15 @@ export class BrowserService {
       url.hash = ''
       return url.href
     })
-    const maxPages = opts.maxPages ?? this.config.usagePolicy.maxPagesPerRun
-    const maxDepth = opts.maxDepth ?? this.config.usagePolicy.maxDepth
-    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > this.config.usagePolicy.maxPagesPerRun) {
-      throw new Error('browser crawl maxPages must be from 1 to configured usagePolicy.maxPagesPerRun (' + this.config.usagePolicy.maxPagesPerRun + ')')
+    this.refreshPolicy()
+    const limits = this.usageGovernor.policy
+    const maxPages = opts.maxPages ?? limits.maxPagesPerRun
+    const maxDepth = opts.maxDepth ?? limits.maxDepth
+    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > limits.maxPagesPerRun) {
+      throw new Error('browser crawl maxPages must be from 1 to configured usagePolicy.maxPagesPerRun (' + limits.maxPagesPerRun + ')')
     }
-    if (!Number.isInteger(maxDepth) || maxDepth < 0 || maxDepth > this.config.usagePolicy.maxDepth) {
-      throw new Error('browser crawl maxDepth must be from 0 to configured usagePolicy.maxDepth (' + this.config.usagePolicy.maxDepth + ')')
+    if (!Number.isInteger(maxDepth) || maxDepth < 0 || maxDepth > limits.maxDepth) {
+      throw new Error('browser crawl maxDepth must be from 0 to configured usagePolicy.maxDepth (' + limits.maxDepth + ')')
     }
     const maxCharsPerPage = Math.min(Math.max(opts.maxCharsPerPage ?? 20_000, 1_000), 50_000)
     const sameOrigin = opts.sameOrigin ?? true
@@ -1041,33 +1276,68 @@ export class BrowserService {
    * is confined to that bucket, which is what stops one session from observing
    * or mutating another's page, cookies, console or network log.
    */
-  private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string; session?: string } = {}): Promise<any> {
+  private async ensureActivePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string; session?: string; context?: ContextOptions } = {}): Promise<any> {
+    return (await this.ensurePage(targetUrl, opts)).page
+  }
+
+  /**
+   * {@link ensureActivePage} plus what it had to do to the session's context. `context` carries the per-call creation
+   * options of `target.open`: an option the call leaves out keeps what the live context has (a context is only
+   * rebuilt for a value that is different, never because a later call said nothing), and a new context starts from
+   * the configured defaults. `rebuilt` names what differed when a live page was closed to make room for the new context.
+   */
+  private async ensurePage(targetUrl?: string, opts: { authProfile?: string; rulePack?: string; session?: string; context?: ContextOptions } = {}): Promise<{ page: any; rebuilt?: string[] }> {
     if (targetUrl && !['http:', 'https:'].includes(new URL(targetUrl).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
+    this.refreshPolicy()
     const state = this.state(opts.session)
     if (state.page && (state.page.isClosed() || !this.browserConnected())) await this.closePage(state)
+    let rebuilt: string[] | undefined
+    let wanted = effectiveContextOptions(this.config.contextDefaults, opts.context)
     if (state.page && !state.page.isClosed()) {
-      if (!targetUrl) return state.page
-      if ((opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id && opts.rulePack === state.rulePack?.id) {
+      if (!targetUrl) return { page: state.page }
+      const applied = state.contextOptions ?? this.config.contextDefaults
+      wanted = { ...applied, ...opts.context }
+      // The login state a context holds was cut to the profile's domains when the context was created. A policy
+      // change that widened the profile (or moved its state file) afterwards is not in that context, so the next open
+      // starts a new one; narrowing already closed the session in changePolicy.
+      const liveProfile = state.profile ? this.authProfiles.get(state.profile.id) : undefined
+      const scopeChanged = !!state.profile && !!liveProfile
+        && (liveProfile.storageStatePath !== state.profile.storageStatePath
+          || [...liveProfile.allowedDomains ?? []].sort().join('\n') !== [...state.profile.allowedDomains ?? []].sort().join('\n'))
+      const sameLogin = (opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id && opts.rulePack === state.rulePack?.id
+      const changedOptions = differingContextOptions(applied, wanted)
+      if (sameLogin && !scopeChanged && changedOptions.length === 0) {
         if (state.profile) this.authProfiles.resolve(state.profile.id, targetUrl)
         if (state.rulePack) resolveRulePack(this.config.rulePacks, state.rulePack.id, targetUrl)
-        return state.page
+        return { page: state.page }
       }
+      rebuilt = [
+        ...changedOptions,
+        ...(opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id ? [] : ['authProfile'],
+        ...scopeChanged && (opts.authProfile ?? this.config.defaultAuthProfile) === state.profile?.id ? ['authProfileScope'] : [],
+        ...opts.rulePack === state.rulePack?.id ? [] : ['rulePack'],
+      ]
       await this.closePage(state)
     }
     if (targetUrl) {
-      const session = await this.transientContext(targetUrl, opts)
+      const session = await this.transientContext(targetUrl, { ...opts, context: wanted, interactive: true })
       state.context = session.context
       state.profile = session.profile
       state.rulePack = session.rulePack
+      state.contextOptions = session.contextOptions
     } else {
       const browser = await this.ensure()
-      state.context = await browser.newContext(storageStateOptions(this.config.storageStatePath, 'global'))
+      state.context = await browser.newContext({
+        ...storageStateOptions(this.config.storageStatePath, 'global'),
+        ...this.contextCreationOptions(wanted, true),
+      })
+      state.contextOptions = wanted
     }
     // A popup (window.open, target=_blank) joins this session's page list; it never takes over the active page by itself.
     state.context.on('page', (opened: any) => { if (state.context) this.trackPage(state, opened) })
     state.page = await state.context.newPage()
     this.trackPage(state, state.page)
-    return state.page
+    return { page: state.page, ...rebuilt ? { rebuilt } : {} }
   }
 
   /**
@@ -1097,10 +1367,13 @@ export class BrowserService {
       state.context = undefined
       state.profile = undefined
       state.rulePack = undefined
+      state.contextOptions = undefined
       if (context) void this.persistAndClose({ context, ...profile ? { profile } : {} }).catch(() => {})
     }
     page.on('close', gone)
     page.on('crash', gone)
+    // The listener lives and dies with the page (and so with the context); the record goes to this session's own list.
+    page.on('download', (download: any) => { state.downloadJobs.set(download, this.saveBrowserDownload(state, download)) })
     page.on('console', (message: any) => {
       if (!state.captureConsole) return
       const location = message.location?.() as { url?: string } | undefined
@@ -1229,8 +1502,10 @@ export class BrowserService {
     return state
   }
 
-  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string; capture?: readonly ('console' | 'network')[]; session?: string } = {}): Promise<InteractiveState> {
-    const page = await this.ensureActivePage(url, opts)
+  async open(url: string, opts: { waitMs?: number; authProfile?: string; rulePack?: string; capture?: readonly ('console' | 'network')[]; session?: string } & CallContextInput = {}): Promise<InteractiveState> {
+    // Checked before anything is created or closed: a bad option must not cost the session its page.
+    const wanted = resolveCallOptions(opts)
+    const { page, rebuilt } = await this.ensurePage(url, { ...opts, context: wanted })
     const state = this.state(opts.session)
     this.resetCapture(state, opts.capture)
     page.setDefaultTimeout(30_000)
@@ -1238,7 +1513,19 @@ export class BrowserService {
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
     await applyRuleSteps(page, state.rulePack)
     if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
-    return this.readState(page, true)
+    const result = await this.readState(page, true)
+    const applied = describeContextOptions(state.contextOptions ?? {})
+    return {
+      ...result,
+      // The whole parameter set in effect, always: the configured defaults with what this call (or the context from an
+      // earlier call) changed, each value tagged with where it came from.
+      contextOptions: applied,
+      contextSources: contextSources(state.contextOptions ?? {}, this.config.contextDefaults, wanted),
+      ...rebuilt ? { contextRebuilt: {
+        changed: rebuilt,
+        note: 'The session\'s previous context was closed and a new one created because ' + rebuilt.join(', ') + ' changed; its pages (popups included) are gone and cookies not kept in an auth profile were dropped.',
+      } } : {},
+    }
   }
 
   async click(target: BrowserTarget, opts: { expectGeneration?: number; timeoutMs?: number; waitMs?: number; session?: string } = {}): Promise<InteractiveState> {
@@ -1532,6 +1819,187 @@ export class BrowserService {
     return { ...fitted.record, ...fitted.truncation ? { truncation: fitted.truncation } : {} }
   }
 
+  // ── downloads (state is per session; files go only to config.downloadDir) ─────────────────
+
+  private pushDownload(state: SessionState, record: DownloadRecord): DownloadRecord {
+    state.downloads.push(record)
+    if (state.downloads.length > DOWNLOAD_HISTORY_LIMIT) state.downloads.splice(0, state.downloads.length - DOWNLOAD_HISTORY_LIMIT)
+    return record
+  }
+
+  private failedDownload(state: SessionState, url: string, suggestedFilename: string, source: DownloadRecord['source'], error: unknown): DownloadRecord {
+    return this.pushDownload(state, {
+      id: 'd' + state.nextDownload++, url: redactCaptureUrl(url), status: 'failed', source, suggestedFilename,
+      error: redactCaptureText(String(error instanceof Error ? error.message : error), 500), timestamp: new Date().toISOString(),
+    })
+  }
+
+  /**
+   * Save one browser download event (navigation to an attachment, a click, a script-created link) into the
+   * download directory and record the outcome in the session that owns the page. Never rejects: a failure is a
+   * `failed` record with the partial file removed, so nothing half-written is ever reported as a result.
+   */
+  private async saveBrowserDownload(state: SessionState, download: any): Promise<DownloadRecord> {
+    const requested = state.downloadFilename
+    state.downloadFilename = undefined
+    const url = String(download.url?.() ?? '')
+    const suggested = String(download.suggestedFilename?.() ?? '')
+    const dir = this.config.downloadDir
+    let temporary: string | undefined
+    try {
+      fs.mkdirSync(dir, { recursive: true })
+      const name = resolveDownloadFilename({ ...requested !== undefined ? { requested } : {}, suggested, url })
+      temporary = temporaryDownloadPath(dir)
+      const source = await download.createReadStream()
+      if (!source) throw new Error('the browser did not provide the downloaded bytes: ' + String(await download.failure?.() ?? 'unknown reason'))
+      const { bytes, sha256 } = await streamToFile(source, temporary, this.config.downloadMaxBytes)
+      const failure = await download.failure?.()
+      if (failure) throw new Error('the download failed: ' + String(failure))
+      if (bytes === 0) throw new Error('the download produced zero bytes; nothing was saved')
+      const saved = claimDownloadPath(dir, name, temporary)
+      temporary = undefined
+      return this.pushDownload(state, {
+        id: 'd' + state.nextDownload++, url: redactCaptureUrl(url), status: 'saved', source: 'browser', suggestedFilename: suggested || name,
+        path: saved, bytes, sha256, timestamp: new Date().toISOString(),
+      })
+    } catch (error) {
+      removeQuietly(temporary)
+      if (error instanceof DownloadLimitError) await download.cancel?.().catch(() => {})
+      return this.failedDownload(state, url, suggested, 'browser', error)
+    }
+  }
+
+  /**
+   * `target.download`: save a URL into the download directory.
+   *
+   * First an HTTP request made through the session's own context (its cookies and login state, its proxy and
+   * user agent); if that does not produce bytes, the URL is opened in a throwaway page of the same context and the
+   * attachment download that navigation triggers is captured. A request that returns nothing is an error, never a
+   * zero-byte file. The session's own page is not navigated.
+   */
+  async download(url: string, opts: { filename?: string; timeoutMs?: number; signal?: AbortSignal; session?: string } = {}): Promise<DownloadResult> {
+    this.assertEnabled()
+    let parsed: URL
+    try { parsed = new URL(url) } catch { throw new Error('target.download requires an HTTP(S) URL') }
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('target.download requires an HTTP(S) URL')
+    // Both are checked before anything is fetched or created.
+    const requested = opts.filename !== undefined ? sanitizeDownloadName(opts.filename, true) : undefined
+    const timeoutMs = opts.timeoutMs ?? 60_000
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 150_000) throw new Error('target.download timeoutMs must be between 1,000 and 150,000 ms')
+    const maxBytes = this.config.downloadMaxBytes
+    const dir = this.config.downloadDir
+    this.refreshPolicy()
+    const state = this.state(opts.session)
+    if (state.page && (state.page.isClosed() || !this.browserConnected())) await this.closePage(state)
+    if (state.page && !state.page.isClosed()) {
+      // The session's login state may only be sent where its auth profile is allowed to go; open() applies the same rule.
+      if (state.profile) this.authProfiles.resolve(state.profile.id, url)
+    } else {
+      await this.ensureActivePage(url, { session: opts.session })
+    }
+    const context = state.context
+    if (!context) throw new Error('dsh-browser: no browser context is available for the download')
+    const deadline = Date.now() + timeoutMs
+    const signal = opts.signal
+    let requestFailure = ''
+    fs.mkdirSync(dir, { recursive: true })
+
+    // 1. A request with the session's cookies.
+    let temporary: string | undefined
+    try {
+      const response: any = await this.usageGovernor.run(url, () => context.request.get(url, { timeout: timeoutMs, failOnStatusCode: false }), signal)
+      const status = Number(response.status?.() ?? 0)
+      if (status >= 200 && status < 400) this.usageGovernor.noteResponse(url, status)
+      else if ([429, 502, 503, 504].includes(status)) {
+        const retryAfter = String(response.headers?.()?.['retry-after'] ?? '')
+        this.usageGovernor.noteResponse(url, status, /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : undefined)
+      }
+      if (!response.ok()) throw new Error(`the server answered HTTP ${status}`)
+      const finalUrl = String(response.url?.() ?? url)
+      const final = new URL(finalUrl)
+      if (!['http:', 'https:'].includes(final.protocol)) throw new Error('the request ended on a non-HTTP(S) URL')
+      if (state.profile) this.authProfiles.resolve(state.profile.id, finalUrl)
+      const headers = response.headers?.() ?? {}
+      const declared = Number(headers['content-length'])
+      if (Number.isFinite(declared) && declared > maxBytes) throw new DownloadLimitError(maxBytes)
+      const body: Buffer = await response.body()
+      if (body.length === 0) throw new Error('the response body was empty (zero bytes)')
+      const suggested = contentDispositionFilename(headers['content-disposition'])
+      const name = resolveDownloadFilename({ ...requested !== undefined ? { requested } : {}, suggested, url: finalUrl })
+      temporary = temporaryDownloadPath(dir)
+      const { bytes, sha256 } = writeBufferToFile(body, temporary, maxBytes)
+      const saved = claimDownloadPath(dir, name, temporary)
+      temporary = undefined
+      const record = this.pushDownload(state, {
+        id: 'd' + state.nextDownload++, url: redactCaptureUrl(finalUrl), status: 'saved', source: 'request',
+        suggestedFilename: suggested || name, path: saved, bytes, sha256, timestamp: new Date().toISOString(),
+      })
+      return downloadResult(record, url)
+    } catch (error) {
+      removeQuietly(temporary)
+      if (signal?.aborted) throw error
+      // A size or policy failure is final: another route would meet the same limit or send the login state where it must not go.
+      if (error instanceof DownloadLimitError) {
+        this.failedDownload(state, url, '', 'request', error)
+        throw error
+      }
+      if (/auth profile .* is not allowed/.test(String(error))) {
+        this.failedDownload(state, url, '', 'request', error)
+        throw error
+      }
+      requestFailure = String(error instanceof Error ? error.message : error).split('\n')[0]!.slice(0, 300)
+    }
+
+    // 2. Navigation: the attachment download the URL triggers, captured from a page of the same context.
+    const remaining = Math.max(deadline - Date.now(), 5_000)
+    const page = await context.newPage()
+    this.trackPage(state, page)
+    state.downloadFilename = requested
+    let recorded = false
+    try {
+      page.setDefaultTimeout(remaining)
+      const waiting = page.waitForEvent('download', { timeout: remaining }).then((value: any) => value, () => undefined)
+      let navigation: { response?: any; error?: unknown } = {}
+      const navigated = this.usageGovernor.run(url, () => page.goto(url, { waitUntil: 'commit', timeout: remaining }), signal)
+        .then((response: any) => { navigation = { response } }, (error: unknown) => { navigation = { error } })
+      // A download makes goto fail with "Download is starting"; a page that simply loaded leaves a short grace for the event.
+      const download = await Promise.race([
+        waiting,
+        navigated.then(() => Promise.race([waiting, new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 1_500))])),
+      ])
+      if (signal?.aborted) throw new Error('target.download aborted')
+      if (!download) {
+        const reason = navigation.error
+          ? 'navigation failed: ' + String((navigation.error as Error)?.message ?? navigation.error).split('\n')[0]!.slice(0, 200)
+          : `the URL loaded as a page (HTTP ${Number(navigation.response?.status?.() ?? 0)}) and did not start a download`
+        throw new Error(`could not download ${redactCaptureUrl(url)}: request failed (${requestFailure}); ${reason}`)
+      }
+      const job = state.downloadJobs.get(download)
+      const record = job ? await job : undefined
+      // The download listener records what it saw, failures included; only a failure it never saw is recorded below.
+      recorded = !!record
+      if (!record) throw new Error(`could not download ${redactCaptureUrl(url)}: the browser download was not captured`)
+      if (record.status !== 'saved') throw new Error(`could not download ${redactCaptureUrl(url)}: request failed (${requestFailure}); ${record.error ?? 'download failed'}`)
+      return downloadResult(record, url)
+    } catch (error) {
+      if (!recorded) this.failedDownload(state, url, '', 'request', error)
+      throw error
+    } finally {
+      state.downloadFilename = undefined
+      await page.close().catch(() => {})
+    }
+  }
+
+  /** `inspect.downloads`: this session's download records (newest last); reading never creates a session bucket. */
+  downloadRecords(opts: { limit?: number; clear?: boolean; session?: string } = {}): { downloadDir: string; records: DownloadRecord[]; total: number } {
+    const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20), 1), DOWNLOAD_HISTORY_LIMIT)
+    const state = this.peek(opts.session)
+    const all = state?.downloads ?? []
+    const records = all.slice(-limit).map(record => ({ ...record }))
+    if (opts.clear && state) state.downloads = []
+    return { downloadDir: this.config.downloadDir, records, total: all.length }
+  }
+
   consoleMessages(opts: { level?: string; limit?: number; clear?: boolean; session?: string } = {}): { enabled: boolean; records: BrowserConsoleRecord[] } {
     const severities = ['debug', 'log', 'info', 'warning', 'error']
     const threshold = opts.level ? severities.indexOf(opts.level) : 0
@@ -1663,6 +2131,7 @@ export class BrowserService {
     session.context = undefined
     session.profile = undefined
     session.rulePack = undefined
+    session.contextOptions = undefined
     session.capturedConsole = []
     session.capturedRequests = []
     if (page) await page.close().catch(() => {})
@@ -1680,12 +2149,9 @@ export class BrowserService {
         chromiumInstalled = fs.existsSync(chromiumExecutablePath)
       }
     } catch { chromiumInstalled = false }
-    let opencliInstalled = false
-    let resolvedOpencliEntryPath: string | undefined
-    try {
-      resolvedOpencliEntryPath = path.resolve(opencliEntryPath())
-      opencliInstalled = fs.existsSync(resolvedOpencliEntryPath)
-    } catch { opencliInstalled = false }
+    const opencli = opencliLocation()
+    const opencliInstalled = opencli !== undefined
+    const resolvedOpencliEntryPath = opencli ? path.resolve(opencli.entry) : undefined
     const runtimeWarnings = this.config.browserRuntime === 'patchright'
       ? [
           'Patchright is Chromium-only and disables Playwright console APIs to avoid Runtime.enable detection.',
@@ -1694,10 +2160,15 @@ export class BrowserService {
             : []),
         ]
       : []
-    if (!chromiumInstalled && chromiumExecutablePath && (this.config.channel === 'chromium' || !!this.config.executablePath)) {
-      runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath}. Run runtime.install for ${this.config.browserRuntime}.`)
+    let plan: BrowserPlan
+    try { plan = this.browserPlan(loadBrowserRuntime(this.config.browserRuntime)) } catch { plan = this.browserPlan(undefined) }
+    if (!plan.ready && (this.config.channel === 'chromium' || !!this.config.executablePath)) {
+      runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath ?? '(unknown)'}. ${this.launchFailure(plan)}`)
     }
-    if (this.config.opencliEnabled && !opencliInstalled) runtimeWarnings.push('OpenCLI is enabled but its package entry is not installed.')
+    // OpenCLI is optional (it is not a dependency of this package), so its absence is reported as a hint, not a warning.
+    runtimeWarnings.push(...this.config.configWarnings)
+    this.refreshPolicy()
+    if (this.policyStore.warning) runtimeWarnings.push(this.policyStore.warning)
     return {
       enabled: this.config.enabled,
       channel: this.config.channel,
@@ -1707,6 +2178,8 @@ export class BrowserService {
       opencliEnabled: this.config.opencliEnabled,
       opencliInstalled,
       ...resolvedOpencliEntryPath ? { opencliEntryPath: resolvedOpencliEntryPath } : {},
+      ...opencli ? { opencliSource: opencli.source } : {},
+      ...this.config.opencliEnabled && !opencliInstalled ? { opencliInstallHint: opencliMissingMessage() } : {},
       automationMode: this.config.automationMode,
       exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets, this.config.enabled, this.config.toolSurface),
       exposedActions: configuredBrowserActions(this.config.automationMode, this.config.automationAssets, this.config.enabled),
@@ -1715,10 +2188,22 @@ export class BrowserService {
       externalUserscriptPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       pageEvaluatePolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       fileUploadPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      downloadPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
+      downloadDir: this.config.downloadDir,
+      downloadMaxBytes: this.config.downloadMaxBytes,
+      contextDefaults: describeContextOptions(this.config.contextDefaults),
       opencliRunPolicy: !this.config.enabled || this.config.automationMode === 'read-only' ? 'deny' : this.config.automationMode === 'unrestricted' ? 'allow' : 'ask',
       chromiumInstalled,
       ...chromiumExecutablePath ? { chromiumExecutablePath } : {},
-      usagePolicy: this.config.usagePolicy,
+      browser: {
+        ready: plan.ready,
+        source: plan.source,
+        ...plan.path ? { path: plan.path } : {},
+        ...plan.note ? { note: plan.note } : {},
+        ...!plan.ready ? { installAdvice: this.launchFailure(plan) } : {},
+      },
+      systemBrowsers: this.systemBrowsers().map(({ channel, name, path: file }) => ({ channel, name, path: file })),
+      usagePolicy: this.usageGovernor.policy,
       usageGovernor: this.usageGovernor.snapshot(),
       authProfiles: this.authProfiles.list(),
       rulePacks: Object.keys(this.config.rulePacks).sort(),

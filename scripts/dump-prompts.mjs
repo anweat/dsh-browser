@@ -9,7 +9,11 @@
 // changes nothing: blank `notes`, `rootNote`, `skill.bodyFile` and `skill.append` mean "none".
 //
 // Usage: node scripts/dump-prompts.mjs [--compact]
+//        node scripts/dump-prompts.mjs --yaml [--lang zh|en]
 //   --compact  single-line JSON (default is 2-space indented)
+//   --yaml     the same defaults as commented YAML (the form to start editing from): every section and every
+//              group/action/error-code entry says where the model reads it, its length cap and when a change applies;
+//              parsed as YAML it equals the JSON. --lang picks the language of the comments (default en).
 //
 // It reads the TypeScript sources, so it never reports a stale build, and it needs no browser. It only runs from a
 // checkout of the repository; an installed plugin shows the same JSON under the settings card's "Export default text".
@@ -25,5 +29,11 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
   process.exit(result.status ?? 1)
 }
 
-const { promptsDumpText } = await import(pathToFileURL(path.join(root, 'src/prompts.ts')).href)
-console.log(promptsDumpText(process.argv.includes('--compact')))
+if (process.argv.includes('--yaml')) {
+  const { promptsDumpYaml } = await import(pathToFileURL(path.join(root, 'src/prompts-yaml.ts')).href)
+  const at = process.argv.indexOf('--lang')
+  process.stdout.write(promptsDumpYaml(at >= 0 && process.argv[at + 1] === 'zh' ? 'zh' : 'en'))
+} else {
+  const { promptsDumpText } = await import(pathToFileURL(path.join(root, 'src/prompts.ts')).href)
+  console.log(promptsDumpText(process.argv.includes('--compact')))
+}

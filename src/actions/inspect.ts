@@ -34,4 +34,19 @@ export const INSPECT_ACTIONS: ActionDef[] = [
       return ctx.service.networkRequests({ ...args, session: ctx.session })
     },
   },
+  {
+    name: 'inspect.downloads',
+    group: 'inspect',
+    summary: 'List this session\'s downloads (target.download and browser-triggered ones): saved path, bytes, sha256, or the failure.',
+    notes: 'Records stay in memory (newest 50) and are never shared between sessions; the files are in downloadDir. clear only drops the records, never the files.',
+    params: {
+      limit: { type: 'number', description: 'Newest 1-50 records. Default 20.' },
+      clear: { type: 'boolean', description: 'Clear the records after reading (files are kept).' },
+    },
+    approval: 'none', readOnly: true, mutating: false, concurrencySafe: true, timeoutMs: 10_000,
+    examples: [{ args: {} }],
+    async execute(args, ctx) {
+      return ctx.service.downloadRecords({ ...args, session: ctx.session })
+    },
+  },
 ]

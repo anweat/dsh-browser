@@ -8,34 +8,15 @@
  */
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
 import { loadBrowserRuntime } from '../../src/deps.ts'
 import { defaultPrompts } from '../../src/prompts.ts'
+import { promptsDumpYaml } from '../../src/prompts-yaml.ts'
 import { computeContentHash } from '../../src/automation-assets.ts'
 import { registerAutomationAssetRpc } from '../../src/automation-assets-rpc.ts'
 import { createHarness, detectBrowser, startFixtureServer, type Harness } from './support.ts'
+import { bundleEntry } from './ui-support.ts'
 
 const detection = detectBrowser()
-const require = createRequire(import.meta.url)
-
-/** Bundle the card with the rolldown that tsdown already ships; skip loudly when it is not installed. */
-async function bundleCard(): Promise<{ code: string } | { skip: string }> {
-  let rolldown: typeof import('rolldown')
-  try {
-    const fromTsdown = createRequire(require.resolve('tsdown/package.json'))
-    rolldown = await import(fromTsdown.resolve('rolldown'))
-  } catch (error) { return { skip: `rolldown (a dependency of tsdown) is not installed: ${String(error)}` } }
-  const entry = new URL('./ui/entry.tsx', import.meta.url).pathname
-  const stub = new URL('./ui/primitives-stub.ts', import.meta.url).pathname
-  const bundle = await rolldown.rolldown({
-    input: entry, platform: 'browser', logLevel: 'silent',
-    resolve: { alias: { '@deepseek-ai/dsh-client-ui-primitives': stub } },
-    transform: { define: { 'process.env.NODE_ENV': '"development"' }, jsx: { runtime: 'automatic' } },
-  } as never)
-  const { output } = await bundle.generate({ format: 'iife' })
-  await bundle.close()
-  return { code: output[0]!.code }
-}
 
 const PROMPTS_REPORT = {
   overrides: [{ key: 'rootNote', length: 42 }],
@@ -54,7 +35,7 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
 
   before(async () => {
     assert.ok(detection.ok)
-    bundled = await bundleCard()
+    bundled = await bundleEntry('settings-entry.tsx')
     if ('skip' in bundled) { console.log(`[e2e:assets-ui] SKIPPED: ${bundled.skip}`); return }
     server = await startFixtureServer()
     harness = createHarness(detection, { automationAssets: { maxModelDraftWritesPerSession: 30, modelDevelopmentEnabled: true } })
@@ -93,6 +74,8 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     })
     await page.setContent('<!doctype html><title>asset ui</title><div id="root"></div>')
     await page.addScriptTag({ content: (bundled as { code: string }).code })
+    // Every group but "Common" starts closed: open them all.
+    await page.evaluate(() => document.querySelectorAll('details[data-dsb-group]').forEach(group => { (group as HTMLDetailsElement).open = true }))
     return { page, errors }
   }
 
@@ -128,8 +111,8 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     assert.equal(await button('Activate r1').isDisabled(), true, 'dirty: Activate is disabled and names its target revision')
     assert.equal(await button('Static validate').isDisabled(), true)
 
-    // Defect 3: switching asks first and loses nothing.
-    await button(/Search B/).click()
+    // Defect 3: leaving the editor (closing the dialog) asks first and loses nothing.
+    await button('Close').last().click()
     await page.getByRole('alertdialog').waitFor()
     assert.equal(await editor.inputValue(), fixed, 'the unsaved edit is still in the editor')
     assert.equal(sentTo('get').filter(entry => entry.payload.id === B.id).length, 0, 'B was not even fetched')
@@ -337,39 +320,43 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     await page.close()
   })
 
-  it('the prompt text section renders and shows what the plugin reports: L0 estimate, overrides and diagnostics', async (t) => {
+  it('the prompts group shows what the plugin reports: the L0 estimate, how many overrides are in force, the diagnostics, and a row per text', async (t) => {
     if ('skip' in bundled) return t.skip(bundled.skip)
     const { page, errors } = await openUi()
     const section = page.locator('[data-dsh-browser-prompts]')
     await section.waitFor()
-    await page.waitForFunction(() => document.querySelector('[data-dsh-browser-prompts-budget]') !== null)
-    assert.match(await section.locator('h3').innerText(), /Prompt text/)
-    assert.match(await page.locator('[data-dsh-browser-prompts-budget]').innerText(), /~325 tokens \(budget 1500\)/)
-    assert.match(await page.locator('[data-dsh-browser-prompts-status]').innerText(), /1 overrides in effect: rootNote \(42\)/)
+    await page.waitForFunction(() => /325/.test(document.querySelector('[data-dsh-browser-prompts-budget]')?.textContent ?? ''))
+    assert.match(await page.locator('[data-dsh-browser-prompts-budget]').innerText(), /L0 always-on ≈ 325 \/ 1500 tokens · largest catalog layer automation\.develop\.save ≈ 980 \/ 1000/)
+    assert.match(await page.locator('[data-dsh-browser-prompts-status]').innerText(), /1 override\(s\) in force/)
+    await page.locator('[data-dsb-fold="prompts-diagnostics"] > summary').click()
     assert.match(await page.locator('[data-dsh-browser-prompts-diagnostics]').innerText(), /groups\.nope: no such group/)
-    assert.equal(await page.locator('#plugin-config-dsh-browser-prompts-rootNote').count(), 1)
-    assert.equal(await page.locator('#plugin-config-dsh-browser-prompts-extras').count(), 1)
+    assert.equal(await page.locator('[data-dsb-prompt-list] [data-dsb-item]').count(), 7)
     assert.deepEqual(errors, [])
     await page.close()
   })
 
-  it('Export default text shows the same JSON as prompts:dump in a read-only box, with no pnpm in the section', async (t) => {
+  it('Export default text opens a dialog: commented YAML first, the same JSON prompts:dump prints on the other tab, and no pnpm', async (t) => {
     if ('skip' in bundled) return t.skip(bundled.skip)
     const { page, errors } = await openUi()
     const section = page.locator('[data-dsh-browser-prompts]')
     await section.waitFor()
     assert.equal(/pnpm/i.test(await section.innerText()), false)
-    assert.equal(await page.locator('[data-dsh-browser-prompts-defaults]').count(), 0, 'nothing is shown until asked for')
+    assert.equal(await page.getByRole('dialog').count(), 0, 'nothing is shown until asked for')
     await page.getByRole('button', { name: 'Export default text', exact: true }).click()
-    const box = page.locator('[data-dsh-browser-prompts-defaults]')
-    await box.waitFor()
+    const dialog = page.getByRole('dialog', { name: 'Default text' })
+    const box = dialog.locator('[data-dsh-browser-prompts-defaults]')
+    await page.waitForFunction(() => /^# /.test((document.querySelector('[data-dsh-browser-prompts-defaults]') as HTMLTextAreaElement | null)?.value ?? ''))
     assert.equal(await box.getAttribute('readonly') !== null, true)
+    assert.equal(await box.inputValue(), promptsDumpYaml('en'), 'the YAML is what the plugin prints, in the card\'s language')
+    assert.equal(/pnpm/i.test(await dialog.innerText()), false)
+    await dialog.getByRole('tab', { name: 'JSON' }).click()
+    await page.waitForFunction(() => /^\{/.test((document.querySelector('[data-dsh-browser-prompts-defaults]') as HTMLTextAreaElement | null)?.value ?? ''))
     const text = await box.inputValue()
     assert.deepEqual(JSON.parse(text), defaultPrompts())
     assert.equal(text, JSON.stringify(defaultPrompts(), null, 2))
-    assert.equal(await page.getByRole('textbox', { name: 'Default text (read-only)' }).count(), 1, 'the box has an accessible name')
-    await page.getByRole('button', { name: 'Hide', exact: true }).click()
-    assert.equal(await page.locator('[data-dsh-browser-prompts-defaults]').count(), 0)
+    assert.equal(await dialog.getByRole('textbox', { name: 'Default text' }).count(), 1, 'the box has an accessible name')
+    await dialog.getByRole('button', { name: 'Close' }).last().click()
+    assert.equal(await page.getByRole('dialog').count(), 0)
     assert.deepEqual(errors, [])
     await page.close()
   })
@@ -383,15 +370,13 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
     const unnamed = (tree: string) => tree.split('\n').filter(line => /^\s*- (textbox|combobox|searchbox|spinbutton)(\s*(\[.*\])?\s*(:.*)?)?$/.test(line))
     const idle = await snapshot()
     assert.deepEqual(unnamed(idle), [], 'nothing selected')
-    assert.match(idle, /textbox "Asset editor \(JSON\)"/)
-    assert.match(idle, /textbox "Test URL \(must match an allowed domain\)"/)
-    assert.match(idle, /textbox "Test inputs JSON/)
+    assert.doesNotMatch(idle, /textbox "Asset editor/, 'the editor is in a dialog that is closed until an asset is opened')
     await page.getByRole('button', { name: new RegExp(draft.name) }).click()
     await page.waitForFunction(() => (document.querySelector('#dsh-browser-asset-editor') as HTMLTextAreaElement).value.includes('Accessible'))
-    await page.getByRole('button', { name: 'Export default text', exact: true }).click()
-    await page.locator('[data-dsh-browser-prompts-defaults]').waitFor()
     const selected = await snapshot()
-    assert.deepEqual(unnamed(selected), [], 'a draft is open and the defaults are shown')
+    assert.deepEqual(unnamed(selected), [], 'a draft is open')
+    assert.match(selected, /textbox "Test URL \(must match an allowed domain\)"/)
+    assert.match(selected, /textbox "Test inputs JSON/)
     assert.equal(await page.getByRole('textbox', { name: 'Asset editor (JSON)' }).count(), 1)
     assert.equal(await page.getByRole('textbox', { name: /^Test URL/ }).count(), 1)
     assert.deepEqual(errors, [])

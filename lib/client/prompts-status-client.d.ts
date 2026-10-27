@@ -1,6 +1,7 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client';
 import type { PromptsStatus } from '../prompts.ts';
+import { type PromptDefaults } from './prompts-form.ts';
 export interface PromptsStatusState {
     loading: boolean;
     failed: boolean;
@@ -10,6 +11,17 @@ export interface PromptsStatusState {
     defaults?: string;
     /** Set when loading the defaults failed. */
     defaultsFailed?: boolean;
+    /** The plugin's own text per prompt control and its default groups/actions/errorHints, loaded when the card opens. */
+    defaultTexts?: PromptDefaults;
+    /** The default export as loaded, so "Export default text" can show it without another request. */
+    defaultsJson?: string;
+    /** The commented YAML export, with the language it was made in. */
+    defaultsYaml?: {
+        lang: string;
+        text: string;
+    };
+    /** Set when loading the commented YAML failed. */
+    yamlFailed?: boolean;
 }
 /** Reads the plugin's own account of its prompt overrides, for the "prompt text" section. */
 export declare class PromptsStatusController {
@@ -17,18 +29,26 @@ export declare class PromptsStatusController {
     private readonly store;
     private disposed;
     constructor(rpc: ClientConnectionRpc);
+    /** The prompt defaults the form compares with and shows as placeholders; undefined until they are loaded. */
+    promptDefaults(): PromptDefaults | undefined;
     inject(): {
         hooks: {
             promptsStatus: SnapshotStore<PromptsStatusState>;
         };
         refreshPromptsStatus: () => void;
         exportPromptDefaults: () => Promise<void>;
+        exportPromptYaml: (lang: string) => Promise<void>;
+        loadPromptDefaults: () => Promise<void>;
         hidePromptDefaults: () => void;
     };
     snapshot(): PromptsStatusState;
     dispose(): void;
-    /** Load the default prompt texts as JSON, for the read-only box under the section. */
+    /** Fetch the default texts (once; a later call reuses them). They feed the placeholders and the "equal to default is no override" rule. */
+    loadDefaults(): Promise<void>;
+    /** Show the default text in the read-only box under the section. */
     exportDefaults(): Promise<void>;
+    /** The commented YAML of the defaults, in the card's language (fetched once per language). */
+    exportYaml(lang: string): Promise<void>;
     refresh(): Promise<void>;
     private publish;
 }

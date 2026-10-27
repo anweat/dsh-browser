@@ -62,36 +62,54 @@ const variants: Record<string, Record<string, unknown>> = {
 /** The ids of the controls and the notes the card rendered. */
 function fieldsRendered(html: string): { controls: string[]; notes: string[] } {
   return {
-    controls: [...html.matchAll(/<(?:input|textarea)[^>]*\bid="plugin-config-dsh-browser-([A-Za-z0-9-]+)"/g)].map(match => match[1]!),
+    // Ids with a dash belong to a part of a field (a policy key's input `usagePolicy-minDelayMs`, the raw box `usagePolicy-json`, a prompt box `prompts-…`).
+    controls: [...new Set([...html.matchAll(/<(?:input|textarea|select)[^>]*\bid="plugin-config-dsh-browser-([A-Za-z0-9-]+)"/g)].map(match => match[1]!).filter(id => !id.includes('-')).concat([...html.matchAll(/data-dsb-field="([A-Za-z0-9]+)"/g)].map(match => match[1]!)))],
     notes: [...html.matchAll(/data-dsh-browser-config-note="([A-Za-z0-9]+)"/g)].map(match => match[1]!),
   }
 }
 
-test('every public config field is a control in the rendered card, or is named with a note that says where to edit it', (t) => {
+test('every public config field has exactly one entry in the card: a control, or a note; the properties text is only a mirror', async (t) => {
   if (skip) return t.skip(skip)
-  const publicFields = Object.keys((Config as unknown as { dict: Record<string, unknown> }).dict)
+  const { MISPLACED_CONFIG_KEYS } = await import('../src/config.ts')
+  const publicFields = Object.keys((Config as unknown as { dict: Record<string, unknown> }).dict).filter(field => !MISPLACED_CONFIG_KEYS.includes(field))
   assert.ok(publicFields.length >= 21, 'the schema has the fields this test was written against')
+  // Rows that exist only while they apply: a custom viewport size, the proxy address and bypass list. Render them present.
+  const conditional = { viewportMode: 'custom', proxyServer: 'http://127.0.0.1:7890' }
+  // Fields whose group is not rebuilt yet: still reachable through the properties text. Emptied as each group lands.
+  const pending: string[] = []
   for (const locale of ['en', 'zh'] as const) {
-    const { html, missingKeys } = renderCard!({ locale })
+    const { html, missingKeys } = renderCard!({ locale, fieldTexts: conditional })
     assert.deepEqual(missingKeys, [], `every label and hint the card asks for exists in ${locale}`)
     const { controls, notes } = fieldsRendered(html)
+    const editor = /<textarea[^>]*id="plugin-config-dsh-browser-properties"[^>]*>([\s\S]*?)<\/textarea>/.exec(html)
+    assert.ok(editor, 'the default-parameters text is rendered')
+    const text = editor![1]!.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&')
+    const inEditor = (field: string) => new RegExp(`^#? ?${field} =`, 'm').test(text)
     for (const field of publicFields) {
-      const control = field === 'prompts' ? controls.some(id => id.startsWith('prompts-')) : controls.includes(field)
+      const control = controls.filter(id => id === field).length === 1
       const note = notes.includes(field)
+      assert.equal(controls.filter(id => id === field).length > 1, false, `config field "${field}" has more than one control in the ${locale} card`)
+      if (pending.includes(field)) { assert.ok(inEditor(field), `${field} is still a line of the properties text`); continue }
       assert.ok(control || note, `config field "${field}" is neither a control nor a note in the ${locale} card`)
-      assert.ok(!(control && note), `config field "${field}" is both`)
+      assert.equal([control, note].filter(Boolean).length, 1, `config field "${field}" is shown as ${[control && 'a control', note && 'a note'].filter(Boolean).join(' and ')}`)
     }
-    // Nothing on the card points at a field the schema does not have.
-    for (const id of controls.filter(id => !id.startsWith('prompts-'))) assert.ok(publicFields.includes(id), `control ${id} is not a config field`)
+    // Nothing on the card points at a field the schema does not have (the properties text is a mirror, not a field).
+    for (const id of controls.filter(id => id !== 'properties')) assert.ok(publicFields.includes(id), `control ${id} is not a config field`)
     for (const id of notes) assert.ok(publicFields.includes(id), `note ${id} is not a config field`)
-    // The ones that used to go missing.
-    for (const field of ['maxSessions', 'args']) assert.ok(controls.includes(field), `${field} has a control`)
-    for (const field of ['authProfiles', 'rulePacks']) {
-      assert.ok(notes.includes(field), `${field} has a note`)
-      assert.ok(!controls.includes(field))
-    }
+    for (const field of ['enabled', 'automationMode', 'toolSurface', 'opencliEnabled', 'browserRuntime', 'channel', 'headless', 'maxSessions', 'args', 'viewportMode', 'viewportWidth', 'viewportHeight', 'userAgent', 'locale', 'timezoneId', 'proxyServer', 'proxyBypass', 'downloadDir', 'downloadMaxBytes', 'usagePolicy', 'automationAssets', 'authProfiles', 'defaultAuthProfile', 'allowPrivateHosts', 'storageStatePath', 'prompts']) assert.ok(controls.includes(field), `${field} is a control`)
+    assert.ok(notes.includes('rulePacks'), 'rulePacks has a note')
+    assert.ok(!controls.includes('rulePacks'))
     assert.equal(html.includes(locale === 'zh' ? '配置文件' : 'config file'), true, 'the note says where to edit')
   }
+  // Every key of the two policy objects has its own input in the card, and the raw box lists the keys the code accepts.
+  const { ASSET_POLICY_KEYS, USAGE_POLICY_KEYS } = await import('../src/policy-keys.ts')
+  const rendered = renderCard!({}).html
+  const policyRows = (field: string) => [...rendered.matchAll(new RegExp(`data-dsb-policy-key="${field}\\.([A-Za-z]+)"`, 'g'))].map(match => match[1]!)
+  assert.deepEqual(policyRows('usagePolicy'), [...USAGE_POLICY_KEYS], 'one row per usagePolicy key, in the code\'s order')
+  assert.deepEqual(policyRows('automationAssets').toSorted(), [...ASSET_POLICY_KEYS].toSorted(), 'one row per automationAssets key')
+  // The conditional rows are absent while they do not apply.
+  const plain = fieldsRendered(renderCard!({}).html).controls
+  for (const field of ['viewportWidth', 'viewportHeight', 'proxyServer', 'proxyBypass']) assert.equal(plain.includes(field), false, `${field} appears only when it applies`)
 })
 
 test('the policy boxes list every key the code accepts, in both locales (maxTestCredentials and minInputSetsForActivation included)', async (t) => {
@@ -100,7 +118,7 @@ test('the policy boxes list every key the code accepts, in both locales (maxTest
   assert.ok(ASSET_POLICY_KEYS.includes('maxTestCredentials') && ASSET_POLICY_KEYS.includes('minInputSetsForActivation'))
   for (const locale of ['en', 'zh'] as const) {
     const { html } = renderCard!({ locale })
-    const hintOf = (field: string) => html.match(new RegExp(`data-dsh-field="plugin-config-dsh-browser-${field}"[\\s\\S]*?<p>([^<]*)</p>`))?.[1] ?? ''
+    const hintOf = (field: string) => html.match(new RegExp(`data-dsh-field="plugin-config-dsh-browser-${field}-json"[\\s\\S]*?<p>([^<]*)</p>`))?.[1] ?? ''
     for (const [field, keys] of [['automationAssets', ASSET_POLICY_KEYS], ['usagePolicy', USAGE_POLICY_KEYS]] as const) {
       const hint = hintOf(field)
       const listed = hint.slice(hint.lastIndexOf(locale === 'zh' ? '可用键名：' : 'Keys:')).replace(/^[^:：]*[:：]\s*/, '').split(/,\s*/)
@@ -109,20 +127,30 @@ test('the policy boxes list every key the code accepts, in both locales (maxTest
   }
 })
 
-test('the prompt section offers "Export default text" and no longer asks anyone to run pnpm', (t) => {
+test('the policy overlay clear button is usable while a corrupt overlay file is being ignored (the warning tells people to use it)', (t) => {
+  if (skip) return t.skip(skip)
+  const clear = (html: string) => html.match(/<button[^>]*data-dsb-action="policy-clear"[^>]*>/)?.[0] ?? ''
+  const disabled = (html: string) => /\sdisabled(=|\s|>)/.test(clear(html))
+  for (const locale of ['en', 'zh'] as const) {
+    assert.ok(clear(renderCard!({ locale }).html), 'the card has the clear button')
+    assert.equal(disabled(renderCard!({ locale }).html), false, 'enabled while an overlay is active')
+    // Nothing to clear: no overlay and no warning.
+    assert.equal(disabled(renderCard!({ locale, policyReport: { overlayActive: false } }).html), true, 'disabled when there is nothing to clear')
+    // The overlay file was edited outside the plugin: it is ignored, the report says so, and clearing is the way out.
+    const ignored = renderCard!({ locale, policyReport: { overlayActive: false, warning: 'policy overlay was ignored: the checksum does not match' } }).html
+    assert.equal(disabled(ignored), false, 'enabled while the overlay file is ignored with a warning')
+    assert.ok(ignored.includes('data-dsh-browser-policy-warning'))
+  }
+})
+
+test('the prompts group offers "Export default text" (the dialog is opened from it) and never asks anyone to run pnpm', (t) => {
   if (skip) return t.skip(skip)
   for (const locale of ['en', 'zh'] as const) {
     const { html } = renderCard!({ locale })
     assert.equal(/pnpm/i.test(html), false, `the ${locale} card never mentions pnpm`)
     assert.match(html, locale === 'zh' ? /导出默认文本/ : /Export default text/)
     assert.ok(html.includes('data-dsh-browser-prompts-export'))
-    // Once loaded, the defaults sit in a read-only box that has a name.
-    const loaded = renderCard!({ locale, promptsDefaults: '{"rootNote":""}' }).html
-    const box = loaded.match(/<textarea[^>]*data-dsh-browser-prompts-defaults[^>]*>/)?.[0] ?? ''
-    assert.match(box, /aria-label="[^"]+"/, 'the box has a name')
-    assert.match(box, /readonly/i, 'and is read-only')
-    assert.ok(loaded.includes('data-dsh-browser-prompts-defaults'))
-    assert.ok(loaded.includes('rootNote'))
+    assert.equal(html.includes('data-dsh-browser-prompts-defaults'), false, 'the box lives in the dialog, which is closed')
   }
 })
 
@@ -133,7 +161,7 @@ test('every text control of the card has an accessible name, in every state of t
       const { html, missingKeys } = renderCard!({ ...options, locale })
       assert.deepEqual(missingKeys, [], `${name}: no missing translations in ${locale}`)
       const controls = controlsOf(html)
-      assert.ok(controls.length > 20, `${name}: the card has its controls (${controls.length})`)
+      assert.ok(controls.length > 10, `${name}: the card has its controls (${controls.length})`)
       assert.deepEqual(controls.filter(control => !control.named).map(control => control.tag + '#' + (control.id ?? '(no id)')), [], `${name}/${locale}: controls without an accessible name`)
     }
   }
@@ -171,3 +199,82 @@ function controlsOf(html: string): Control[] {
   }
   return controls.map(entry => ({ ...entry.control, named: entry.control.named || (!!entry.control.id && labels.has(entry.control.id)) }))
 }
+
+test('the default-parameters editor lists line-level problems with the line number and key, and warns about unknown keys', (t) => {
+  if (skip) return t.skip(skip)
+  const text = ['# comment', '', 'viewportMode = custom', 'viewportHeight = 600', 'proxyServer = ftp://127.0.0.1:1', 'downloadDir = relative/dir', 'headless = maybe', 'bogusKey = 1', 'enabled = false', 'not a line'].join('\n')
+  for (const locale of ['en', 'zh'] as const) {
+    const { html, missingKeys } = renderCard!({ locale, propertiesText: text, fieldTexts: { viewportMode: 'custom' } })
+    assert.deepEqual(missingKeys, [], locale)
+    assert.match(html, /data-dsh-browser-properties-errors/)
+    assert.match(html, /line 5: proxyServer scheme must be one of http, https, socks5, socks4/)
+    assert.match(html, /line 6: downloadDir must be an absolute directory path/)
+    assert.match(html, /line 7: headless must be true or false/)
+    assert.match(html, /line 10: expected &quot;key = value&quot;|line 10: expected "key = value"/)
+    assert.match(html, /viewportMode=custom needs viewportWidth/)
+    assert.doesNotMatch(html, /viewportMode=custom needs viewportHeight/)
+    assert.match(html, /data-dsh-browser-properties-warnings/)
+    assert.match(html, /line 8: unknown setting &quot;bogusKey&quot; is ignored|line 8: unknown setting "bogusKey" is ignored/)
+    assert.match(html, /line 9: enabled is not a default parameter/)
+    assert.match(html, /aria-invalid="true"/)
+  }
+  const clean = renderCard!({ fieldTexts: { viewportMode: 'window', proxyServer: 'http://127.0.0.1:7890' } })
+  assert.doesNotMatch(clean.html, /data-dsh-browser-properties-errors/)
+  assert.match(clean.html, /proxyServer = http:\/\/127\.0\.0\.1:7890/)
+  assert.match(clean.html, /# userAgent =/)
+  // Every key is preceded by its comment, in the card's language.
+  const propertiesOf = (html: string) => (/<textarea[^>]*id="plugin-config-dsh-browser-properties"[^>]*>([\s\S]*?)<\/textarea>/.exec(html)?.[1] ?? '').replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&')
+  assert.match(propertiesOf(clean.html), /# Proxy such as http:\/\/127\.0\.0\.1:7890[^\n]*\nproxyServer = http:\/\/127\.0\.0\.1:7890\n/)
+  const zh = renderCard!({ locale: 'zh', fieldTexts: { viewportMode: 'custom' } })
+  assert.match(propertiesOf(zh.html), /# 视口：window = 浏览器默认 \| 720p（1280x720）[^\n]*默认 window\nviewportMode = custom\n/)
+})
+
+test('configuration warnings of the running plugin are counted in the status summary (the list itself is in its dialog)', (t) => {
+  if (skip) return t.skip(skip)
+  const { html } = renderCard!({ configWarnings: ['config proxyServer="ftp://x" was ignored: scheme must be one of http, https, socks5, socks4; no proxy is used instead. Fix: ...'] })
+  assert.match(html, /data-dsb-warnings-count="1"/)
+  assert.match(renderCard!().html, /data-dsb-warnings-count="0"/)
+})
+
+test('the prompts group lists every text with its state, and only the entries that were changed', (t) => {
+  if (skip) return t.skip(skip)
+  const stored = { prompts: { rootNote: 'Prefer search first.', tools: { browser_index: { description: 'Short index.' } }, actions: { 'act.click': { summary: 'Click it' } }, errorHints: { DEADLINE: 'Wait longer.' } } }
+  for (const locale of ['en', 'zh'] as const) {
+    const { html, missingKeys } = renderCard!({ locale, values: stored })
+    assert.deepEqual(missingKeys, [], locale)
+    const list = html.slice(html.indexOf('data-dsb-prompt-list'), html.indexOf('data-dsb-entry-list'))
+    for (const id of ['indexDescription', 'callDescription', 'rootGuide', 'rootNote', 'skillDescription', 'skillBodyFile', 'skillAppend']) assert.ok(list.includes(`data-dsb-item="${id}"`), `${id} is a row`)
+    const row = (id: string) => list.slice(list.indexOf(`data-dsb-item="${id}"`)).split('data-dsb-item=')[1] ?? ''
+    assert.match(row('rootNote'), locale === 'zh' ? /已覆盖/ : /overridden/)
+    assert.match(row('indexDescription'), locale === 'zh' ? /已覆盖/ : /overridden/)
+    assert.match(row('rootGuide'), locale === 'zh' ? /默认/ : /default/)
+    assert.doesNotMatch(row('rootGuide'), locale === 'zh' ? /已覆盖/ : /overridden/)
+    const entries = html.slice(html.indexOf('data-dsb-entry-list'))
+    assert.ok(entries.includes('data-dsb-item="actions:act.click"') && entries.includes('data-dsb-item="errorHints:DEADLINE"'))
+    assert.equal(entries.includes('data-dsb-item="groups:'), false, 'unchanged groups are not listed')
+  }
+  // Nothing overridden: the list says so.
+  assert.match(renderCard!({}).html, /No entries changed/)
+})
+
+test('the status summary says when no browser can launch (a warning), when a system Chrome stands in, and when the optional OpenCLI is not installed (neither is a warning)', (t) => {
+  if (skip) return t.skip(skip)
+  const found = { browser: { ready: true, source: 'playwright-chromium' }, systemBrowsers: [], chromiumInstalled: true, opencli: { enabled: true, installed: true, source: 'path' } }
+  const quiet = renderCard!({ runtime: found }).html
+  assert.match(quiet, /data-dsb-warnings-count="0"/)
+  assert.doesNotMatch(quiet, />OpenCLI not installed<|>No browser available<|>Browser: system Chrome \/ Edge</)
+
+  const none = renderCard!({ runtime: { ...found, browser: { ready: false, source: 'none', installAdvice: 'No browser is available to launch. Do one of: (1) install Google Chrome' } } }).html
+  assert.match(none, /data-dsb-warnings-count="1"/)
+  assert.match(none, />No browser available</)
+
+  const system = renderCard!({ runtime: { ...found, browser: { ready: true, source: 'system-browser', note: 'Playwright Chromium is not installed, so Google Chrome is used (nothing to download).' } } }).html
+  assert.match(system, /data-dsb-warnings-count="0"/)
+  assert.match(system, />Browser: system Chrome \/ Edge</)
+
+  const noOpencli = renderCard!({ fieldTexts: { opencliEnabled: 'true' }, runtime: { ...found, opencli: { enabled: true, installed: false, hint: 'OpenCLI is not installed (it is optional). Install it with `npm i -g @jackwener/opencli`' } } }).html
+  assert.match(noOpencli, /data-dsb-warnings-count="0"/)
+  assert.match(noOpencli, />OpenCLI not installed</)
+  // Switched off in the settings: the badge says off, not "not installed".
+  assert.match(renderCard!({ fieldTexts: { opencliEnabled: 'false' }, runtime: { ...found, opencli: { enabled: false, installed: false } } }).html, /OpenCLI off/)
+})

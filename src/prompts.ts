@@ -222,12 +222,17 @@ export const NO_PROMPTS_SOURCE: PromptsSource = { current: () => NO_PROMPTS }
 // --- defaults, in the shape of the configuration ---------------------------------------------------------------
 
 /** The sub-actions and detail topics of an action, as the keys `prompts.actions` addresses them by. */
-function* promptTargets(): Generator<{ key: string; summary: string; notes: string }> {
+function* promptTargets(): Generator<{ key: string; kind: 'action' | 'sub' | 'topic'; summary: string; notes: string }> {
   for (const action of ACTIONS) {
-    yield { key: action.name, summary: action.summary, notes: action.notes ?? '' }
-    for (const [sub, def] of Object.entries(action.subActions?.items ?? {})) yield { key: `${action.name}.${sub}`, summary: def.summary, notes: def.notes ?? '' }
-    for (const [topic, def] of Object.entries(action.topics ?? {})) yield { key: `${action.name}.${topic}`, summary: def.summary, notes: def.text }
+    yield { key: action.name, kind: 'action', summary: action.summary, notes: action.notes ?? '' }
+    for (const [sub, def] of Object.entries(action.subActions?.items ?? {})) yield { key: `${action.name}.${sub}`, kind: 'sub', summary: def.summary, notes: def.notes ?? '' }
+    for (const [topic, def] of Object.entries(action.topics ?? {})) yield { key: `${action.name}.${topic}`, kind: 'topic', summary: def.summary, notes: def.text }
   }
+}
+
+/** What each overridable `actions` key is: an action, one of its sub-actions, or a detail topic (a page of its own). */
+export function promptTargetKinds(): Record<string, 'action' | 'sub' | 'topic'> {
+  return Object.fromEntries([...promptTargets()].map(target => [target.key, target.kind]))
 }
 
 /**
