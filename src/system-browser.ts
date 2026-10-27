@@ -141,7 +141,7 @@ export function browserInstallAdvice(options: { runtime: string; cliPath?: strin
   const withPath = options.browsersPath ? `PLAYWRIGHT_BROWSERS_PATH="${options.browsersPath}" ${cli}` : cli
   return 'No browser is available to launch. Do one of: '
     + '(1) install Google Chrome or Microsoft Edge (picked up automatically, nothing else to configure); '
-    + '(2) run the runtime.install action, which downloads Playwright Chromium (about 150 MB); '
+    + '(2) run the runtime.install action, which downloads Playwright Chromium (about 190 MB download); '
     + `(3) or in a terminal: ${withPath} ; `
     + '(4) or set executablePath (or channel) in the browser plugin settings.'
 }

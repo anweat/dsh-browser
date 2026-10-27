@@ -207,7 +207,7 @@ export declare const zh: {
     readonly headlessHelp: "默认开启。需要亲眼看页面、或者站点检测到无头浏览器时可关闭；Patchright 的兼容性最好的配置通常是关闭无头。";
     readonly autoInstall: "缺失时自动安装 Chromium";
     readonly autoInstallHint: "可能触发较大的下载，日常建议关闭。";
-    readonly autoInstallHelp: "开启后，找不到 Playwright Chromium 时会自动执行 playwright install chromium（约 150 MB），并且不再改用系统 Chrome。默认关闭：装了 Chrome / Edge 就直接用，没有时用 runtime.install 动作显式安装。";
+    readonly autoInstallHelp: "开启后，找不到 Playwright Chromium 时会自动执行 playwright install chromium（下载约 190 MB），并且不再改用系统 Chrome。默认关闭：装了 Chrome / Edge 就直接用，没有时用 runtime.install 动作显式安装。";
     readonly browserAdvanced: "高级";
     readonly browserAdvancedHint: "少数部署才需要改的项。";
     readonly executablePath: "浏览器可执行文件";
