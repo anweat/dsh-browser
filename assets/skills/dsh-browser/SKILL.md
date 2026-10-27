@@ -82,7 +82,7 @@ A wrong argument returns `INVALID_ARGS` with the schema: fix and resend.
 | `VALIDATION_FAILED` | the steps ran but an assert or postcondition did not hold: read the page, fix the recipe; do not repeat submits |
 | `VALIDATION_MISSING` | a v2 draft has no `assert` or postcondition, so its test cannot pass: add one, save, test again |
 | `CANCELLED` | stopped; steps that already ran stay done (see `effects`) |
-| `POLICY_DENIED` / `CAPABILITY_UNAVAILABLE` | not allowed or not set up here (Chromium missing: `runtime.install`) |
+| `POLICY_DENIED` / `CAPABILITY_UNAVAILABLE` | not allowed or not set up here (no browser: see `runtime.status` `browser.installAdvice`) |
 
 Recipe runs (`automation.run_recipe`, `automation.run`, `automation.develop` test) return the whole run in `result` even if `ok` is false: `executionStatus`, `validationStatus` (`not_checked`, `passed`, `failed`), `completedSteps`, `failedStep`, `effects` (`none`, `observed`, `unknown`), `outputs`. `completed` with `not_checked` means the steps ran, not that the result is right; nothing is rolled back (`references/recipes.md`).
 
