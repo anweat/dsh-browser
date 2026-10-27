@@ -16,15 +16,15 @@
 | `0.2.0-rc.1`（预发布，历史记录） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 325 项测试、64 项真实浏览器 e2e 与真实 Web profile 验证 |
 | `0.2.0` | `dsh-v0.2.0-rc.2` | 第一个面向 DSH 桌面版 0.2.0 线的正式版，也是后续开发的基底。**只支持 `dsh-v0.2.0-rc.2` 这一条线**（peer `>=0.2.0-rc.2 <0.2.1-0`）：去掉为更旧宿主保留的兼容分支（`settings.register` 的 live scope 回退等），并去掉对 `settings` 服务的必需依赖（只声明 `inject: ['tools']`，没有 Settings 服务的组合里也能启动）；不改工具、动作、schema、文本与审批规则。在 `0.2.0-rc.2` 上完成 327 项测试、64 项真实浏览器 e2e 与 peer 双解析模式检查。旧宿主（0.1.7 线，`dsh-v0.1.7-rc.2`）继续使用 `0.1.17` |
 | `0.2.1` | `dsh-v0.2.0-rc.2`（不变） | 相对 `0.2.0` 的补丁版，DSH 基线与 peer 范围（`>=0.2.0-rc.2 <0.2.1-0`）不变，只含两项：(1) 参数无效的调用不再先弹审批：审批钩子先判断动作是否被当前 `automationMode` 禁用（禁用仍直接拒绝），再用与 `runAction` 相同的校验检查参数，无效则不询问，执行层再校验一次并返回带精简 schema 的 `INVALID_ARGS`，不执行任何页面动作；参数有效时的审批规则与理由不变。(2) “探索转草稿”（`draft_from_journal`）的指导文本补充。不改动作、参数 schema 与审批规则。在 `0.2.0-rc.2` 上完成 337 项测试与 66 项真实浏览器 e2e |
-| `0.2.2` | `dsh-v0.2.1-rc.2` / `dsh-v0.2.1-rc.3` | 把 DSH 基线跟到 0.2.1-rc.2 / rc.3 线（受管 peer `>=0.2.1-rc.2 <0.2.2-0`，Cordis peer `~4.0.5`，`devDependencies` 全部锁到 `0.2.1-rc.3`，schemastery 3.18.5）。源码不需要为 0.2.1-rc.2 / rc.3 改动：typecheck、构建、peer 双解析模式检查、426 项单测（0 skipped）、86 项真实 Chromium e2e 与 client bundle 检查全绿。功能面新增 context 创建期选项、下载落盘与策略覆盖层（见「升级到 0.2.2」）。`0.2.0` 线宿主继续使用 `0.2.1` |
+| `0.2.2` | `dsh-v0.2.0-rc.2`，`dsh-v0.2.1-rc.2` / `rc.3` / `rc.4` | 同时支持两条线（受管 peer `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`，Cordis peer `~4.0.4`，`devDependencies` 锁在 `0.2.1-rc.3`，schemastery 3.18.5）。**源码不为任何一个宿主版本改动**：在真实安装的 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4 宿主上都完成了干净安装、Web 设置卡片渲染与保存、skill 注册、资产 RPC、`tools/pre-execute` 审批钩子的验证（见 `docs/validation/2026-10-28-compat-dist.md`）。功能面新增 context 创建期选项、下载落盘与策略覆盖层（见「升级到 0.2.2」）。0.2.0 线宿主此前只能用 `0.2.1`，现在也可以装 `0.2.2` |
 
-`0.2.2` 把范围从 `0.2.0` 线移到 `dsh-v0.2.1-rc.2` 线：`>=0.2.1-rc.2 <0.2.2-0`。单基线策略不变——只声明一条
-**实测过**的线：`0.2.0-rc.2` 及更旧的宿主（含 `0.2.1-alpha.1` 这类 0.2.1 的预发布）一律拒绝，`0.2.2` 的预发布也挡在
-`<0.2.2-0` 之外。宿主 0.2.1-rc.2 把 Cordis 由 4.0.4 升到 4.0.5（`cordis-plugin-include` / `cordis-plugin-group` 同步
-小版本），所以 Cordis peer 从 `4.0.4` 改为 `~4.0.5`；schemastery 3.18.5 仍被 `>=3.18.2 <4` 覆盖，peer 范围不变。
-宿主 rc.2→rc.3 只有 4 个功能提交（导航入口自定义新包与 slot、菜单图标、analytics、DeepSeek `/models`），不触及本插件用到的契约；`test:peers` 把 `0.2.1-rc.3` 并入受支持基线矩阵。
-这一版是纯版本矩阵 + 验证迁移：0.2.1-rc.2 / rc.3 的 typings 与运行期契约（`inject: ['tools']`、工具注册、
-`Config`/`ConfigForm`、客户端 slot 与模块表）没有变化到需要改源码，`pnpm verify` 全绿。
+`0.2.2` 的范围是**两段**：`>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`，各对应一条实测过的线（0.2.0 线只有 `0.2.0-rc.2`，
+0.2.1 线是 `rc.2` / `rc.3` / `rc.4`）。`0.2.0-rc.1`、`0.2.1-alpha.*`、`0.2.1-rc.1` 与 `0.2.2` 及以上（含它的预发布）一律拒绝。
+Cordis peer 是 `~4.0.4`：0.2.0-rc.2 宿主声明 `~4.0.4`，0.2.1-rc.2 起声明 `~4.0.5`，两个小版本在本插件用到的契约上没有差别
+（插件只把 Cordis 当类型用；在把 Cordis 固定成 4.0.4 的 0.2.0-rc.2 宿主上也验证了加载与工具注册）。schemastery 3.18.5 仍被 `>=3.18.2 <4` 覆盖。
+把 `0.2.0` 线放回范围的依据：插件在 0.2.0-rc.2 上用到的宿主接口（`tools` 注册与 `tools/pre-execute` 钩子、`Config` 的 `.volatile()` 与
+`settings/mutate` 原子保存、`connection.rpc.handle` + `webServer`、`skills.registerProvider`、客户端模块表里的 primitives / slots /
+plugin-manager）与 0.2.1 线逐项一致，真实宿主上的差别只有 Cordis 小版本。`test:peers` 把四个基线并入受支持矩阵，并断言被拒绝的版本。
 
 `0.1.17` 把 DSH 运行时依赖由精确锁定改为范围声明（`^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.1-0`），
 使同一份包可装在 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代宿主上。`0.2.0-rc.1` 起的新功能（动作体系、skill、recipe v2、
@@ -35,21 +35,21 @@
 
 - 宿主的组装期校验用的是 `semver.satisfies(host, range, { includePrerelease: true })`，所以「单范围能不能过宿主」不是关键。
   真正决定装机成败的是 npm/pnpm 的**默认** semver：预发布版本只有在某个比较符自带同号（同 major.minor.patch）预发布时才被判为满足。
-  于是 `>=0.2.0-rc.2 <0.2.2-0` 这种写法过得了宿主校验，却会让 `dsh plugin add` 报 ERESOLVE（下界 tuple 是 0.2.0，接不住 0.2.1-rc.2）；
-  `>=0.2.1-rc.2` 这个比较符自带 `0.2.1` 的预发布，是**承重**的，必须保留。
+  于是一段式的 `>=0.2.0-rc.2 <0.2.2-0` 过得了宿主校验，却会让 `dsh plugin add` 报 ERESOLVE（下界 tuple 是 0.2.0，接不住 0.2.1-rc.2）；
+  所以写成两段，每一段的下界（`>=0.2.0-rc.2`、`>=0.2.1-rc.2`）都自带该线的同号预发布，是**承重**的，必须保留。
 - 上界是 `<0.2.2-0` 而不是 `<0.2.2`：后者放行 `0.2.2-alpha.1` 这类 0.2.2 的预发布。收口后，若 0.2.2 真出现破坏，
   会在**组装期**直接报 `is incompatible with dsh 0.2.2` 并点名，而不是拖到用户机器上变成运行期怪错
   （`0.1.5 → 0.1.7` 曾一次性打断所有按 `0.1.5-alpha.1` 构建的插件）。
 - 范围只表示「测过哪些」，不等于承诺不破坏；真正的防线是每换一个 DSH 版本重跑一遍这套验证。
-  `pnpm run test:peers`（已并入 `pnpm verify`）用两种解析模式逐个断言受管 peer：`0.2.1-rc.2`、`0.2.1-rc.3` 与 `0.2.1` 必须通过，
-  `0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.2-alpha.1` 必须被拒绝；并自带 `--selftest` 已知行为自校验。
+  `pnpm run test:peers`（已并入 `pnpm verify`）用两种解析模式逐个断言受管 peer：`0.2.0-rc.2`、`0.2.1-rc.2` / `rc.3` / `rc.4` 必须通过，
+  `0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.1-alpha.*`、`0.2.1-rc.1`、`0.2.2-alpha.1`、`0.2.2` 必须被拒绝；并自带 `--selftest` 已知行为自校验。
 
 `0.1.15` 使用 DSH 新客户端分包：状态存储来自
 `dsh-client-store`，设置契约来自 `dsh-client-ui-settings`，客户端 Context
 来自 Cordis。npm 上 `0.1.15-alpha.2` 仍声明旧版 DSH peer，不能与本版混用。
 
 设置的读取不再对宿主版本做适配：Host 半边直接使用 Loader 传给 `apply` 的条目配置（设置页由条目的 `Config` schema 派生，
-条目 id 为 `browser`），浏览器设置卡片使用 `ConfigForm`/`ctx.configForms`，`devDependencies` 锁定 `0.2.1-rc.3`。
+条目 id 为 `browser`），浏览器设置卡片使用 `ConfigForm`/`ctx.configForms`，`devDependencies` 锁定 `0.2.1-rc.3`（类型与单测按这一版；0.2.0-rc.2 与 0.2.1-rc.4 靠真实宿主验证，不在 devDependencies 里）。
 可编辑字段都是 `.volatile()`：保存后新值写入运行中的引用，但浏览器进程、工具暴露与审批规则在启动时一次读取，
 所以保存后仍需重启 profile 才生效（只有提示文本覆盖里的目录、错误提示等按调用实时读取，见「自定义提示文本」）。
 
@@ -60,7 +60,7 @@
 ## 安装
 
 ```bash
-# 默认安装（新的 browser_index / browser_call 工具体系，面向 dsh-v0.2.1-rc.2 宿主）：
+# 默认安装（新的 browser_index / browser_call 工具体系，面向 dsh-v0.2.0-rc.2 与 dsh-v0.2.1-rc.2 ~ rc.4 宿主）：
 dsh plugin --profile web add @anweat/dsh-browser@0.2.2
 # 宿主仍是 0.1.7 线（dsh-v0.1.7-rc.2）时，固定安装 0.1.17（旧的 browser_* 工具体系）：
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17
@@ -70,8 +70,8 @@ dsh plugin --profile web add ./dsh-browser
 dsh --profile web
 ```
 
-> `0.2.0` 与 `0.2.1` 只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`），`0.2.2` 只支持 `dsh-v0.2.1-rc.2`
-> （peer `>=0.2.1-rc.2 <0.2.2-0`）；范围之外的宿主版本未经验证，
+> `0.2.0` 与 `0.2.1` 只支持 `dsh-v0.2.0-rc.2`（peer `>=0.2.0-rc.2 <0.2.1-0`），`0.2.2` 支持 `dsh-v0.2.0-rc.2` 与
+> `dsh-v0.2.1-rc.2` ~ `rc.4`（peer `>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`）；范围之外的宿主版本未经验证，
 > 旧宿主（`dsh-v0.1.7-rc.2` 线）请固定使用 `0.1.17`。预发布通道 `@next` 不再用于安装，`0.2.0-rc.1` 仅作历史记录。
 > 若你的 harness 是包含未发布提交的本地源码 checkout，版本号可能有出入——用
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
@@ -83,11 +83,11 @@ dsh --profile web
 
 - **设置界面重做**（用户反馈“文字和框体太多，不知道怎么配，没有注释”）：状态摘要 + 九个可折叠分组（默认只展开“常用”）+ 一直在视野里的保存条（“N 项未保存 / 放弃 / 保存”）；下拉、开关、数字加单位、chips、列表和弹窗取代了整页文本框。登录 profile、提示词、自动化资产都是“列表 + 编辑弹窗”，提示词弹窗左右对照“默认文本｜我的覆盖”。每个键都有注释：字段旁一句话 + `?` 里的长说明，properties 文本模式每个键前一行注释，示例配置与导出的提示词默认文本（新的带注释 YAML）同样如此。保存结构、`Config` schema 与运行时行为不变（`authProfiles` 现在也能在卡片里改，它在 schema 里本来就可写）。详见“配置”一节。
 
-- **DSH 基线跟到 `dsh-v0.2.1-rc.2` / `rc.3`**：受管 peer 为 `>=0.2.1-rc.2 <0.2.2-0`（旧的 `>=0.2.0-rc.2 <0.2.1-0` 会拒绝今天的宿主），
-  Cordis peer 为 `~4.0.5`，`devDependencies` 全部锁到 `0.2.1-rc.3`（schemastery 3.18.5）。源码不需要为 0.2.1-rc.2 / rc.3 改动：
-  0.2.1-rc.2 / rc.3 的 typings 与运行期契约没有破坏本插件用到的 `tools` 注册、`Config` / `ConfigForm`、客户端 slot 与模块表。
-  `0.2.0` 线宿主继续使用 `0.2.1`。验证：typecheck、构建、peer 双解析模式检查、426 项单测（0 skipped）、
-  86 项真实 Chromium e2e 与 client bundle 检查全绿。
+- **同时支持 `dsh-v0.2.0-rc.2` 与 `dsh-v0.2.1-rc.2` ~ `rc.4`**：受管 peer 为 `>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`
+  （今天的桌面端是 0.2.1 线，`0.2.1` 的 peer 会拒绝它；仍在 0.2.0-rc.2 上的用户同样可以装），Cordis peer 为 `~4.0.4`，
+  `devDependencies` 锁到 `0.2.1-rc.3`（schemastery 3.18.5）。源码不需要为任何一个宿主版本改动（见上文兼容表与
+  `docs/validation/2026-10-28-compat-dist.md`）。验证：typecheck、构建、peer 双解析模式检查、单测、真实 Chromium e2e 与
+  client bundle 检查全绿，三个宿主版本上分别做了干净安装与设置卡片保存。
 - 行为、配置键与审批规则与 `0.2.1` 相同；从 `0.2.1` 直接升级即可，不配置新键时行为不变。
 - 新增 context 创建期选项：配置键 `viewportMode` / `viewportWidth` / `viewportHeight` / `userAgent` / `locale` / `timezoneId` / `proxyServer` / `proxyBypass`，以及 `target.open` 的按次参数 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer`（见下文“浏览器上下文选项”）。
 - 新增 `target.download` 与 `inspect.downloads`，以及配置 `downloadDir`、`downloadMaxBytes`（见下文“下载落盘”）。新增 `target.download` / `inspect.downloads` 使动作总数从 34 变为 36。
