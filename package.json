@@ -33,8 +33,8 @@
   "scripts": {
     "build": "node scripts/clean-lib.mjs && tsc -p tsconfig.json && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --experimental-transform-types test/*.test.ts",
-    "test:e2e": "node --test --experimental-transform-types test/e2e/*.test.ts",
+    "test": "node --import ./test/isolate-home.mjs --test --experimental-transform-types test/*.test.ts",
+    "test:e2e": "node --import ./test/isolate-home.mjs --test --experimental-transform-types test/e2e/*.test.ts",
     "measure:tools": "node scripts/measure-tool-surface.mjs",
     "prompts:dump": "node scripts/dump-prompts.mjs",
     "test:client-bundle": "node scripts/check-client-bundle.mjs",
