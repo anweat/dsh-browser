@@ -4,7 +4,9 @@
 
 自包含的浏览器运行时插件 for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）。
 
-把 **Playwright / Patchright（可选 Chromium 驱动）** 与 **OpenCLI** 作为插件自身的 npm 依赖打包（优先插件本地，缺省回退全局复用），对外提供一个 `browser` 服务 + 一组交互式浏览器工具。`dsh-web-search-pro` 通过 `inject: ['browser']` 注入该服务，驱动它的浏览器 / OpenCLI 后端——**不再依赖全局 CLI**。
+把 **Playwright / Patchright（可选 Chromium 驱动）** 作为插件自身的 npm 依赖，对外提供一个 `browser` 服务 + 一组交互式浏览器工具。`dsh-web-search-pro` 通过 `inject: ['browser']` 注入该服务，驱动它的浏览器 / OpenCLI 后端。
+
+**浏览器本身不随插件下载**：装了 Google Chrome 或 Microsoft Edge 就直接用（自动检测，不用配置）；都没有时才需要装 Playwright 的 Chromium（`runtime.install`，下载约 190 MB）。**OpenCLI 是可选的、需要单独安装**（`npm i -g @jackwener/opencli`）：只有 `opencli.*` 动作和 Web Search Pro 的 `browser-opencli` 后端用到它，不装也不影响其他浏览器工具，也不会让 `dsh plugin add` 报失败（见「第一次使用」与「升级到 0.2.2」）。
 
 ## 兼容与发布通道
 
@@ -16,7 +18,7 @@
 | `0.2.0-rc.1`（预发布，历史记录） | `dsh-v0.1.7-rc.2` ~ `dsh-v0.2.0-rc.2` | **破坏性变更**：30 个 `browser_*` 工具改为 `browser_index` / `browser_call` 两个入口加动作目录（常驻约 325 token，原约 8.8k）；随包提供 `dsh-browser` skill；recipe v2、资产版本与激活保护、结构化观察、探索记录生成草稿、提示文本可配置。并入按 session 隔离浏览器状态（#36）与 dialog 竞态修复（#30）。在 `0.2.0-rc.2` 上完成 325 项测试、64 项真实浏览器 e2e 与真实 Web profile 验证 |
 | `0.2.0` | `dsh-v0.2.0-rc.2` | 第一个面向 DSH 桌面版 0.2.0 线的正式版，也是后续开发的基底。**只支持 `dsh-v0.2.0-rc.2` 这一条线**（peer `>=0.2.0-rc.2 <0.2.1-0`）：去掉为更旧宿主保留的兼容分支（`settings.register` 的 live scope 回退等），并去掉对 `settings` 服务的必需依赖（只声明 `inject: ['tools']`，没有 Settings 服务的组合里也能启动）；不改工具、动作、schema、文本与审批规则。在 `0.2.0-rc.2` 上完成 327 项测试、64 项真实浏览器 e2e 与 peer 双解析模式检查。旧宿主（0.1.7 线，`dsh-v0.1.7-rc.2`）继续使用 `0.1.17` |
 | `0.2.1` | `dsh-v0.2.0-rc.2`（不变） | 相对 `0.2.0` 的补丁版，DSH 基线与 peer 范围（`>=0.2.0-rc.2 <0.2.1-0`）不变，只含两项：(1) 参数无效的调用不再先弹审批：审批钩子先判断动作是否被当前 `automationMode` 禁用（禁用仍直接拒绝），再用与 `runAction` 相同的校验检查参数，无效则不询问，执行层再校验一次并返回带精简 schema 的 `INVALID_ARGS`，不执行任何页面动作；参数有效时的审批规则与理由不变。(2) “探索转草稿”（`draft_from_journal`）的指导文本补充。不改动作、参数 schema 与审批规则。在 `0.2.0-rc.2` 上完成 337 项测试与 66 项真实浏览器 e2e |
-| `0.2.2` | `dsh-v0.2.0-rc.2`，`dsh-v0.2.1-rc.2` / `rc.3` / `rc.4` | 同时支持两条线（受管 peer `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`，Cordis peer `~4.0.4`，`devDependencies` 锁在 `0.2.1-rc.3`，schemastery 3.18.5）。**源码不为任何一个宿主版本改动**：在真实安装的 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4 宿主上都完成了干净安装、Web 设置卡片渲染与保存、skill 注册、资产 RPC、`tools/pre-execute` 审批钩子的验证（见 `docs/validation/2026-10-28-compat-dist.md`）。功能面新增 context 创建期选项、下载落盘与策略覆盖层（见「升级到 0.2.2」）。0.2.0 线宿主此前只能用 `0.2.1`，现在也可以装 `0.2.2` |
+| `0.2.2` | `dsh-v0.2.0-rc.2`，`dsh-v0.2.1-rc.2` / `rc.3` / `rc.4` | 同时支持两条线（受管 peer `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`，Cordis peer `~4.0.4`，`devDependencies` 锁在 `0.2.1-rc.3`，schemastery 3.18.5）。**源码不为任何一个宿主版本改动**：在真实安装的 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4 宿主上都完成了干净安装、Web 设置卡片渲染与保存、skill 注册、资产 RPC、`tools/pre-execute` 审批钩子的验证（见 `docs/validation/2026-10-28-compat-dist.md`）。**安装行为变化**：OpenCLI 不再是依赖（它的安装脚本会让 pnpm 11 的 `dsh plugin add` 失败），Playwright 的 Chromium 缺失时自动改用系统 Chrome / Edge（见「第一次使用」）。功能面新增 context 创建期选项、下载落盘与策略覆盖层（见「升级到 0.2.2」）。0.2.0 线宿主此前只能用 `0.2.1`，现在也可以装 `0.2.2` |
 
 `0.2.2` 的范围是**两段**：`>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`，各对应一条实测过的线（0.2.0 线只有 `0.2.0-rc.2`，
 0.2.1 线是 `rc.2` / `rc.3` / `rc.4`）。`0.2.0-rc.1`、`0.2.1-alpha.*`、`0.2.1-rc.1` 与 `0.2.2` 及以上（含它的预发布）一律拒绝。
@@ -77,6 +79,20 @@ dsh --profile web
 > `dsh plugin --profile web add ./<path>` 并在 profile 的 `pnpm-workspace.yaml`
 > 里对齐版本后重装即可。
 
+## 第一次使用
+
+1. **安装插件**（上一节）。pnpm 11 下 `dsh plugin add` 应当直接成功、退出码 0，不需要改 `pnpm-workspace.yaml`。`0.2.1` 及更早的版本把 OpenCLI 作为依赖，它的安装脚本会被 pnpm 11 拦下，`dsh plugin add` 报 `ERR_PNPM_IGNORED_BUILDS` 失败——而且包其实已经装上、插件却没有被加入 profile 的 bundles，之后再 `add` 一次也不会补上。`0.2.2` 不再把 OpenCLI 作为依赖，这个问题不会出现。
+2. **重启 profile**（web profile 关闭了 HMR）。设置卡片在「设置 → 插件 → Browser automation」；顶部状态摘要会直接说明运行环境：
+   - 没有任何可启动的浏览器：红色徽章“没有可用浏览器”，点“查看详情”有可照做的步骤；
+   - 用的是系统 Chrome / Edge（Playwright 的 Chromium 没下载过）：徽章“浏览器：系统 Chrome / Edge”，这是正常状态，什么都不用做；
+   - 开着 OpenCLI 但没装：徽章“OpenCLI 未安装”，不是警告。
+3. **浏览器**。让模型调用 `browser_call({action:"runtime.status"})`（或看设置卡片）确认 `browser.ready` 为 `true`：
+   - 有 Google Chrome / Microsoft Edge：自动使用，不下载任何东西（`channel` 保持默认 `chromium` 即可）。Playwright 的 Chromium 一旦下载过，就改用它；填了 `executablePath`，或把 `channel` 设为 `chrome` / `msedge`，则固定用你指定的那个，找不到就报错、不会悄悄换别的；
+   - 都没有：选一条——① 装 Chrome 或 Edge；② 让模型调用 `runtime.install` 动作（下载 Playwright Chromium，约 190 MB，磁盘占用约 600 MB，会询问审批）；③ 终端里 `node "<profile>/node_modules/playwright/cli.js" install chromium`（准确路径写在错误信息和 `runtime.status.browser.installAdvice` 里；如果设置了 `PLAYWRIGHT_BROWSERS_PATH`，命令里会带上它）；④ 在设置里填 `executablePath`。
+   - 开了 `autoInstall: true` 的人：缺 Chromium 时仍然自动下载（不会改用系统 Chrome），行为同以前。
+4. **OpenCLI（可选）**。要用站点 adapter（`opencli.*`）或 Web Search Pro 的 `browser-opencli` 后端时：`npm i -g @jackwener/opencli`，装完重启 DSH，再调用 `opencli.status`。插件按这个顺序找它：环境变量 `DSH_BROWSER_OPENCLI`（`main.js`、`opencli` 启动器或包目录）→ profile 里自己装的 → `PATH` 上的 `opencli` → `npm root -g` → 常见全局目录（Homebrew、`~/.npm-global`、nvm / fnm / Volta 的各个 Node 版本）。从程序坞启动的桌面版没有 shell 的 `PATH`，所以最后两步专门兜这种情况；找不到时设 `DSH_BROWSER_OPENCLI`。
+   想把 OpenCLI 装进 profile 里（而不是全局）：先在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: { '@jackwener/opencli': false }`（它的安装脚本只做 shell 补全和清理测试文件，不运行也不影响功能），再 `dsh plugin --profile <name> add @jackwener/opencli`。
+
 ## 从旧版本升级
 
 ### 升级到 0.2.2
@@ -88,7 +104,9 @@ dsh --profile web
   `devDependencies` 锁到 `0.2.1-rc.3`（schemastery 3.18.5）。源码不需要为任何一个宿主版本改动（见上文兼容表与
   `docs/validation/2026-10-28-compat-dist.md`）。验证：typecheck、构建、peer 双解析模式检查、单测、真实 Chromium e2e 与
   client bundle 检查全绿，三个宿主版本上分别做了干净安装与设置卡片保存。
-- 行为、配置键与审批规则与 `0.2.1` 相同；从 `0.2.1` 直接升级即可，不配置新键时行为不变。
+- **干净安装不再失败：OpenCLI 不再是依赖，改为可选并单独安装。** 旧版本把 `@jackwener/opencli` 列为 `dependencies`，它的 install 脚本（只做 shell 补全和清理测试文件）在新用户的 profile 里被 pnpm 11 拦下，`dsh plugin add` 以 `ERR_PNPM_IGNORED_BUILDS` 失败；更糟的是宿主只在“新增的依赖”上把插件加入 bundles，那次失败之后再 `add` 也不会补上，插件从来没有被启用。改成 `optionalDependencies` 没用（pnpm 11 仍然拦）。现在：包里没有 OpenCLI；`opencli.*` 动作在找到 OpenCLI 时照常工作（`PATH`、全局 npm 目录、nvm / fnm / Volta、profile 里自己装的、`DSH_BROWSER_OPENCLI`），找不到时返回带 `npm i -g @jackwener/opencli` 的说明；`runtime.status` 多了 `opencliSource` 与 `opencliInstallHint`，未安装不再是 `runtimeWarnings`。**已经在用内置 OpenCLI 的人**：升级后它会从 profile 里消失，如果你需要它，`npm i -g @jackwener/opencli` 并重启即可（已经全局装过的不用做任何事）。Web Search Pro 优先使用独立的 `opencli`，它的 `browser-opencli` 后备后端同样依赖这份安装。
+- **新用户第一次使用不再卡在“没有 Chromium”：** 默认 `channel: chromium` 在 Playwright 的 Chromium 没有下载过时，自动改用本机的 Google Chrome 或 Microsoft Edge（macOS、Windows、Linux 的常见安装位置；不下载、不联网）；都没有时，`runtime.status` 的 `browser.ready` 为 `false`，`browser.installAdvice`、启动失败的错误信息、`browser_index` 根视图、设置卡片的状态摘要都给出同一组可照做的选项（装 Chrome / Edge、`runtime.install`、终端命令、`executablePath`）。`runtime.status` 新增 `browser`（`ready`、`source`、`path`、`note`、`installAdvice`）与 `systemBrowsers`；`chromiumInstalled` 与 `chromiumExecutablePath` 照旧。显式配置的 `executablePath` / `channel` 永远照你写的用，不会被悄悄替换，写错了会点名是哪个设置错了。
+- 行为、配置键与审批规则与 `0.2.1` 相同；从 `0.2.1` 直接升级即可，不配置新键时行为不变（除上面两条）。
 - 新增 context 创建期选项：配置键 `viewportMode` / `viewportWidth` / `viewportHeight` / `userAgent` / `locale` / `timezoneId` / `proxyServer` / `proxyBypass`，以及 `target.open` 的按次参数 `viewport` / `userAgent` / `locale` / `timezoneId` / `proxyServer`（见下文“浏览器上下文选项”）。
 - 新增 `target.download` 与 `inspect.downloads`，以及配置 `downloadDir`、`downloadMaxBytes`（见下文“下载落盘”）。新增 `target.download` / `inspect.downloads` 使动作总数从 34 变为 36。
 - **嵌套写法不再被静默忽略**：配置里写 `viewport: {width, height}`、`proxy: {...}`、`contextOptions`、`download(s)` 会被忽略，并在 `runtime.status` 的 `runtimeWarnings` 里说明应使用哪些扁平键。**配置错误不会让插件加载失败**（否则设置卡片也会一起消失）：无效的值回退到默认并同样出现在 `runtimeWarnings`。
@@ -160,10 +178,10 @@ DSH 会话示例：
 
 | 层 | 实际是什么 | 打包还是复用 |
 |---|---|---|
-| **chromium 内核** | 共享缓存 `%LOCALAPPDATA%\ms-playwright`（约 400MB） | **永远复用共享缓存**，不塞进插件、不重复下载；缺失时 `runtime.install` 一键补 |
+| **浏览器** | 系统 Google Chrome / Edge，或共享缓存 `%LOCALAPPDATA%\ms-playwright` 里的 Playwright Chromium（约 400MB） | **安装插件时不下载任何浏览器**。优先 Playwright Chromium，没有就用系统 Chrome / Edge；都没有时 `runtime.install` 一键补 |
 | **playwright 驱动**（JS 包） | `playwright` npm 依赖 | 插件本地 node_modules 优先，缺省回退全局 npm |
 | **patchright 驱动**（可选） | 与 Playwright 同版本的 Chromium 兼容驱动 | 插件内置；配置 `browserRuntime: patchright` 才启用 |
-| **opencli**（纯 Node CLI） | `@jackwener/opencli` npm 依赖 | 同上，本地优先 / 全局复用 |
+| **opencli**（纯 Node CLI，可选） | `@jackwener/opencli`，**不是**本包依赖 | 不打包：它的安装脚本会让 pnpm 11 的 `dsh plugin add` 报失败。要用就 `npm i -g @jackwener/opencli`，插件在 `PATH`、全局 npm 目录和 profile 里找它 |
 
 ### 把共享浏览器缓存放到别的盘（可选）
 
@@ -528,14 +546,14 @@ Recipe 适合让模型生成可审计、可复现的多步操作，不必生成 
         enabled: true            # 是否启用浏览器服务；false 时 agent 没有浏览器工具。默认 true
         automationMode: standard # 自动化模式：read-only 只读 | standard 写操作逐次询问（默认）| autonomous 页面交互直接执行 | unrestricted 全部免审批（风险最高：agent 还能自行放宽登录域名与限流）
         toolSurface: indexed     # 工具面：indexed（默认）= 只常驻 browser_index + browser_call，约 325 token | flat = 每个动作一个工具，常驻上下文大得多。改后需重启
-        opencliEnabled: true     # OpenCLI（站点 adapter 与 Chrome Browser Bridge）总开关。默认 true
+        opencliEnabled: true     # OpenCLI（站点 adapter 与 Chrome Browser Bridge）总开关。默认 true；OpenCLI 需要另外安装（npm i -g @jackwener/opencli），没装时只是 opencli.* 不可用
 
         # ── 浏览器 ──────────────────────────────────────────────────────────
         browserRuntime: playwright # 驱动：playwright（默认）| patchright（仅 Chromium，对反爬检测更友好）
-        channel: chromium        # 浏览器：chromium（打包内核，默认）| chrome | msedge（本机已装）；Patchright 推荐 chrome
+        channel: chromium        # 浏览器：chromium（默认：Playwright 的 Chromium，没下载过时自动用本机 Chrome / Edge）| chrome | msedge（固定用本机已装的那个）；Patchright 推荐 chrome
         headless: true           # true 不显示窗口（默认）| false 显示；Patchright 通常关闭无头兼容性最好
-        autoInstall: false       # 缺内核时是否自动 install chromium（几十到上百 MB）。默认 false，建议用 runtime.install 显式安装
-        # executablePath: ''     # 自定义浏览器的绝对路径；留空用自带或通道默认
+        autoInstall: false       # 缺 Playwright Chromium 时是否自动下载（下载约 190 MB，开启后不再改用系统 Chrome）。默认 false：有 Chrome / Edge 就直接用，没有再用 runtime.install
+        # executablePath: ''     # 自定义浏览器的绝对路径；留空：Playwright Chromium，缺失时用系统 Chrome / Edge
         # cdpPort: 9222          # 本机 CDP 调试端口 1–65535；留空关闭。风险：同机其它程序可借此控制浏览器
         maxSessions: 8           # 同时持有 context+page 的 session 上限 1–64，超出淘汰最久未使用者。默认 8
         # args: ['--disable-gpu'] # 追加的 Chromium 启动参数；只加你理解的。默认 []
@@ -735,11 +753,11 @@ Camoufox 当前没有硬集成：截至本版，其 JS 包要求 Node 22 且 pee
 - `target.open` 和 web-search-pro 的平台搜索可选择 `authProfile` / `rulePack`。`runtime.status` 只显示 profile 名称、域名和回写状态，不显示文件路径或 Cookie。
 - RulePack 仍只允许有界动作；init script 必须是本地、SHA-256 固定且不超过 64KB。外部模型 JavaScript 使用独立的 UserScript 工具，不能冒充 RulePack；除 `unrestricted` 外需一次性审批。
 - 生成登录态：`npx playwright codegen --save-storage=storageState.json`（或复用 `dsh-web-search-pro` 的 `scripts/save-login.mjs`），把产物路径填进 `storageStatePath`。
-- opencli 的社交平台后端（小红书/推特/Reddit/IG/FB）仍需浏览器扩展 + 登录态在线，即使 opencli 已打包为依赖也绕不开扩展。
+- opencli 的社交平台后端（小红书/推特/Reddit/IG/FB）仍需浏览器扩展 + 登录态在线，装好 opencli 也绕不开扩展。
 
 ### OpenCLI 连接检查
 
-插件运行时优先使用自己依赖的 OpenCLI。需要在终端排查 Browser Bridge 时，可全局安装同一 CLI 并检查：
+OpenCLI 是可选组件，不随插件安装（见「第一次使用」）。先全局安装它，再用同一个 CLI 在终端排查 Browser Bridge：
 
 ```bash
 npm i -g @jackwener/opencli
@@ -749,7 +767,7 @@ opencli doctor
 
 健康状态应同时包含 daemon running、extension connected 和一个 connected Chrome profile。仅安装 npm 包不等于 Browser Bridge 可用；Chrome 扩展断开时，OpenCLI 社区搜索会明确失败，而普通 Playwright 浏览器工具不受影响。
 
-在 DSH Desktop（Electron）中，插件会从 `PATH` 查找真正的 Node.js 可执行文件来运行内置 OpenCLI 和浏览器运行时 CLI。若 `opencli.status` 报告找不到 Node.js，可在启动 DSH Desktop 的环境中设置 `DSH_BROWSER_NODE` 为 `node.exe` 的绝对路径，然后重启 Desktop。
+在 DSH Desktop（Electron）中，插件会从 `PATH` 查找真正的 Node.js 可执行文件来运行 OpenCLI 和浏览器运行时 CLI。若 `opencli.status` 报告找不到 Node.js，可在启动 DSH Desktop 的环境中设置 `DSH_BROWSER_NODE` 为 `node.exe` 的绝对路径，然后重启 Desktop。
 
 插件内先调用 `opencli.status`，不要只看 `runtime.status.opencliEnabled`。后者表示配置开关，
 前者才是真实连接。通用调用以 argv 数组传入，不经过 shell，也不会自行拼接引号：
