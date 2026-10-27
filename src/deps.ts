@@ -322,13 +322,16 @@ export function opencliLocation(): OpencliLocation | undefined {
   return location
 }
 
+/** What to tell the user when OpenCLI was not found: names a wrong `DSH_BROWSER_OPENCLI` first, since that one is theirs to fix. */
+export function opencliMissingMessage(): string {
+  const override = process.env.DSH_BROWSER_OPENCLI?.trim()
+  return override ? `DSH_BROWSER_OPENCLI=${override} is not an OpenCLI package directory, its main.js or the opencli launcher: fix or unset it. ${OPENCLI_INSTALL_HINT}` : OPENCLI_INSTALL_HINT
+}
+
 /** Entry JS of OpenCLI (its bin/main). Throws the install hint when OpenCLI is not installed. */
 export function opencliEntryPath(): string {
   const location = opencliLocation()
-  if (!location) {
-    const override = process.env.DSH_BROWSER_OPENCLI?.trim()
-    throw new Error(override ? `DSH_BROWSER_OPENCLI=${override} is not an OpenCLI package directory, main.js or launcher. ${OPENCLI_INSTALL_HINT}` : OPENCLI_INSTALL_HINT)
-  }
+  if (!location) throw new Error(opencliMissingMessage())
   return location.entry
 }
 

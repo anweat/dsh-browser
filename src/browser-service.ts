@@ -22,7 +22,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { browserRuntimeCliPath, loadBrowserRuntime, opencliLocation, OPENCLI_INSTALL_HINT, runOpencli, runNode, type CliResult, type OpencliSource } from './deps.ts'
+import { browserRuntimeCliPath, loadBrowserRuntime, opencliLocation, opencliMissingMessage, runOpencli, runNode, type CliResult, type OpencliSource } from './deps.ts'
 import { browserInstallAdvice, detectSystemBrowsers, planBrowser, type BrowserPlan, type SystemBrowser } from './system-browser.ts'
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-profiles.ts'
@@ -1082,7 +1082,7 @@ export class BrowserService {
   opencli(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
     if (!this.config.enabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: browser service is disabled', timedOut: false })
     if (!this.config.opencliEnabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI is disabled', timedOut: false })
-    if (!this.opencliAvailable()) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: ' + OPENCLI_INSTALL_HINT, timedOut: false })
+    if (!this.opencliAvailable()) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: ' + opencliMissingMessage(), timedOut: false })
     if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
       return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
     }
@@ -2179,7 +2179,7 @@ export class BrowserService {
       opencliInstalled,
       ...resolvedOpencliEntryPath ? { opencliEntryPath: resolvedOpencliEntryPath } : {},
       ...opencli ? { opencliSource: opencli.source } : {},
-      ...this.config.opencliEnabled && !opencliInstalled ? { opencliInstallHint: OPENCLI_INSTALL_HINT } : {},
+      ...this.config.opencliEnabled && !opencliInstalled ? { opencliInstallHint: opencliMissingMessage() } : {},
       automationMode: this.config.automationMode,
       exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets, this.config.enabled, this.config.toolSurface),
       exposedActions: configuredBrowserActions(this.config.automationMode, this.config.automationAssets, this.config.enabled),

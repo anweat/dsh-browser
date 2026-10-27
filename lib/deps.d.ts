@@ -66,6 +66,8 @@ export interface OpencliSearchEnv {
 export declare function locateOpencli(search: OpencliSearchEnv): OpencliLocation | undefined;
 /** Find OpenCLI on this machine. A hit is remembered while its files exist; a miss is looked up again (the user may install it while DSH runs). */
 export declare function opencliLocation(): OpencliLocation | undefined;
+/** What to tell the user when OpenCLI was not found: names a wrong `DSH_BROWSER_OPENCLI` first, since that one is theirs to fix. */
+export declare function opencliMissingMessage(): string;
 /** Entry JS of OpenCLI (its bin/main). Throws the install hint when OpenCLI is not installed. */
 export declare function opencliEntryPath(): string;
 /**

@@ -142,6 +142,7 @@ test('OpenCLI that is not installed is a hint, never a warning, and the opencli 
     const status = await service.status()
     assert.equal(status.opencliInstalled, false)
     assert.match(status.opencliInstallHint ?? '', /npm i -g @jackwener\/opencli/)
+    assert.match(status.opencliInstallHint ?? '', /DSH_BROWSER_OPENCLI=.*nowhere.*fix or unset it/s, 'a wrong override is named, it is theirs to fix')
     assert.doesNotMatch(status.runtimeWarnings.join(' '), /OpenCLI/)
     const result = await service.opencli(['list'])
     assert.equal(result.code, -1)
