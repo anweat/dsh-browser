@@ -11,11 +11,15 @@ export const styles = {
   assetTestForm: 'dsb-asset-test-form', assetEditor: 'dsb-asset-editor', invalidInput: 'dsb-invalid-input',
 } as const
 
+/**
+ * Inject the card's stylesheet, or refresh it in place. A Host that hot-reloads the plugin keeps the page (and the
+ * `<style>` an older version injected), so an existing element gets the current CSS instead of being kept as is.
+ */
 export function ensureStyles(): void {
-  if (document.getElementById('dsh-browser-settings-styles')) return
-  const style = document.createElement('style')
+  const existing = document.getElementById('dsh-browser-settings-styles')
+  const style = existing ?? document.createElement('style')
   style.id = 'dsh-browser-settings-styles'
-  style.textContent = `
+  const css = `
 .dsb-notice{margin:0;padding:9px 11px;border-radius:8px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-3)}.dsb-hint{font-size:12px;line-height:1.5;color:var(--dsw-alias-label-tertiary);margin:0}
 .dsb-field{display:flex;min-width:0;flex-direction:column;gap:6px}.dsb-field-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.dsb-label{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary)}
 .dsb-input{box-sizing:border-box;width:100%;min-width:0;height:34px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);font:inherit;font-size:13px;color:var(--dsw-alias-label-primary)}.dsb-input:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary)}.dsb-input:disabled{opacity:.55}.dsb-textarea{height:auto;padding:9px 10px;resize:vertical;line-height:1.45}.dsb-code{font-family:var(--ds-font-family-code);font-size:12px}
@@ -56,5 +60,6 @@ div.dsb-modal{width:min(560px,100%);max-height:100%}div.dsb-modal-wide{width:min
 @container (max-width:560px){.dsb-row{grid-template-columns:minmax(0,1fr)}.dsb-row-control.dsb-inline{justify-content:flex-start}.dsb-compare{grid-template-columns:minmax(0,1fr)}.dsb-group-sub{white-space:normal}.dsb-item{flex-wrap:wrap}.dsb-savebar{flex-wrap:wrap}.dsb-savebar .dsb-actions{margin-left:auto}}
 @media(max-width:560px){.dsb-compare{grid-template-columns:minmax(0,1fr)}div.dsb-modal{width:100%}}
 `
-  document.head.append(style)
+  if (style.textContent !== css) style.textContent = css
+  if (!existing) document.head.append(style)
 }

@@ -57,4 +57,8 @@ export declare const styles: {
     readonly assetEditor: "dsb-asset-editor";
     readonly invalidInput: "dsb-invalid-input";
 };
+/**
+ * Inject the card's stylesheet, or refresh it in place. A Host that hot-reloads the plugin keeps the page (and the
+ * `<style>` an older version injected), so an existing element gets the current CSS instead of being kept as is.
+ */
 export declare function ensureStyles(): void;
