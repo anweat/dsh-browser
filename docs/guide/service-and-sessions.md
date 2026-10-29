@@ -18,7 +18,7 @@ export function apply(ctx: Context) {
 }
 ```
 
-服务接口（结构性，无需共享类型包）见 `src/browser-service.ts` 里的 `BrowserService`；`render`、`snapshot`、`searchResults`、`opencli`、`close` 供其他插件调用，签名从 0.2.0 起不变。
+服务接口（结构性，无需共享类型包）见 `src/browser-service.ts` 里的 `BrowserService`；`render`、`snapshot`、`searchResults`、`opencli`、`close` 供其他插件调用，签名相对 0.1.x 没有变化。
 
 ## 跨 session 隔离
 
