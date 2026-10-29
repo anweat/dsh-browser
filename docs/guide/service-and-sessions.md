@@ -13,12 +13,12 @@
 export const inject = ['tools', 'browser']
 export function apply(ctx: Context) {
   const browser = ctx.get('browser') as BrowserService
-  // browser.render / snapshot / searchResults / opencli / recipe /
-  // runBuiltinScript / runUserscript / open / click / type / scroll / read / screenshot / close
+  // 例如 browser.render / snapshot / searchResults / opencli / recipe / crawl /
+  // runBuiltinScript / runUserscript / open / observe / read / click / type / scroll / screenshot / download / close
 }
 ```
 
-服务接口（结构性，无需共享类型包）见 `src/browser-service.ts`。
+服务接口（结构性，无需共享类型包）见 `src/browser-service.ts` 里的 `BrowserService`；`render`、`snapshot`、`searchResults`、`opencli`、`close` 供其他插件调用，签名从 0.2.0 起不变。
 
 ## 跨 session 隔离
 
