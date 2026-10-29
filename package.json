@@ -23,6 +23,8 @@
     "assets",
     "cordis.patch.yml",
     "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
     "AUDIT.md",
     "scripts",
     "LICENSE"
@@ -38,10 +40,11 @@
     "measure:tools": "node scripts/measure-tool-surface.mjs",
     "prompts:dump": "node scripts/dump-prompts.mjs",
     "test:client-bundle": "node scripts/check-client-bundle.mjs",
-    "verify": "pnpm run typecheck && pnpm run test:peers && pnpm run build && pnpm test && pnpm run test:client-bundle",
+    "verify": "pnpm run typecheck && pnpm run test:peers && pnpm run build && pnpm test && pnpm run test:client-bundle && pnpm run docs:check",
     "prepublishOnly": "pnpm run verify",
     "prepare": "npm run build",
-    "test:peers": "node test/compat/check-peer-ranges.js"
+    "test:peers": "node test/compat/check-peer-ranges.js",
+    "docs:check": "node scripts/check-docs-links.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.0.4",
