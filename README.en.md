@@ -67,7 +67,7 @@ A local source checkout may carry a different version number than the published 
    - Neither present: install Chrome or Edge; or have the model call `runtime.install` (about 190 MB, asks for approval); or set `executablePath`. All options are in [runtime and dependencies](https://github.com/anweat/dsh-browser/blob/master/docs/guide/runtime-and-dependencies.md) (Chinese).
 3. **Optional dependencies.**
    - **OpenCLI** is used only by the `opencli.*` actions and by Web Search Pro's `browser-opencli` backend. Run `npm i -g @jackwener/opencli`, restart, then call `opencli.status`. Without it everything else works, and `dsh plugin add` does not fail. The lookup order and troubleshooting are in [login state and OpenCLI](https://github.com/anweat/dsh-browser/blob/master/docs/guide/login-and-opencli.md) (Chinese).
-   - **dsh-web-search-pro** consumes this plugin's browser through `inject: ['browser']`. The two install independently, but its browser-based features need this plugin present.
+   - **dsh-web-search-pro** reads this plugin's `browser` service at run time for page snapshots, `playwright` fetches and search-page platforms. The two install independently, but those browser-based features need this plugin present.
 
 ## Quick examples
 

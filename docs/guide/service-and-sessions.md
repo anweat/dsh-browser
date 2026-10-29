@@ -60,6 +60,6 @@ cookie 与 storage，跨 session 串号正是要防的事。
 
 ## 与 dsh-web-search-pro 的关系
 
-`dsh-web-search-pro` 现在 `inject: ['browser']`，其 `web_snapshot` / `web_fetch_pro`(playwright 后端) /
-`web_platform_search`(中文社区 playwright + 社交平台 opencli) 全部走本插件的 `browser` 服务。
-两者可独立安装，但 web-search-pro 的浏览器类能力依赖 dsh-browser 先行提供 `browser` 服务（Cordis `inject` 自动排序，无需手动控制挂载顺序）。
+`dsh-web-search-pro`（0.2.x）是本插件的可选搭档：它的 `read.snapshot`、`read.fetch mode=playwright`、搜索页类平台和 OpenCLI 后备后端都走本插件的 `browser` 服务；网页搜索、证据管线和 CLI 平台不需要浏览器。两者可独立安装，没有 dsh-browser 时这些浏览器类能力不可用。
+
+Web Search Pro **没有**把 `browser` 写进 `inject`（Cordis 4.0.x 把声明的每个 `inject` 都当作必需，没有可选写法，会让它在没装浏览器插件时一直挂起），而是在每次调用时用 `ctx.get('browser')` 读取，所以挂载顺序不用手动控制。Web Search Pro 0.2+ 只支持本插件 0.2.x，旧的 0.1.x 会被识别为不支持。
