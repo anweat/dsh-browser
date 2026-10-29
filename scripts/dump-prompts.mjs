@@ -5,7 +5,7 @@
 //   { tools, rootGuide, rootNote, groups, actions, errorHints, skill }
 //
 // Copy the output, delete what you want to keep as is, reword the rest, and put it under
-// `prompts:` in your profile config (see README "Custom prompt text"). Pasted back unchanged it
+// `prompts:` in your profile config (see docs/guide/prompts.md). Pasted back unchanged it
 // changes nothing: blank `notes`, `rootNote`, `skill.bodyFile` and `skill.append` mean "none".
 //
 // Usage: node scripts/dump-prompts.mjs [--compact]
