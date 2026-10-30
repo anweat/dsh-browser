@@ -158,9 +158,9 @@ function satisfies(version, range, options = {}) {
 /**
  * 本仓库声明支持、并已在真实宿主上跑过的 DSH 基线，分两条线：
  *   0.2.0 线：0.2.0-rc.2（npm 上 0.2.0 线只有 rc.1 / rc.2，rc.1 没有验证过）
- *   0.2.1 线：0.2.1-rc.2、rc.3、rc.4（devDependencies 固定在 rc.3，rc.2 / rc.4 靠真实宿主验证，见 docs/validation）
+ *   0.2.1 线：0.2.1-rc.2、rc.3、rc.4、rc.5（devDependencies 固定在 rc.3，rc.2 / rc.4 / rc.5 靠真实宿主验证，见 docs/validation）
  */
-const SUPPORTED_BASELINES = ['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4']
+const SUPPORTED_BASELINES = ['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5']
 /**
  * 必须被拒绝的宿主版本（runtime 与 install 两种模式都不能满足）：
  * 已放弃的旧线、功能未在其上验证过的前一个预发布、以及不放行的下一个次版本的预发布。
@@ -207,6 +207,7 @@ function selftest() {
     [pinned, '0.2.1-rc.2', true, true],       // 受支持基线；`>=0.2.1-rc.2` 这个比较符自带同号预发布，是承重的
     [pinned, '0.2.1-rc.3', true, true],       // 第二个受支持基线（rc.2→rc.3 只有导航入口自定义等 4 个功能提交）
     [pinned, '0.2.1-rc.4', true, true],       // 第三个 0.2.1 基线
+    [pinned, '0.2.1-rc.5', true, true],       // 第四个 0.2.1 基线（与 rc.4 同依赖、同 peer 面，只改了对话里的 reasoning 块渲染）
     [pinned, '0.2.1-rc.9', true, true],
     [pinned, '0.2.1', true, true],            // 0.2.1 正式版与基线同 tuple，声明兼容
     [pinned, '0.2.2-alpha.1', false, false],  // 上界是 <0.2.2-0，不是 <0.2.2：连 0.2.2 的预发布也挡掉
