@@ -15,6 +15,10 @@ dsh plugin --profile <name> add @anweat/dsh-browser@<版本>
 
 DSH Desktop 上的升级方式见 [README 的 Desktop 安装](README.md#安装)。
 
+## 未发布
+
+**兼容**：新增实测 `dsh-v0.2.1-rc.5`（npm `@deepseek-ai/dsh@0.2.1-rc.5`，dist-tag `next`，2026-10-30 验证）。**插件源码与 peer 范围没有改动**：rc.5 与 rc.4 的依赖版本相同，源码差异只在客户端对话的推理块渲染，不涉及插件用到的宿主接口。npm 上已发布的 `0.2.2` 在 rc.5 宿主上干净安装（pnpm 11.7.0 与 12.4.2 都退出码 0、无警告）、headless 工具列表与 `runtime.status`、Web 设置卡片渲染与保存一项都通过。`test:peers` 的受支持基线加了 `0.2.1-rc.5`。验证记录见 [docs/validation/2026-10-30-dsh-rc5.md](docs/validation/2026-10-30-dsh-rc5.md)。
+
 ## 0.2.2（2026-10-28）
 
 **兼容**：`dsh-v0.2.0-rc.2`，`dsh-v0.2.1-rc.2` / `rc.3` / `rc.4`。同时支持两条线：受管 peer `>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`，Cordis peer `~4.0.4`，`devDependencies` 锁在 `0.2.1-rc.3`，schemastery 3.18.5。**源码不为任何一个宿主版本改动**：在真实安装的 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4 宿主上都完成了干净安装、Web 设置卡片渲染与保存、skill 注册、资产 RPC、`tools/pre-execute` 审批钩子的验证（见 [docs/validation/2026-10-28-compat-dist.md](docs/validation/2026-10-28-compat-dist.md)）。0.2.0 线宿主此前只能用 `0.2.1`，现在也可以装 `0.2.2`。验证：typecheck、构建、peer 双解析模式检查、单测、真实 Chromium e2e 与 client bundle 检查全绿，三个宿主版本上分别做了干净安装与设置卡片保存。

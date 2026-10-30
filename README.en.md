@@ -21,7 +21,7 @@ Security boundaries and the September 2026 review are in [AUDIT.md](https://gith
 
 | Plugin | DSH | Peer ranges |
 |---|---|---|
-| `0.2.2` (current) | `0.2.0-rc.2`, `0.2.1-rc.2` to `rc.4` (tested on 0.2.0-rc.2, 0.2.1-rc.3, 0.2.1-rc.4) | DSH packages `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`; `@deepseek-ai/cordis` `~4.0.4` |
+| `0.2.2` (current) | `0.2.0-rc.2`, `0.2.1-rc.2` to `rc.5` (tested on 0.2.0-rc.2, 0.2.1-rc.3, 0.2.1-rc.4, 0.2.1-rc.5) | DSH packages `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`; `@deepseek-ai/cordis` `~4.0.4` |
 | `0.1.17` (pin this on 0.1.7-line hosts) | `dsh-v0.1.7-rc.2` | the older `browser_*` tool set |
 
 Host versions outside these ranges are not verified. Older versions and upgrade notes are in the [CHANGELOG](https://github.com/anweat/dsh-browser/blob/master/CHANGELOG.md) (Chinese). Why the peer range has two segments is explained in [docs/dev/host-compat.md](https://github.com/anweat/dsh-browser/blob/master/docs/dev/host-compat.md) (Chinese).

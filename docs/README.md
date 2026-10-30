@@ -38,6 +38,7 @@
 | [2026-10-12.md](validation/2026-10-12.md) | dev/0.2.2：真实 DSH Host 验证（context 选项、下载等） |
 | [2026-10-26-commandcode.md](validation/2026-10-26-commandcode.md) | dev/0.2.2：真实 DSH 0.2.1-rc.3 宿主 + command-code 的 DeepSeek 模型验证 |
 | [2026-10-28-compat-dist.md](validation/2026-10-28-compat-dist.md) | 0.2.2 发布前：DSH 0.2.0-rc.2 / 0.2.1-rc.x 兼容与 npm 分发 |
+| [2026-10-30-dsh-rc5.md](validation/2026-10-30-dsh-rc5.md) | 0.2.2：DSH 0.2.1-rc.5 宿主上的干净安装、headless、Web 设置卡片（插件无改动） |
 
 ## 其他
 
