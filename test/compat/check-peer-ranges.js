@@ -159,17 +159,21 @@ function satisfies(version, range, options = {}) {
  * 本仓库声明支持、并已在真实宿主上跑过的 DSH 基线，分两条线：
  *   0.2.0 线：0.2.0-rc.2（npm 上 0.2.0 线只有 rc.1 / rc.2，rc.1 没有验证过）
  *   0.2.1 线：0.2.1-rc.2、rc.3、rc.4、rc.5（devDependencies 固定在 rc.3，rc.2 / rc.4 / rc.5 靠真实宿主验证，见 docs/validation）
+ *   0.2.2 线：0.2.2-rc.1（实测：隔离宿主上插件正常加载并激活，设置命名空间 `browser` 注册成功；
+ *            未放宽 peer 的 0.2.2 在同一宿主上被安装闸门硬拒绝，说明这段范围是承重的）。
+ *            上界写 <0.2.3-0，所以 0.2.2 正式版也一并放行，但它没有在真实宿主上跑过 ——
+ *            这条线一旦回归，问题会出在 0.2.2 正式版上，而不是 rc 上。
  */
-const SUPPORTED_BASELINES = ['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5']
+const SUPPORTED_BASELINES = ['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-rc.1']
 /**
  * 必须被拒绝的宿主版本（runtime 与 install 两种模式都不能满足）：
  * 已放弃的旧线、功能未在其上验证过的前一个预发布、以及不放行的下一个次版本的预发布。
  */
-const REJECTED_BASELINES = ['0.1.7-rc.2', '0.2.0-rc.1', '0.2.1-alpha.1', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.2-alpha.1', '0.2.2']
+const REJECTED_BASELINES = ['0.1.7-rc.2', '0.2.0-rc.1', '0.2.1-alpha.1', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.2-alpha.1', '0.2.3-rc.1', '0.2.3']
 /** 用于说明范围宽窄的代表性版本（只做展示，不影响退出码）。 */
 const MATRIX_VERSIONS = [
   '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.0', '0.2.1-alpha.1', '0.2.1-rc.1',
-  '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1', '0.2.2-alpha.1', '0.2.2', '0.3.0-rc.1',
+  '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1', '0.2.2-alpha.1', '0.2.2-rc.1', '0.2.2', '0.2.3-rc.1', '0.2.3', '0.3.0-rc.1',
 ]
 
 const gatedPeers = (manifest) =>
@@ -189,7 +193,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..')
 
 function selftest() {
-  const pinned = '>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0'
+  const pinned = '>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-rc.1 <0.2.3-0'
   const single = '>=0.2.1-rc.2 <0.2.2-0'
   const looseCaret = '^0.2.1-rc.2'
   const wide = '>=0.2.1-rc.2 <0.3.0'
@@ -210,8 +214,12 @@ function selftest() {
     [pinned, '0.2.1-rc.5', true, true],       // 第四个 0.2.1 基线（与 rc.4 同依赖、同 peer 面，只改了对话里的 reasoning 块渲染）
     [pinned, '0.2.1-rc.9', true, true],
     [pinned, '0.2.1', true, true],            // 0.2.1 正式版与基线同 tuple，声明兼容
-    [pinned, '0.2.2-alpha.1', false, false],  // 上界是 <0.2.2-0，不是 <0.2.2：连 0.2.2 的预发布也挡掉
-    [pinned, '0.2.2', false, false],          // cap 生效：未实测的 0.2.2 不声称兼容
+    [pinned, '0.2.2-alpha.1', false, false],  // alpha 早于 rc.1，不在任何一段里
+    [pinned, '0.2.2-rc.1', true, true],       // 实测过的 0.2.2 线基线
+    [pinned, '0.2.2-rc.9', true, true],
+    [pinned, '0.2.2', true, true],            // 上界是 <0.2.3-0：0.2.2 正式版随 rc 线一并放行
+    [pinned, '0.2.3-rc.1', false, false],     // 新的边界：0.2.3 的预发布仍被挡在 -0 之外
+    [pinned, '0.2.3', false, false],
     [looseCaret, '0.2.1', true, true],
     [looseCaret, '0.2.2-alpha.1', true, false], // install 毒药：宿主校验放行、npm 默认解析拒绝
     [looseCaret, '0.3.0-rc.1', false, false],   // ^ 的上界是 <0.3.0-0
