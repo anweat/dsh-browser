@@ -48,6 +48,35 @@ function expectedRevision(payload: Record<string, unknown>): number | undefined 
   return value
 }
 
+/** The part of the Host's `connection` service this file uses. `register` is its (TypeScript-private) channel registrar. */
+interface ConnectionRegistrar {
+  rpc: {
+    /** Register one authenticated absolute channel prefix owned by this plugin. */
+    handle(channel: string, handler: ConnectionRpcHandler): () => Promise<void>
+  }
+  register?(owner: unknown, channel: string, handler: ConnectionRpcHandler): () => Promise<void>
+}
+
+/**
+ * Mount the plugin's RPC channel and return its disposer.
+ *
+ * `connection.rpc.handle` mounts the Web route through the Context that owns the service, and that Context reads
+ * `webServer` without having injected it. On cordis 4.0.x a service read through the root Context gets away with that.
+ * On cordis 4.1 (DSH 0.2.2) it throws `cannot get property "webServer" without inject`, and since the throw happened
+ * inside an inject callback nothing reported it: the channel was never mounted and every `/dsh-browser-assets/*`
+ * call from the settings card came back HTTP 405. The Host's own `register(owner, channel, handler)` takes the owner
+ * explicitly, so the fallback hands it `owner`, the Context that did inject `webServer`. Same route, same transport
+ * (envelope, authentication fence, Peer scope); only the owner differs.
+ */
+function openChannel(owner: unknown, connection: ConnectionRegistrar, handler: ConnectionRpcHandler): () => Promise<void> {
+  try {
+    return connection.rpc.handle(CHANNEL, handler)
+  } catch (error) {
+    if (typeof connection.register !== 'function') throw error
+    return connection.register(owner, CHANNEL, handler)
+  }
+}
+
 /** `promptsStatus` answers the settings card's "prompt text" section: the overrides in force, diagnostics and the L0 estimate. */
 export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService, promptsStatus?: () => unknown): void {
   ctx.inject(['connection', 'webServer'], (connectionCtx) => {
@@ -58,14 +87,7 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
     // which a manual route can reconstruct.
     // The dedicated registrar mounts its Web route through the Context that
     // reads it. The root Context owns webServer; the plugin effect owns cleanup.
-    const connection = (connectionCtx.root as unknown as {
-      connection: {
-        rpc: {
-          /** Register one authenticated absolute channel prefix owned by this plugin. */
-          handle(channel: string, handler: ConnectionRpcHandler): () => Promise<void>
-        }
-      }
-    }).connection
+    const connection = (connectionCtx.root as unknown as { connection: ConnectionRegistrar }).connection
     const handler: ConnectionRpcHandler = async (endpoint, rawPayload) => {
       try {
         // The transport hands the handler the endpoint relative to the channel,
@@ -154,7 +176,7 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
       }
     }
     connectionCtx.effect(
-      () => connection.rpc.handle(CHANNEL, handler),
+      () => openChannel(connectionCtx, connection, handler),
       'dsh-browser: automation asset RPC channel',
     )
   })

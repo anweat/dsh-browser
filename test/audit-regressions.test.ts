@@ -60,6 +60,35 @@ test('real browser handles primitives and hidden uploads; redirects cannot expan
   }
 })
 
+test('asset API falls back to register(owner, ...) when rpc.handle cannot read webServer (cordis 4.1)', async () => {
+  const calls: { owner: unknown; channel: string }[] = []
+  let handler: any
+  // What the Host's `rpc.handle` does on cordis 4.1: it reads `webServer` through a Context that never injected it.
+  const connection = {
+    rpc: { handle() { throw new Error('cannot get property "webServer" without inject') } },
+    register(owner: unknown, channel: string, h: unknown) { calls.push({ owner, channel }); handler = h; return async () => {} },
+  }
+  const ctx: any = {
+    inject(_names: unknown, setup: (ctx: unknown) => void) { setup(ctx) },
+    effect(setup: () => unknown) { setup() },
+    root: { connection },
+  }
+  registerAutomationAssetRpc(ctx, { snapshot: () => ({ assets: [] }) } as never, {} as never)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]!.channel, '/dsh-browser-assets')
+  assert.equal(calls[0]!.owner, ctx, 'the owner must be the Context that injected webServer, not the root')
+  const peer = { id: 'test-peer', ctx: {} as never, dispose: async () => {} }
+  assert.deepEqual(await handler('snapshot', {}, new AbortController().signal, peer), { ok: true, value: { assets: [] } })
+
+  // A Host without the fallback entry point keeps the original error instead of hiding it.
+  const bare: any = {
+    inject(_names: unknown, setup: (ctx: unknown) => void) { setup(bare) },
+    effect(setup: () => unknown) { setup() },
+    root: { connection: { rpc: connection.rpc } },
+  }
+  assert.throws(() => registerAutomationAssetRpc(bare, {} as never, {} as never), /without inject/)
+})
+
 test('asset API registers its own channel and never intercepts the shared one', async () => {
   let channel: string | undefined
   let handler: any
