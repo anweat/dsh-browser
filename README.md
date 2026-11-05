@@ -19,7 +19,7 @@
 
 | 插件 | DSH | peer 范围 |
 |---|---|---|
-| `0.2.2`（当前） | `0.2.0-rc.2`、`0.2.1-rc.2` ~ `rc.5`（实测 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4、0.2.1-rc.5） | DSH 包 `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`；`@deepseek-ai/cordis` `~4.0.4` |
+| `0.2.2`（当前） | `0.2.0-rc.2`、`0.2.1-rc.2` ~ `rc.5`、`0.2.2-rc.1` 起的 0.2.2 线（实测 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4、0.2.1-rc.5、0.2.2-rc.1；0.2.2 正式版靠 rc.1 的验证放行，尚未实测） | DSH 包 `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0 \|\| >=0.2.2-rc.1 <0.2.3-0`；`@deepseek-ai/cordis` `~4.0.4 \|\| ~4.1.0` |
 | `0.1.17`（0.1.7 线宿主固定用这一版） | `dsh-v0.1.7-rc.2` | 旧的 `browser_*` 工具体系 |
 
 范围之外的宿主版本未经验证。历史版本、升级说明见 [CHANGELOG](https://github.com/anweat/dsh-browser/blob/master/CHANGELOG.md)；peer 范围为什么写成两段见 [docs/dev/host-compat.md](https://github.com/anweat/dsh-browser/blob/master/docs/dev/host-compat.md)。

@@ -3,7 +3,7 @@
 #   dsh plugin --profile <name> add @anweat/dsh-browser
 # then boot the profile (the web profile has HMR disabled, so a restart applies it).
 #
-# Supports DSH 0.2.0-rc.2 and 0.2.1-rc.2 to rc.5 (see the peer ranges in package.json).
+# Supports DSH 0.2.0-rc.2, 0.2.1-rc.2 to rc.5 and 0.2.2-rc.1 (the 0.2.2 line; see the peer ranges in package.json).
 #
 # Login state: prefer named `authProfiles` with explicit `allowedDomains` (see
 # README). `storageStatePath` remains as a legacy global fallback.
