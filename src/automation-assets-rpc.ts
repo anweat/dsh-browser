@@ -175,9 +175,17 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
         return { ok: false, error: { code: 'bad-request' as const, message: stripAnsi(String(error instanceof Error ? error.message : error)).slice(0, 500), details } }
       }
     }
-    connectionCtx.effect(
-      () => openChannel(connectionCtx, connection, handler),
-      'dsh-browser: automation asset RPC channel',
-    )
+    connectionCtx.effect(() => {
+      try {
+        return openChannel(connectionCtx, connection, handler)
+      } catch (error) {
+        // An inject callback's throw is not reported by the Host (this is how the cordis 4.1 failure stayed invisible),
+        // so say it ourselves: the card still renders, but every `/dsh-browser-assets/*` request is HTTP 405.
+        const message = `dsh-browser: settings-card RPC channel ${CHANNEL} was not mounted (${stripAnsi(String(error instanceof Error ? error.message : error))}); the card's assets, prompts, policy and runtime panels will not load`
+        // console, not ctx.logger: the Host's logger was observed dropping this at its default level (nothing reached the log).
+        console.warn(message)
+        return () => {}
+      }
+    }, 'dsh-browser: automation asset RPC channel')
   })
 }

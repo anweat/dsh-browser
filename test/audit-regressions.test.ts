@@ -80,13 +80,18 @@ test('asset API falls back to register(owner, ...) when rpc.handle cannot read w
   const peer = { id: 'test-peer', ctx: {} as never, dispose: async () => {} }
   assert.deepEqual(await handler('snapshot', {}, new AbortController().signal, peer), { ok: true, value: { assets: [] } })
 
-  // A Host without the fallback entry point keeps the original error instead of hiding it.
+  // A Host without the fallback entry point: the failure is logged with its cause, not swallowed.
   const bare: any = {
     inject(_names: unknown, setup: (ctx: unknown) => void) { setup(bare) },
     effect(setup: () => unknown) { setup() },
     root: { connection: { rpc: connection.rpc } },
   }
-  assert.throws(() => registerAutomationAssetRpc(bare, {} as never, {} as never), /without inject/)
+  const warnings: string[] = []
+  const realWarn = console.warn
+  console.warn = (message: string) => { warnings.push(message) }
+  try { registerAutomationAssetRpc(bare, {} as never, {} as never) } finally { console.warn = realWarn }
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0]!, /was not mounted \(cannot get property "webServer" without inject\)/)
 })
 
 test('asset API registers its own channel and never intercepts the shared one', async () => {
