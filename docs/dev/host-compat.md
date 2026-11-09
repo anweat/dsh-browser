@@ -55,8 +55,13 @@ plugin-manager）与 0.2.1 线逐项一致，真实宿主上的差别只有 Cord
 卡片仍能渲染，但每个 `/dsh-browser-assets/*` 请求都返回 HTTP 405。退化的样子（实测，截图在验证记录里）：状态摘要少了“浏览器：…”一项；提示词分组显示“暂时读不到插件状态（重启中？），稍后刷新。”和一个误导性的“已覆盖”徽章；
 策略覆盖层显示“暂时读不到覆盖层状态”；资产列表与运行状态提示拿不到数据。没有任何一处说明是通道没挂上。
 
-**做法**：先走文档化的 `rpc.handle`；它抛错而宿主又有 `register(owner, channel, handler)` 时，用注入了 `webServer` 的那个 Context 当 owner 调 `register`
-（`openChannel`，同一条路由、同一套传输：信封解码、鉴权闸门、Peer 作用域，只有 owner 不同）。**`register` 在 TypeScript 里是私有成员，所以回退依赖宿主内部实现。**
-宿主若改名或移除它，回退失效、通道保持未挂载；这时插件在控制台打一条 `dsh-browser: settings-card RPC channel /dsh-browser-assets was not mounted (<原因>); …`
-（用 `console.warn`：实测 `ctx.logger` 的默认级别会吞掉它），不再静默。单测固定了回退与告警，真实宿主验证每次都会查 `/dsh-browser-assets/*` 的状态码。
-更好的修法在宿主一侧：让 `rpc.handle` 用调用方传入的 Context 读 `webServer`；宿主修好后这段回退可以删掉。
+**做法**（不依赖宿主的私有方法）：经一个派生 Context 读 `connection` 服务，这个 Context 把已注入的 `webServer` 作为**自有属性**带上：
+`connectionCtx.extend({ webServer: connectionCtx.get('webServer') }).connection.rpc.handle(channel, handler)`（`connectionWithWebServer`）。
+`rpc` getter 捕获的 `owner` 就是这个派生 Context，`owner.webServer` 在它自己身上解析，不再走 Connection 插件的定义位置，所以不抛。`Context.extend` 是公开 API
+（cordis 的 `Context.extend` 把 meta 属性直接定义在子 Context 上）；路由、信封解码、鉴权闸门、Peer 作用域都是宿主自己的那一套。**所有宿主走同一条路径**（0.2.0 / 0.2.1 / 0.2.2 线都实测），
+没有“先试 handle、失败再回退”的分支。只把 root 换成普通的 `connectionCtx` 不够：宿主在那个 Context 上同样读不到 `webServer`。
+这个做法由 [#49](https://github.com/anweat/dsh-browser/issues/49)（@shuaigekda）提出并在 0.2.2-rc.1 上验证；本仓库把它放到三个宿主上复验（见 [验证记录 2026-11-09](../validation/2026-11-09-dsh-0.2.2-public-api.md)）。
+挂载仍可能失败（例如宿主改了 `rpc.handle` 的行为、通道前缀已被占用）：这时插件在控制台打一条
+`dsh-browser: settings-card RPC channel /dsh-browser-assets was not mounted (<原因>); …`（用 `console.warn`：实测 `ctx.logger` 的默认级别会吞掉它），不再静默，effect 返回空的卸载函数。
+单测固定了“`handle` 在带自有 `webServer` 的派生 Context 上被调用”与告警内容（含不带 ANSI），真实宿主验证每次都会查 `/dsh-browser-assets/*` 的状态码。
+更好的修法仍在宿主一侧：让 `rpc.handle` 用调用方传入的 Context 读 `webServer`；宿主修好后派生 Context 这一步可以删掉（留着也无害）。

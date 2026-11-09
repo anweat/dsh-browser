@@ -39,6 +39,7 @@
 | [2026-10-26-commandcode.md](validation/2026-10-26-commandcode.md) | dev/0.2.2：真实 DSH 0.2.1-rc.3 宿主 + command-code 的 DeepSeek 模型验证 |
 | [2026-10-28-compat-dist.md](validation/2026-10-28-compat-dist.md) | 0.2.2 发布前：DSH 0.2.0-rc.2 / 0.2.1-rc.x 兼容与 npm 分发 |
 | [2026-10-30-dsh-rc5.md](validation/2026-10-30-dsh-rc5.md) | 0.2.2：DSH 0.2.1-rc.5 宿主上的干净安装、headless、Web 设置卡片（插件无改动） |
+| [2026-11-09-dsh-0.2.2-public-api.md](validation/2026-11-09-dsh-0.2.2-public-api.md) | 设置卡片 RPC 通道改走公开 API（#49），0.2.0-rc.2 / 0.2.1-rc.5 / 0.2.2-rc.1 三个宿主上的复验 |
 | [2026-11-05-dsh-0.2.2.md](validation/2026-11-05-dsh-0.2.2.md) | 0.2.2：DSH 0.2.2-rc.1（cordis 4.1）宿主上的安装闸门、完整工具调用、Web 设置卡片，以及设置卡片 RPC 通道的修复 |
 
 ## 其他
