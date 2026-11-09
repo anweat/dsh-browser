@@ -1,6 +1,6 @@
 # 内核与依赖
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 ## 浏览器怎么选
 

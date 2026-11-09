@@ -1,6 +1,6 @@
 # 自动化资产（实验性）
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 可复用的 recipe / UserScript 的积累、检索、模型显式开发与激活。Recipe 本身的写法见 [Playwright Recipe](recipes.md)。
 

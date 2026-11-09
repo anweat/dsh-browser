@@ -1,6 +1,6 @@
 # 自定义提示文本
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 模型读到的提示和建议文本都可以由部署方覆盖：两个常驻工具的描述、`browser_index` 根目录的指南和附言、分组与动作的摘要和说明、错误提示、以及 `dsh-browser` skill。不配置 `prompts` 时所有输出与内置默认逐字节一致。
 

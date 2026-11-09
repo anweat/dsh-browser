@@ -2,7 +2,7 @@
 
 [返回 README](../README.md) ｜ [English README](../README.en.md) ｜ [CHANGELOG](../CHANGELOG.md)
 
-`@anweat/dsh-browser` 0.2.2 的文档。README 是入口（安装、第一次使用、快速示例）；这里按主题列出其余文档。`docs/` 不随 npm 包发布。
+`@anweat/dsh-browser` 0.2.3 的文档。README 是入口（安装、第一次使用、快速示例）；这里按主题列出其余文档。`docs/` 不随 npm 包发布。
 
 ## 用户指南（docs/guide/，中文）
 
@@ -38,6 +38,9 @@
 | [2026-10-12.md](validation/2026-10-12.md) | dev/0.2.2：真实 DSH Host 验证（context 选项、下载等） |
 | [2026-10-26-commandcode.md](validation/2026-10-26-commandcode.md) | dev/0.2.2：真实 DSH 0.2.1-rc.3 宿主 + command-code 的 DeepSeek 模型验证 |
 | [2026-10-28-compat-dist.md](validation/2026-10-28-compat-dist.md) | 0.2.2 发布前：DSH 0.2.0-rc.2 / 0.2.1-rc.x 兼容与 npm 分发 |
+| [2026-10-30-dsh-rc5.md](validation/2026-10-30-dsh-rc5.md) | 0.2.2：DSH 0.2.1-rc.5 宿主上的干净安装、headless、Web 设置卡片（插件无改动） |
+| [2026-11-09-dsh-0.2.2-public-api.md](validation/2026-11-09-dsh-0.2.2-public-api.md) | 设置卡片 RPC 通道改走公开 API（#49），0.2.0-rc.2 / 0.2.1-rc.5 / 0.2.2-rc.1 三个宿主上的复验 |
+| [2026-11-05-dsh-0.2.2.md](validation/2026-11-05-dsh-0.2.2.md) | 0.2.2：DSH 0.2.2-rc.1（cordis 4.1）宿主上的安装闸门、完整工具调用、Web 设置卡片，以及设置卡片 RPC 通道的修复 |
 
 ## 其他
 
@@ -51,14 +54,14 @@
 |---|---|
 | 开头：AUDIT 提示、简介、OpenCLI 可选说明 | [README](../README.md) 的开头与“亮点”；AUDIT 链接也在上面的“其他” |
 | 兼容与发布通道：版本表 | [CHANGELOG](../CHANGELOG.md)（每个版本一节）；当前版本一张小表在 README 的“兼容性” |
-| 兼容与发布通道：`0.2.2` 范围、Cordis peer、两种 semver 解析、`test:peers` | [dev/host-compat.md](dev/host-compat.md) |
+| 兼容与发布通道：`0.2.3` 范围、Cordis peer、两种 semver 解析、`test:peers` | [dev/host-compat.md](dev/host-compat.md) |
 | 兼容与发布通道：设置读取不再适配宿主、保存后需重启 | [guide/configuration.md#保存后何时生效](guide/configuration.md#保存后何时生效)；技术取舍在 [dev/host-compat.md](dev/host-compat.md) |
 | 兼容与发布通道：不依赖 `settings` 服务 | [guide/configuration.md#保存后何时生效](guide/configuration.md#保存后何时生效) 与 [dev/host-compat.md](dev/host-compat.md) |
 | 安装 | README 的“安装”（CLI、DSH Desktop、本地目录）；Desktop 为新增 |
 | 第一次使用：重启与设置卡片 | README 的“第一次使用” |
 | 第一次使用：浏览器 | README 的“第一次使用”（摘要）；全文在 [guide/runtime-and-dependencies.md](guide/runtime-and-dependencies.md#浏览器怎么选) |
 | 第一次使用：OpenCLI（可选） | README 的“第一次使用”（摘要）；全文在 [guide/login-and-opencli.md](guide/login-and-opencli.md#opencli-的安装与查找) |
-| 从旧版本升级：0.2.2 / 0.2.1 / 0.2.0 / 0.1.17 | [CHANGELOG](../CHANGELOG.md) 对应版本 |
+| 从旧版本升级：0.2.3 / 0.2.2 / 0.2.1 / 0.2.0 / 0.1.17 | [CHANGELOG](../CHANGELOG.md) 对应版本 |
 | 快速使用与适用情形（表格、合规声明、会话示例） | [guide/tools-and-actions.md#按任务选动作](guide/tools-and-actions.md#按任务选动作)；合规声明也在 README |
 | 内核与依赖的“打包 vs 复用” | [guide/runtime-and-dependencies.md](guide/runtime-and-dependencies.md#打包-vs-复用) |
 | 把共享浏览器缓存放到别的盘 | [guide/runtime-and-dependencies.md](guide/runtime-and-dependencies.md#把共享浏览器缓存放到别的盘可选) |

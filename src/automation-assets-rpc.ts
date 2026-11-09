@@ -48,6 +48,34 @@ function expectedRevision(payload: Record<string, unknown>): number | undefined 
   return value
 }
 
+/** The part of the Host's `connection` service this file uses. */
+interface ConnectionRegistrar {
+  rpc: {
+    /** Register one authenticated absolute channel prefix owned by this plugin. */
+    handle(channel: string, handler: ConnectionRpcHandler): () => Promise<void>
+  }
+}
+
+/**
+ * The Context to read the Host's `connection` service through.
+ *
+ * `connection.rpc.handle` mounts the Web route with `owner.webServer.register(route)`, where `owner` is the Context
+ * the `rpc` getter captured (`this.ctx`) when the service was read. On cordis 4.0.x any Context could do that. On
+ * cordis 4.1 (DSH 0.2.2) the service getter resolves `webServer` against the Connection plugin's own definition site,
+ * whose `inject` list does not include `webServer`, so `rpc.handle` throws `cannot get property "webServer" without
+ * inject` (DSH master still has this code). The throw happened inside an inject callback and nothing reported it: the
+ * channel was never mounted and every `/dsh-browser-assets/*` call from the settings card came back HTTP 405.
+ * Reading `connection` through a derived Context that carries the already-injected `webServer` as its own property
+ * makes `owner.webServer` resolve there. `Context.extend` is public API, no private Host member is involved, and the
+ * route, the envelope, the authentication fence and the Peer scope are the Host's own. The technique is from
+ * anweat/dsh-browser#49 (@shuaigekda); it is used on every host, 4.0.x included, so there is one code path.
+ * Replacing the root Context with plain `connectionCtx` is not enough.
+ */
+function connectionWithWebServer(connectionCtx: Context): ConnectionRegistrar {
+  const withWebServer = connectionCtx.extend({ webServer: (connectionCtx as unknown as { get(name: string): unknown }).get('webServer') })
+  return (withWebServer as unknown as { connection: ConnectionRegistrar }).connection
+}
+
 /** `promptsStatus` answers the settings card's "prompt text" section: the overrides in force, diagnostics and the L0 estimate. */
 export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetStore, service: BrowserService, promptsStatus?: () => unknown): void {
   ctx.inject(['connection', 'webServer'], (connectionCtx) => {
@@ -56,16 +84,8 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
     // transport owns envelope decoding, the admission/authentication fence, the
     // cancellation signal, and the Peer scope the handler receives — none of
     // which a manual route can reconstruct.
-    // The dedicated registrar mounts its Web route through the Context that
-    // reads it. The root Context owns webServer; the plugin effect owns cleanup.
-    const connection = (connectionCtx.root as unknown as {
-      connection: {
-        rpc: {
-          /** Register one authenticated absolute channel prefix owned by this plugin. */
-          handle(channel: string, handler: ConnectionRpcHandler): () => Promise<void>
-        }
-      }
-    }).connection
+    // The registrar mounts its Web route through the Context that read it (see connectionWithWebServer);
+    // the plugin effect owns cleanup.
     const handler: ConnectionRpcHandler = async (endpoint, rawPayload) => {
       try {
         // The transport hands the handler the endpoint relative to the channel,
@@ -153,9 +173,17 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
         return { ok: false, error: { code: 'bad-request' as const, message: stripAnsi(String(error instanceof Error ? error.message : error)).slice(0, 500), details } }
       }
     }
-    connectionCtx.effect(
-      () => connection.rpc.handle(CHANNEL, handler),
-      'dsh-browser: automation asset RPC channel',
-    )
+    connectionCtx.effect(() => {
+      try {
+        return connectionWithWebServer(connectionCtx).rpc.handle(CHANNEL, handler)
+      } catch (error) {
+        // An inject callback's throw is not reported by the Host (this is how the cordis 4.1 failure stayed invisible),
+        // so say it ourselves: the card still renders, but every `/dsh-browser-assets/*` request is HTTP 405.
+        const message = `dsh-browser: settings-card RPC channel ${CHANNEL} was not mounted (${stripAnsi(String(error instanceof Error ? error.message : error))}); the card's assets, prompts, policy and runtime panels will not load`
+        // console, not ctx.logger: the Host's logger was observed dropping this at its default level (nothing reached the log).
+        console.warn(message)
+        return () => {}
+      }
+    }, 'dsh-browser: automation asset RPC channel')
   })
 }

@@ -1,6 +1,6 @@
 # 自动化自由度与审批
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 `automationMode` 决定模型能看到哪些动作、哪些动作要审批。
 

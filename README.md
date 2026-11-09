@@ -19,7 +19,7 @@
 
 | 插件 | DSH | peer 范围 |
 |---|---|---|
-| `0.2.2`（当前） | `0.2.0-rc.2`、`0.2.1-rc.2` ~ `rc.4`（实测 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4） | DSH 包 `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`；`@deepseek-ai/cordis` `~4.0.4` |
+| `0.2.3`（当前） | `0.2.0-rc.2`、`0.2.1-rc.2` ~ `rc.5`、`0.2.2-rc.1` 起的 0.2.2 线（实测 0.2.0-rc.2、0.2.1-rc.3、0.2.1-rc.4、0.2.1-rc.5、0.2.2-rc.1；0.2.2 与 0.2.3 正式版靠 rc.1 的验证放行，尚未实测） | DSH 包 `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0 \|\| >=0.2.2-rc.1 <0.2.3-0`；`@deepseek-ai/cordis` `~4.0.4 \|\| ~4.1.0` |
 | `0.1.17`（0.1.7 线宿主固定用这一版） | `dsh-v0.1.7-rc.2` | 旧的 `browser_*` 工具体系 |
 
 范围之外的宿主版本未经验证。历史版本、升级说明见 [CHANGELOG](https://github.com/anweat/dsh-browser/blob/master/CHANGELOG.md)；peer 范围为什么写成两段见 [docs/dev/host-compat.md](https://github.com/anweat/dsh-browser/blob/master/docs/dev/host-compat.md)。
@@ -29,7 +29,7 @@
 **DSH CLI**（以 `web` profile 为例）：
 
 ```bash
-dsh plugin --profile web add @anweat/dsh-browser@0.2.2
+dsh plugin --profile web add @anweat/dsh-browser@0.2.3
 # 宿主仍是 0.1.7 线（dsh-v0.1.7-rc.2）时，固定安装 0.1.17：
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17
 # 装完重启 profile（web profile 关闭了 HMR）：
@@ -39,7 +39,7 @@ dsh --profile web
 **DSH Desktop**：profile 由应用管理，CLI 对 `--profile desktop` 会直接报错（`profile "desktop" is managed exclusively by the Electron application`），请在应用里装：
 
 1. 打开**插件**页，点 **Add plugin**。
-2. 填包名，可带版本，即上面 `dsh plugin add` 后面那一段，例如 `@anweat/dsh-browser@0.2.2`。
+2. 填包名，可带版本，即上面 `dsh plugin add` 后面那一段，例如 `@anweat/dsh-browser@0.2.3`。
 3. 对话框里还能选 **Registry**。国内镜像（如 npmmirror）可能比官方源晚几分钟到几小时，装不到新版本时，把 Registry 换成 `https://registry.npmjs.org`。
 4. 点 **Install**，装完按应用提示重启。
 
@@ -49,7 +49,7 @@ dsh --profile web
 
 ```bash
 dsh plugin --profile web add ./dsh-browser            # 本地检出
-pnpm pack && dsh plugin --profile web add ./anweat-dsh-browser-0.2.2.tgz
+pnpm pack && dsh plugin --profile web add ./anweat-dsh-browser-0.2.3.tgz
 ```
 
 本地源码 checkout 的版本号可能与已发布的有出入，需要在 profile 的 `pnpm-workspace.yaml` 里对齐版本后重装。`dsh plugin add` 在 pnpm 11 下应当直接成功、退出码 0；排障时才需要手改 profile 的 `package.json`。

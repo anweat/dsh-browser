@@ -1,6 +1,6 @@
 # 下载、文件落盘与浏览器上下文选项
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 ## Cookie 与文件落盘
 

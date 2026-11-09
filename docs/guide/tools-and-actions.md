@@ -1,6 +1,6 @@
 # 工具与动作
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 模型通过 `browser_index` 查看动作目录、用 `browser_call` 执行动作。本篇讲按任务选动作、工具面、统一信封与错误码、严格定位、完整动作目录，以及随包的 skill。
 

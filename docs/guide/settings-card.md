@@ -1,6 +1,6 @@
 # 设置卡片
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 所有键的含义与默认值见 [配置参考](configuration.md)。
 

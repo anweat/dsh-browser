@@ -1,6 +1,6 @@
 # `browser` 服务与 session 隔离
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 面向把本插件当底层服务使用的其他插件作者，也解释多个 session 同时用浏览器时的隔离边界。
 

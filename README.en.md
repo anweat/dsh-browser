@@ -21,7 +21,7 @@ Security boundaries and the September 2026 review are in [AUDIT.md](https://gith
 
 | Plugin | DSH | Peer ranges |
 |---|---|---|
-| `0.2.2` (current) | `0.2.0-rc.2`, `0.2.1-rc.2` to `rc.4` (tested on 0.2.0-rc.2, 0.2.1-rc.3, 0.2.1-rc.4) | DSH packages `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0`; `@deepseek-ai/cordis` `~4.0.4` |
+| `0.2.3` (current) | `0.2.0-rc.2`, `0.2.1-rc.2` to `rc.5`, and the 0.2.2 line from `0.2.2-rc.1` (tested on 0.2.0-rc.2, 0.2.1-rc.3, 0.2.1-rc.4, 0.2.1-rc.5, 0.2.2-rc.1; the 0.2.2 and 0.2.3 final releases are admitted on the strength of rc.1 and has not been run) | DSH packages `>=0.2.0-rc.2 <0.2.1-0 \|\| >=0.2.1-rc.2 <0.2.2-0 \|\| >=0.2.2-rc.1 <0.2.3-0`; `@deepseek-ai/cordis` `~4.0.4 \|\| ~4.1.0` |
 | `0.1.17` (pin this on 0.1.7-line hosts) | `dsh-v0.1.7-rc.2` | the older `browser_*` tool set |
 
 Host versions outside these ranges are not verified. Older versions and upgrade notes are in the [CHANGELOG](https://github.com/anweat/dsh-browser/blob/master/CHANGELOG.md) (Chinese). Why the peer range has two segments is explained in [docs/dev/host-compat.md](https://github.com/anweat/dsh-browser/blob/master/docs/dev/host-compat.md) (Chinese).
@@ -31,7 +31,7 @@ Host versions outside these ranges are not verified. Older versions and upgrade 
 **DSH CLI** (using the `web` profile as an example):
 
 ```bash
-dsh plugin --profile web add @anweat/dsh-browser@0.2.2
+dsh plugin --profile web add @anweat/dsh-browser@0.2.3
 # On a host of the 0.1.7 line (dsh-v0.1.7-rc.2), pin 0.1.17 instead:
 dsh plugin --profile web add @anweat/dsh-browser@0.1.17
 # Restart the profile after installing (the web profile runs without HMR):
@@ -41,7 +41,7 @@ dsh --profile web
 **DSH Desktop**: the Desktop profile is owned by the application, and the CLI refuses it (`profile "desktop" is managed exclusively by the Electron application`). Install from inside the app:
 
 1. Open the **Plugins** page and click **Add plugin**.
-2. Enter the package name, optionally with a version: the same text that follows `dsh plugin add`, for example `@anweat/dsh-browser@0.2.2`.
+2. Enter the package name, optionally with a version: the same text that follows `dsh plugin add`, for example `@anweat/dsh-browser@0.2.3`.
 3. The dialog also lets you choose a **Registry**. A mirror (for example npmmirror in China) can lag the official registry by minutes to hours; if the new version cannot be found, switch the Registry to `https://registry.npmjs.org`.
 4. Click **Install**, then restart when the app asks.
 
@@ -51,7 +51,7 @@ Upgrading a third-party plugin means uninstalling it and installing it again.
 
 ```bash
 dsh plugin --profile web add ./dsh-browser            # a local checkout
-pnpm pack && dsh plugin --profile web add ./anweat-dsh-browser-0.2.2.tgz
+pnpm pack && dsh plugin --profile web add ./anweat-dsh-browser-0.2.3.tgz
 ```
 
 A local source checkout may carry a different version number than the published one; align the versions in the profile's `pnpm-workspace.yaml` and install again. With pnpm 11, `dsh plugin add` should succeed with exit code 0; editing the profile's `package.json` by hand is only a troubleshooting step.

@@ -1,6 +1,6 @@
 # Playwright Recipe
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 Recipe 是声明式的多步操作，由 `automation.run_recipe`（内联）或 `automation.run`（已激活资产）执行。资产的积累、检索与激活见 [自动化资产](automation-assets.md)。
 
