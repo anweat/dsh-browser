@@ -1,6 +1,6 @@
 # 策略覆盖层与风险
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 “限制类”设置（authProfile 的域名与登录态文件、`usagePolicy` 限流项）现在可以由 agent 经动作编辑，用户不必手填。机制是一层受管理的**覆盖文件** `$DSH_HOME/data/browser/policy-overlay.json`（原子写、`0600`，带 `revision`、`updatedAt` 和最近 50 条审计），合并在设置面板的配置（基线）之上，**覆盖层优先**。它只能保存两类字段：`authProfiles` 和 `usagePolicy`。
 

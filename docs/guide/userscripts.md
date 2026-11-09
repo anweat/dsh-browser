@@ -1,6 +1,6 @@
 # 外部模型脚本：推荐流程
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 外部模型可以输出 Tampermonkey/UserScript 格式源码，但不要直接执行。让当前 DSH Agent 先调用
 `script.validate`，展示名称、`@match`、SHA-256 和能力，再调用

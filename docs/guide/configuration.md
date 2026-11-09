@@ -1,6 +1,6 @@
 # 配置参考
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 设置卡片的用法见 [设置卡片](settings-card.md)。改动后哪些要重启、哪些实时生效，见各键的注释与文末说明。
 

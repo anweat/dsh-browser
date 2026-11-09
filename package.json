@@ -1,6 +1,6 @@
 {
   "name": "@anweat/dsh-browser",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Browser runtime plugin for DeepSeek Harness (scoped @anweat) — ships Playwright and Patchright, uses your system Chrome / Edge (or a Playwright Chromium you install), optionally drives OpenCLI site adapters, exposes a `browser` service and interactive browser tools.",
   "license": "MIT",
   "type": "module",

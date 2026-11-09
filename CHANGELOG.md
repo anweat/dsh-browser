@@ -17,13 +17,17 @@ DSH Desktop 上的升级方式见 [README 的 Desktop 安装](README.md#安装)�
 
 ## 未发布
 
+## 0.2.3（2026-11-09）
+
+**摘要**：0.2.3 让插件能在 DSH 0.2.2-rc.1（cordis 4.1）上完整使用，并补上 0.2.1-rc.5 的支持：peer 范围加了 0.2.2 线，设置卡片的 RPC 通道在 cordis 4.1 宿主上能正常挂载（此前卡片能渲染，但所有数据请求返回 405）。另有此前未发布的文档整理。**谁应该升级**：所有在 DSH 0.2.2-rc.1 上的用户，包括 Desktop（已发布的 `0.2.2` 的 peer 范围不含 0.2.2-rc.1，会被拒绝安装）；0.2.0 / 0.2.1 线宿主上功能不变，可按需升级。感谢 [#48](https://github.com/anweat/dsh-browser/pull/48)（@snailium）和 [#49](https://github.com/anweat/dsh-browser/issues/49)（@shuaigekda）。**已知限制**：0.2.2 正式版靠 rc.1 的验证放行，没有在真实宿主上跑过；没有在 Electron Desktop 上实测，也没有和模型会话一起测过。
+
 **兼容**：新增实测 `dsh-v0.2.2-rc.1`（npm `@deepseek-ai/dsh@0.2.2-rc.1`，dist-tag `next`，cordis 4.1.0、schemastery 3.19.0，2026-11-05 验证）和 `dsh-v0.2.1-rc.5`（2026-10-30 验证）。peer 范围加第三段：DSH 包 `>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-rc.1 <0.2.3-0`，Cordis `~4.0.4 || ~4.1.0`；`devDependencies` 升到 `0.2.2-rc.1` / cordis 4.1.0。起点是外部贡献 [#48](https://github.com/anweat/dsh-browser/pull/48)（@snailium，peer 与 devDependencies 改动原样保留作者署名）。**上界是 `<0.2.3-0`，所以 0.2.2 正式版也被放行，它靠 rc.1 的验证放行，没有在真实宿主上跑过。**
 
-**修复**：设置卡片的 RPC 通道 `/dsh-browser-assets` 在 cordis 4.1 宿主（DSH 0.2.2-rc.1）上没有挂上。根因在宿主：`connection.rpc.handle` 内部读 `owner.webServer`（`rpc-host.ts`），owner 没有注入它，4.1 的检查会抛 `cannot get property "webServer" without inject`；异常出在 `ctx.inject` 回调里没有被报告，结果卡片能渲染，但提示词、策略、资产、运行状态的每个 `/dsh-browser-assets/*` 请求都返回 HTTP 405，页面上只显示“暂时读不到…”。现在改为经一个派生 Context 读 `connection` 服务：`connectionCtx.extend({ webServer: connectionCtx.get('webServer') })`，把已注入的 `webServer` 作为自有属性带上，再调 `rpc.handle`，`owner.webServer` 就能解析。**不再依赖宿主的私有方法**（上一版的回退调用的是宿主在 TypeScript 里私有的 `register`，这一版已删除），所有宿主（0.2.0 / 0.2.1 / 0.2.2 线）走同一条路径；挂载失败时仍在控制台警告并写明通道与原因。做法由 [#49](https://github.com/anweat/dsh-browser/issues/49)（@shuaigekda）提出并在 0.2.2-rc.1 上验证，这里在三个宿主上复验。PR #48 只验证到“激活、设置命名空间存在”，没有跑到这一步。细节见 [docs/dev/host-compat.md](docs/dev/host-compat.md#资产-rpc-通道dsh-browser-assets)。
+**修复**：设置卡片的 RPC 通道 `/dsh-browser-assets` 在 cordis 4.1 宿主（DSH 0.2.2-rc.1）上没有挂上。根因在宿主：`connection.rpc.handle` 内部读 `owner.webServer`（`rpc-host.ts`），owner 没有注入它，4.1 的检查会抛 `cannot get property "webServer" without inject`；异常出在 `ctx.inject` 回调里没有被报告，结果卡片能渲染，但提示词、策略、资产、运行状态的每个 `/dsh-browser-assets/*` 请求都返回 HTTP 405，页面上只显示“暂时读不到…”。现在改为经一个派生 Context 读 `connection` 服务：`connectionCtx.extend({ webServer: connectionCtx.get('webServer') })`，把已注入的 `webServer` 作为自有属性带上，再调 `rpc.handle`，`owner.webServer` 就能解析。**不依赖宿主的私有方法**，所有宿主（0.2.0 / 0.2.1 / 0.2.2 线）走同一条路径；挂载失败时仍在控制台警告并写明通道与原因。做法由 [#49](https://github.com/anweat/dsh-browser/issues/49)（@shuaigekda）提出并在 0.2.2-rc.1 上验证，这里在三个宿主上复验。PR #48 只验证到“激活、设置命名空间存在”，没有跑到这一步。细节见 [docs/dev/host-compat.md](docs/dev/host-compat.md#资产-rpc-通道dsh-browser-assets)。
 
 **验证**：三个宿主（0.2.0-rc.2、0.2.1-rc.5、0.2.2-rc.1）上用 `pnpm pack` 的 tgz 走 `dsh plugin add file:` 安装闸门，没有配置的 entry 与有配置的 entry 各跑一次完整工具调用（`target.open` 本地页面、`observe.read`、`observe.screenshot`，以及一次 volatile 编辑后 `prompts` 立即生效且页面 session 不重启）；0.2.2-rc.1 的 Web 设置卡片渲染、保存一项、`cordis.patch.yml` 落盘与恢复，控制台 0 错误。`pnpm run verify`（464 项单测）与 `pnpm run test:e2e`（96 项）通过。记录见 [docs/validation/2026-11-09-dsh-0.2.2-public-api.md](docs/validation/2026-11-09-dsh-0.2.2-public-api.md)（公开 API 方案在三个宿主上的复验）、[docs/validation/2026-11-05-dsh-0.2.2.md](docs/validation/2026-11-05-dsh-0.2.2.md) 与 [docs/validation/2026-10-30-dsh-rc5.md](docs/validation/2026-10-30-dsh-rc5.md)。
 
-**升级**：从已发布的 `0.2.2` 升级到包含本次改动的版本即可；0.2.2-rc.1 宿主不需要其他配置。
+**升级**：从 `0.2.2` 升级到 `0.2.3` 即可；0.2.2-rc.1 宿主不需要其他配置。
 
 ## 0.2.2（2026-10-28）
 

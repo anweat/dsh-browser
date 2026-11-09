@@ -1,6 +1,6 @@
 # 使用策略：防止过度调用的缓冲
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 `usagePolicy` 是资源与站点压力保护，不是审批系统。所有模式共用同一个进程内 Governor：
 

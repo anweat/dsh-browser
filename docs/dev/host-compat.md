@@ -1,6 +1,6 @@
 # 宿主兼容与 peer 范围
 
-> 适用版本：`@anweat/dsh-browser` 0.2.2 ｜ [返回 README](../../README.md)
+> 适用版本：`@anweat/dsh-browser` 0.2.3 ｜ [返回 README](../../README.md)
 
 面向维护者：为什么 peer 范围写成两段、上界为什么是 `<0.2.3-0`、设置读取与 `inject` 的取舍。每个版本的兼容声明见 [CHANGELOG](../../CHANGELOG.md)。
 
