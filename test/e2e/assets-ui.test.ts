@@ -13,6 +13,7 @@ import { defaultPrompts } from '../../src/prompts.ts'
 import { promptsDumpYaml } from '../../src/prompts-yaml.ts'
 import { computeContentHash } from '../../src/automation-assets.ts'
 import { registerAutomationAssetRpc } from '../../src/automation-assets-rpc.ts'
+import { connectionContext } from '../rpc-fixture.ts'
 import { createHarness, detectBrowser, startFixtureServer, type Harness } from './support.ts'
 import { bundleEntry } from './ui-support.ts'
 
@@ -52,11 +53,7 @@ describe('the asset editor in a real browser', { skip: detection.ok ? false : (d
   /** An RPC handler over the harness's store and service, as the Host would mount it. */
   function mountRpc() {
     let handler: any
-    const ctx: any = {
-      inject(_names: unknown, setup: (ctx: unknown) => void) { setup(ctx) },
-      effect(setup: () => unknown) { setup() },
-      root: { connection: { rpc: { handle(_channel: string, h: unknown) { handler = h; return async () => {} } } } },
-    }
+    const ctx = connectionContext((_owner, _channel, h) => { handler = h; return async () => {} })
     registerAutomationAssetRpc(ctx, harness.assets, harness.service, () => PROMPTS_REPORT)
     const peer = { id: 'peer', ctx: {} as never, dispose: async () => {} }
     return (endpoint: string, payload: unknown) => handler(endpoint, payload, new AbortController().signal, peer)

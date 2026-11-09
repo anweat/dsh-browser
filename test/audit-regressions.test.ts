@@ -10,6 +10,7 @@ import { registerTools } from '../src/tools.ts'
 import { browserPolicyDecision } from '../src/approval-policy.ts'
 import { validateRecipe } from '../src/automation.ts'
 import { registerAutomationAssetRpc } from '../src/automation-assets-rpc.ts'
+import { connectionContext } from './rpc-fixture.ts'
 
 test('waits cannot disable timeouts and primitive writes retain approvals', () => {
   assert.throws(() => validateRecipe([{ type: 'wait', condition: 'selector', value: '#missing', timeoutMs: 0 }]), /timeoutMs/)
@@ -60,60 +61,45 @@ test('real browser handles primitives and hidden uploads; redirects cannot expan
   }
 })
 
-test('asset API falls back to register(owner, ...) when rpc.handle cannot read webServer (cordis 4.1)', async () => {
-  const calls: { owner: unknown; channel: string }[] = []
+test('asset API mounts through a derived Context that carries webServer as an own property (cordis 4.1, #49)', async () => {
+  const calls: { owner: any; channel: string }[] = []
   let handler: any
-  // What the Host's `rpc.handle` does on cordis 4.1: it reads `webServer` through a Context that never injected it.
-  const connection = {
-    rpc: { handle() { throw new Error('cannot get property "webServer" without inject') } },
-    register(owner: unknown, channel: string, h: unknown) { calls.push({ owner, channel }); handler = h; return async () => {} },
-  }
-  const ctx: any = {
-    inject(_names: unknown, setup: (ctx: unknown) => void) { setup(ctx) },
-    effect(setup: () => unknown) { setup() },
-    root: { connection },
-  }
+  // `rpc.handle` reads `owner.webServer`; on the plain Context that throws, as on DSH 0.2.2-rc.1.
+  const ctx = connectionContext((owner, channel, h) => { calls.push({ owner, channel }); handler = h; return async () => {} })
+  assert.throws(() => ctx.connection.rpc.handle('/x', () => ({ ok: true })), /cannot get property "webServer" without inject/)
   registerAutomationAssetRpc(ctx, { snapshot: () => ({ assets: [] }) } as never, {} as never)
   assert.equal(calls.length, 1)
   assert.equal(calls[0]!.channel, '/dsh-browser-assets')
-  assert.equal(calls[0]!.owner, ctx, 'the owner must be the Context that injected webServer, not the root')
+  const owner = calls[0]!.owner
+  assert.notEqual(owner, ctx, 'handle must be called on the derived Context, not the one the inject callback received')
+  assert.ok(Object.hasOwn(owner, 'webServer'), 'webServer must be an own property of the derived Context')
+  assert.equal(Object.getPrototypeOf(owner), ctx)
   const peer = { id: 'test-peer', ctx: {} as never, dispose: async () => {} }
   assert.deepEqual(await handler('snapshot', {}, new AbortController().signal, peer), { ok: true, value: { assets: [] } })
+})
 
-  // A Host without the fallback entry point: the failure is logged with its cause, not swallowed.
-  const bare: any = {
-    inject(_names: unknown, setup: (ctx: unknown) => void) { setup(bare) },
-    effect(setup: () => unknown) { setup() },
-    root: { connection: { rpc: connection.rpc } },
-  }
+test('asset API warns with the channel and the reason, without ANSI, when the channel cannot be mounted', () => {
+  const failing = connectionContext(() => { throw new Error('\u001b[31mboom: duplicate prefix route\u001b[0m') })
   const warnings: string[] = []
   const realWarn = console.warn
   console.warn = (message: string) => { warnings.push(message) }
-  try { registerAutomationAssetRpc(bare, {} as never, {} as never) } finally { console.warn = realWarn }
+  try { registerAutomationAssetRpc(failing, {} as never, {} as never) } finally { console.warn = realWarn }
   assert.equal(warnings.length, 1)
-  assert.match(warnings[0]!, /was not mounted \(cannot get property "webServer" without inject\)/)
+  assert.match(warnings[0]!, /settings-card RPC channel \/dsh-browser-assets was not mounted \(boom: duplicate prefix route\)/)
+  assert.doesNotMatch(warnings[0]!, /\u001b/)
 })
 
 test('asset API registers its own channel and never intercepts the shared one', async () => {
   let channel: string | undefined
   let handler: any
   const disposers: (() => void)[] = []
-  const ctx: any = {
-    inject(names: unknown, setup: (ctx: unknown) => void) {
-      assert.deepEqual(names, ['connection', 'webServer'])
-      setup(ctx)
-    },
-    effect(setup: () => () => void) { disposers.push(setup()) },
-    root: { connection: { rpc: {
-      handle(ch: string, h: unknown) {
-        channel = ch; handler = h
-        return async () => { channel = undefined; handler = undefined }
-      },
-      // Registering on `/api` anyway would replace the shared channel's
-      // fallback and 404 every other plugin's endpoint, so fail loudly here.
-      intercept() { throw new Error('must not intercept the shared /api channel') },
-    } } },
-  }
+  const ctx = connectionContext((_owner, ch, h) => {
+    channel = ch; handler = h
+    return async () => { channel = undefined; handler = undefined }
+  })
+  const inject = ctx.inject
+  ctx.inject = (names: unknown, setup: (ctx: unknown) => void) => { assert.deepEqual(names, ['connection', 'webServer']); inject(names, setup) }
+  ctx.effect = (setup: () => () => void) => { disposers.push(setup()) }
   registerAutomationAssetRpc(ctx, { snapshot: () => ({ assets: [] }) } as never, {} as never)
   assert.equal(channel, '/dsh-browser-assets', 'the plugin must own a private channel')
   assert.ok(handler, 'the channel handler was not registered')
