@@ -118,11 +118,12 @@ test('mergeIntoFile: writes the merge, keeps one .bak generation, writes nothing
   assert.deepEqual(fs.readdirSync(dir).sort(), ['state.json', 'state.json.bak'], 'no temporary files are left')
 })
 
-test('mergeIntoFile does not create a file for a delta that holds nothing, and a file without arrays is not rewritten for nothing', () => {
+test('mergeIntoFile bootstraps a missing file (even empty), and a file without arrays is not rewritten for nothing', () => {
   const dir = tmp()
   const file = path.join(dir, 'new.json')
-  assert.equal(mergeIntoFile(file, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), 'unchanged')
-  assert.equal(fs.existsSync(file), false)
+  assert.equal(mergeIntoFile(file, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), 'written')
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { cookies: [], origins: [] })
+  assert.equal(fs.existsSync(file + '.bak'), false)
   const bare = path.join(dir, 'bare.json')
   fs.writeFileSync(bare, '{"cookies":[]}')
   assert.equal(mergeIntoFile(bare, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), 'unchanged')

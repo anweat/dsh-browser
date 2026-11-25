@@ -27,7 +27,7 @@ import { BrowserService, sessionKeyFor } from '../src/browser-service.ts'
 import { resolveConfig } from '../src/config.ts'
 import { apply, inject } from '../src/index.ts'
 
-const CONSUMED_METHODS = ['render', 'snapshot', 'searchResults', 'opencli', 'close'] as const
+const CONSUMED_METHODS = ['render', 'snapshot', 'searchResults', 'searchPage', 'opencli', 'close'] as const
 
 // Function.length counts parameters before the first one with a default value.
 // render(url, rules, opts = {}), snapshot(url, rules, opts), searchResults(url, spec, opts = {}),
@@ -36,6 +36,7 @@ const REQUIRED_ARITY: Record<(typeof CONSUMED_METHODS)[number], number> = {
   render: 2,
   snapshot: 3,
   searchResults: 2,
+  searchPage: 2,
   opencli: 1,
   close: 0,
 }

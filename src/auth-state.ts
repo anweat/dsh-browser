@@ -242,7 +242,8 @@ function atomicWrite(file: string, content: string): void {
 }
 
 /**
- * Merge a delta into the file as it is NOW and write it, keeping the previous content as `<file>.bak` (one generation).
+ * Merge a delta into the file as it is NOW (a profile whose file does not exist yet gets it, even empty: that is how a
+ * `persistState` profile is bootstrapped) and write it, keeping the previous content as `<file>.bak` (one generation).
  * Nothing is written when the merge changes nothing. A current file that cannot be parsed is never overwritten.
  */
 export function mergeIntoFile(file: string, delta: StateDelta): 'written' | 'unchanged' {
@@ -250,7 +251,6 @@ export function mergeIntoFile(file: string, delta: StateDelta): 'written' | 'unc
   const merged = applyDelta(current, delta)
   const exists = current !== undefined
   if (exists && same(applyDelta(current, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), merged)) return 'unchanged'
-  if (!exists && merged.cookies!.length === 0 && merged.origins!.length === 0) return 'unchanged'
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   if (exists) atomicWrite(file + '.bak', fs.readFileSync(file, 'utf8'))
   atomicWrite(file, JSON.stringify(merged, null, 2))

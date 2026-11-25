@@ -33,6 +33,8 @@ import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, 
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
+import { KeyedMutex, captureStorageState, computeDelta, mergeIntoFile, scopeState, stateFileKey, writeBackSkipReason, type StorageState, type WriteBackHint, type WriteBackOutcome } from './auth-state.ts'
+import { DEFAULT_SEARCH_TIMEOUT_MS, MAX_RESULTS, NO_WRITE_BACK_STATES, POLL_MS, SearchJudge, navigationFailure, normalizeSample, signalsExpression, stripUrl, type PlatformSpec, type SearchItem, type SearchPageResult, type Verdict } from './search-signals.ts'
 import { PolicyOverlayStore, domainBase, type AuditEntry, type ChangeMeta, type Direction, type PolicyChange, type PolicyDiff } from './policy-overlay.ts'
 import { installDialogGuard } from './dialogs.ts'
 import { TargetStaleError, resolveLocator, withStrictLocator, type BrowserTarget } from './locator.ts'
@@ -72,19 +74,7 @@ export interface SnapshotResult {
   usedRule?: string
 }
 
-/** Structural platform-search spec (matches web-search-pro's PlatformSearchSpec). */
-export interface PlatformSpec {
-  item: string
-  title: string
-  link: string
-  text?: string
-}
-
-export interface SearchItem {
-  url: string
-  title: string
-  snippet?: string
-}
+export type { PlatformSpec, SearchItem, SearchPageState, SearchPageResult } from './search-signals.ts'
 
 export interface InteractiveState {
   url: string
@@ -255,7 +245,8 @@ export interface BrowserStatus {
   systemBrowsers: { channel: string; name: string; path: string }[]
   usagePolicy: ResolvedConfig['usagePolicy']
   usageGovernor: ReturnType<UsageGovernor['snapshot']>
-  authProfiles: { id: string; allowedDomains: string[]; persistState: boolean }[]
+  /** `writeBack` is the last write-back of a `persistState` profile in this process: what happened and why, never cookie names, values or paths. */
+  authProfiles: { id: string; allowedDomains: string[]; persistState: boolean; writeBack?: { outcome: 'written' | 'unchanged' | 'skipped' | 'failed'; reason?: string; at: string } }[]
   rulePacks: string[]
   builtinScripts: string[]
   externalUserscriptsRequireApproval: boolean
@@ -295,26 +286,6 @@ const EXTRACTOR_FN = `(ruleList) => {
   return { title, text, html: doc.documentElement.outerHTML.slice(0, 2000000), usedRule: rule ? rule.hostname : null }
 }`
 
-/** Platform search-page list extractor (runs in the page). */
-const LIST_EXTRACTOR = `(spec) => {
-  const items = []
-  const nodes = document.querySelectorAll(spec.item)
-  for (let i = 0; i < nodes.length && items.length < 20; i++) {
-    const el = nodes[i]
-    const titleEl = spec.title ? el.querySelector(spec.title) : null
-    const linkEl = spec.link ? el.querySelector(spec.link) : null
-    const textEl = spec.text ? el.querySelector(spec.text) : null
-    const title = (titleEl ? titleEl.textContent : el.textContent || '').trim().replace(/\\s+/g, ' ')
-    let url = linkEl ? (linkEl.href || linkEl.getAttribute('href') || '') : ''
-    if (url && url.startsWith('/')) url = location.origin + url
-    if (!url && linkEl === null && titleEl) { const a = titleEl.closest ? titleEl.closest('a') : null; if (a) url = a.href }
-    const snippet = textEl ? (textEl.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 300) : ''
-    if (!url || !title || title.length < 2) continue
-    items.push({ url, title, snippet })
-  }
-  return items
-}`
-
 const CRAWL_EXTRACTOR = `(maxChars) => {
   const root = document.querySelector('article, main, [role="main"]') || document.body
   const text = ((root && (root.innerText || root.textContent)) || '').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, maxChars)
@@ -336,10 +307,6 @@ function uid(): string {
 function capText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text
   return text.slice(0, maxChars) + '\n\n(Content truncated at ' + maxChars + ' characters.)'
-}
-
-function specArg(spec: PlatformSpec): Record<string, unknown> {
-  return { item: spec.item, title: spec.title, link: spec.link, text: spec.text ?? '' }
 }
 
 function evaluateExtractor(page: any, rules: readonly RenderRule[]): Promise<any> {
@@ -402,6 +369,18 @@ function redactCaptureUrl(value: string): string {
  * cookies and storage, so each session gets its own context, not just its own
  * page.
  */
+/** What a `persistState` context was created with, kept until it is closed. */
+interface WriteBackHandle {
+  profile: ResolvedAuthProfile
+  /** The domain-filtered state the context was created with: the delta at close is computed against it. */
+  baseline: StorageState
+  /** Short-lived operation (holds the per-file lock, refuses bad answers) as opposed to an interactive session. */
+  transient: boolean
+  /** Releases the per-file lock; absent for interactive sessions. */
+  release?: () => void
+  hint: WriteBackHint
+}
+
 interface SessionState {
   context?: any
   /** The ACTIVE page: the one every action targets. Always one of `pages` while set. */
@@ -514,6 +493,14 @@ export class BrowserService {
   /** The managed policy overlay merged over the configured authProfiles and usagePolicy (see policy-overlay.ts). */
   private readonly policyStore: PolicyOverlayStore
   private opencliCatalogCache?: OpencliCatalogItem[]
+  /** One transient operation at a time per `persistState` state file, from reading it to the end of its write-back (see src/auth-state.ts). */
+  private readonly stateUse = new KeyedMutex()
+  /** The short read-merge-write of a state file, for transient and interactive write-backs alike. */
+  private readonly stateWrite = new KeyedMutex()
+  /** What a `persistState` context was given and must write back; released when the context is closed. */
+  private readonly writeBacks = new WeakMap<object, WriteBackHandle>()
+  /** The last write-back outcome per auth profile id (no cookie names, values or paths). */
+  private readonly lastWriteBack = new Map<string, WriteBackOutcome>()
   /** Per-session exploration journals (see src/journal.ts). Released with the session, never written to disk. */
   private readonly journals = new Map<string, SessionJournal>()
   /** How many sessions may hold a context+page at once before LRU eviction. */
@@ -899,64 +886,97 @@ export class BrowserService {
     return { ...toPlaywrightOptions(options), ...interactive ? { acceptDownloads: true } : {} }
   }
 
-  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean; context?: ContextOptions; interactive?: boolean } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack; contextOptions: ContextOptions }> {
+  private async transientContext(url: string, opts: { authProfile?: string; rulePack?: string; anonymous?: boolean; context?: ContextOptions; interactive?: boolean; signal?: AbortSignal } = {}): Promise<{ context: any; profile?: ResolvedAuthProfile; rulePack?: ResolvedRulePack; contextOptions: ContextOptions; hint: WriteBackHint }> {
     if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error('browser navigation requires an HTTP(S) URL')
     this.refreshPolicy()
     const profileId = opts.anonymous ? undefined : (opts.authProfile ?? this.config.defaultAuthProfile)
     const profile = profileId ? this.authProfiles.resolve(profileId, url) : undefined
     const rulePack = resolveRulePack(this.config.rulePacks, opts.rulePack, url)
-    const stateOptions = profile
-      ? storageStateOptions(profile.storageStatePath, `auth profile ${profile.id}`, profile.persistState)
-      : (!opts.anonymous ? storageStateOptions(this.config.storageStatePath, 'global') : {})
-    let scopedState: unknown
-    if (profile && stateOptions.storageState) {
-      const state = JSON.parse(fs.readFileSync(stateOptions.storageState, 'utf8'))
-      scopedState = {
-        cookies: (state.cookies ?? []).filter((cookie: { domain: string }) => hostAllowed(cookie.domain.replace(/^\./, ''), profile.allowedDomains)),
-        origins: (state.origins ?? []).filter((origin: { origin: string }) => hostAllowed(new URL(origin.origin).hostname, profile.allowedDomains)),
-      }
+    // A short-lived operation owns its `persistState` file from reading it to the end of its write-back, so two of them never
+    // start from the same rotating token. The lock is taken before any governor slot (navigation takes those later) and is
+    // released on every path below that does not hand the context to the caller. Interactive sessions rely on the delta merge.
+    let release: (() => void) | undefined
+    if (profile?.persistState && opts.interactive !== true) {
+      release = await this.stateUse.acquire(stateFileKey(profile.storageStatePath), { signal: opts.signal, label: 'login state of auth profile ' + profile.id })
     }
-    const applied = opts.context ?? this.config.contextDefaults
-    const contextOptions = { ...stateOptions, ...(scopedState ? { storageState: scopedState } : {}), ...this.contextCreationOptions(applied, opts.interactive === true) }
     let context: any
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const browser = await this.ensure()
-      try {
-        context = await browser.newContext(contextOptions)
-        break
-      } catch (error) {
-        if (attempt > 0 || this.browserConnected(browser)) throw error
-        this.handleBrowserDisconnected(browser)
-      }
-    }
-    if (!context) throw new Error('dsh-browser: browser context could not be created after reconnecting')
     try {
-      if (rulePack?.initScriptPath) await context.addInitScript({ path: rulePack.initScriptPath })
+      const stateOptions = profile
+        ? storageStateOptions(profile.storageStatePath, `auth profile ${profile.id}`, profile.persistState)
+        : (!opts.anonymous ? storageStateOptions(this.config.storageStatePath, 'global') : {})
+      let scopedState: StorageState | undefined
+      if (profile && stateOptions.storageState) {
+        scopedState = scopeState(JSON.parse(fs.readFileSync(stateOptions.storageState, 'utf8')), profile.allowedDomains)
+      }
+      const applied = opts.context ?? this.config.contextDefaults
+      const contextOptions = { ...stateOptions, ...(scopedState ? { storageState: scopedState } : {}), ...this.contextCreationOptions(applied, opts.interactive === true) }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const browser = await this.ensure()
+        try {
+          context = await browser.newContext(contextOptions)
+          break
+        } catch (error) {
+          if (attempt > 0 || this.browserConnected(browser)) throw error
+          this.handleBrowserDisconnected(browser)
+        }
+      }
+      if (!context) throw new Error('dsh-browser: browser context could not be created after reconnecting')
+      try {
+        if (rulePack?.initScriptPath) await context.addInitScript({ path: rulePack.initScriptPath })
+      } catch (error) {
+        await context.close().catch(() => {})
+        throw error
+      }
+      const hint: WriteBackHint = {}
+      if (profile?.persistState) this.writeBacks.set(context, { profile, baseline: scopedState ?? {}, transient: opts.interactive !== true, ...release ? { release } : {}, hint })
+      else release?.()
+      return { context, contextOptions: applied, hint, ...profile ? { profile } : {}, ...rulePack ? { rulePack } : {} }
     } catch (error) {
-      await context.close().catch(() => {})
+      release?.()
       throw error
     }
-    return { context, contextOptions: applied, ...profile ? { profile } : {}, ...rulePack ? { rulePack } : {} }
   }
 
+  /**
+   * Write the login state of a closing `persistState` context back, then close it.
+   *
+   * The write is the context's DELTA (what it changed against what it was given) merged into the file as it is now,
+   * never the context's whole state over the file; see src/auth-state.ts for the rules and for when nothing is written.
+   * Failed persistence still throws, so it is never reported as success. The per-file lock is released here.
+   */
   private async persistAndClose(session: { context: any; profile?: ResolvedAuthProfile }): Promise<void> {
+    const handle = this.writeBacks.get(session.context)
+    this.writeBacks.delete(session.context)
     try {
       if (session.profile?.persistState) {
-        let state: unknown
+        const owner = handle ?? { profile: session.profile, baseline: {}, transient: false, hint: {} }
+        const { profile } = owner
+        const at = Date.now()
+        let state: StorageState
         try {
-          state = await session.context.storageState()
+          state = await captureStorageState(session.context)
         } catch (error) {
           // A crashed browser cannot provide state. Filesystem failures below
           // still propagate so failed persistence is never reported as success.
-          if (/target page, context or browser has been closed|browser has been closed|browser disconnected/i.test(String(error))) return
+          if (/target page, context or browser has been closed|browser has been closed|browser disconnected/i.test(String(error))) {
+            this.lastWriteBack.set(profile.id, { outcome: 'skipped', reason: 'the browser had closed', at })
+            return
+          }
           throw error
         }
-        fs.mkdirSync(path.dirname(session.profile.storageStatePath), { recursive: true })
-        const temporary = session.profile.storageStatePath + '.tmp-' + uid().slice(0, 8)
-        fs.writeFileSync(temporary, JSON.stringify(state, null, 2), { encoding: 'utf8', mode: 0o600 })
-        fs.renameSync(temporary, session.profile.storageStatePath)
+        const delta = computeDelta(owner.baseline, state, profile.allowedDomains)
+        const skip = writeBackSkipReason(owner.transient, owner.hint, delta)
+        if (skip) { this.lastWriteBack.set(profile.id, { outcome: 'skipped', reason: skip, at }); return }
+        const unlock = await this.stateWrite.acquire(stateFileKey(profile.storageStatePath), { label: 'login state of auth profile ' + profile.id })
+        try {
+          this.lastWriteBack.set(profile.id, { outcome: mergeIntoFile(profile.storageStatePath, delta), at })
+        } catch (error) {
+          this.lastWriteBack.set(profile.id, { outcome: 'failed', reason: String((error as NodeJS.ErrnoException)?.code ?? 'error'), at })
+          throw error
+        } finally { unlock() }
       }
     } finally {
+      handle?.release?.()
       await session.context.close().catch(() => {})
     }
   }
@@ -969,19 +989,20 @@ export class BrowserService {
     opts: { signal?: AbortSignal; maxChars?: number; waitMs?: number; authProfile?: string; rulePack?: string } = {},
   ): Promise<RenderResult> {
     const session = await this.transientContext(url, opts)
-    const { context } = session
-    const page = await context.newPage()
+    const page = await this.openPage(session)
     const signal = opts.signal
     const onAbort = () => void page.close().catch(() => {})
     if (signal?.aborted) onAbort()
     else signal?.addEventListener('abort', onAbort)
     try {
       page.setDefaultTimeout(20_000)
-      await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 25_000 }, signal)
+      const response = await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 25_000 }, signal)
+      session.hint.status = Number(response?.status?.() ?? 0)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
       const data = await evaluateExtractor(page, rules)
+      session.hint.loginSignal = await this.loginSignal(page, session)
       return {
         title: String(data.title ?? ''),
         text: capText(String(data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(), opts.maxChars ?? 200_000),
@@ -1002,25 +1023,26 @@ export class BrowserService {
     opts: { signal?: AbortSignal; outDir: string; maxChars?: number; authProfile?: string; rulePack?: string; screenshot?: boolean },
   ): Promise<SnapshotResult> {
     const session = await this.transientContext(url, opts)
-    const { context } = session
-    const page = await context.newPage()
+    const page = await this.openPage(session)
     const signal = opts.signal
     const onAbort = () => void page.close().catch(() => {})
     if (signal?.aborted) onAbort()
     else signal?.addEventListener('abort', onAbort)
-    fs.mkdirSync(opts.outDir, { recursive: true })
     const stamp = Date.now() + '-' + uid().slice(0, 8)
     const screenshotPath = opts.screenshot === false ? undefined : path.join(opts.outDir, stamp + '.png')
     const htmlPath = path.join(opts.outDir, stamp + '.html')
     try {
+      fs.mkdirSync(opts.outDir, { recursive: true })
       page.setDefaultTimeout(25_000)
-      await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
+      const response = await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
+      session.hint.status = Number(response?.status?.() ?? 0)
       await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
       if (screenshotPath) await page.screenshot({ path: screenshotPath, fullPage: true })
       const html = await page.content()
       fs.writeFileSync(htmlPath, html, 'utf8')
       const data = await evaluateExtractor(page, rules)
+      session.hint.loginSignal = await this.loginSignal(page, session)
       return {
         title: String(data.title ?? ''),
         text: capText(String(data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(), opts.maxChars ?? 200_000),
@@ -1036,40 +1058,109 @@ export class BrowserService {
     }
   }
 
+  /** A page in a transient session's context. If it cannot be opened the session is closed (and its login-state lock released) before the error goes on. */
+  private async openPage(session: { context: any; profile?: ResolvedAuthProfile }): Promise<any> {
+    try { return await session.context.newPage() } catch (error) {
+      await this.persistAndClose(session).catch(() => {})
+      throw error
+    }
+  }
+
+  /** Whether the page looks like a login or captcha wall; only read for `persistState` profiles (it feeds the write-back guard). Best effort. */
+  private async loginSignal(page: any, session: { profile?: ResolvedAuthProfile }): Promise<boolean | undefined> {
+    if (!session.profile?.persistState) return undefined
+    try {
+      const sample = normalizeSample(await page.evaluate(signalsExpression({ item: '.dsh-browser-no-such-item', title: '', link: '' })))
+      return sample ? sample.captcha || sample.login : undefined
+    } catch { return undefined }
+  }
+
+  /**
+   * A platform search page with a state instead of a guess (docs/session-p0-contract.md). Waiting is a race between
+   * signals, not a fixed sleep: the first decisive reading ends it. Cancellation and configuration errors (unknown
+   * profile, domain not allowed) throw; everything a site or the network does comes back as `state`.
+   */
+  async searchPage(
+    url: string,
+    spec: PlatformSpec,
+    opts: { signal?: AbortSignal; count?: number; waitMs?: number; cookies?: { name: string; value: string; domain: string; path: string }[]; authProfile?: string; rulePack?: string; timeoutMs?: number; /** Navigation limit when it should be longer than `timeoutMs` (searchResults keeps its 30 s). */ navigationTimeoutMs?: number } = {},
+  ): Promise<SearchPageResult> {
+    const started = Date.now()
+    const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, 1_000), 120_000)
+    const want = Math.min(Math.max(opts.count ?? 8, 1), MAX_RESULTS)
+    const session = await this.transientContext(url, opts)
+    const { context } = session
+    const signal = opts.signal
+    let page: any
+    let onAbort: (() => void) | undefined
+    const finish = (verdict: Verdict | { state: 'network' | 'timeout'; detail: string }, items: SearchItem[] = [], status?: number): SearchPageResult => {
+      if (NO_WRITE_BACK_STATES.has(verdict.state)) session.hint.skip = 'search page state ' + verdict.state
+      const finalUrl = page && !page.isClosed?.() ? stripUrl(page.url()) : undefined
+      return { state: verdict.state, items, tookMs: Date.now() - started, ...status ? { status } : {}, ...finalUrl ? { finalUrl } : {}, detail: verdict.detail, ...session.profile ? { authProfile: session.profile.id } : {} }
+    }
+    try {
+      if (opts.cookies?.length) await context.addCookies(opts.cookies).catch(() => {})
+      page = await context.newPage()
+      onAbort = () => void page.close().catch(() => {})
+      if (signal?.aborted) onAbort()
+      else signal?.addEventListener('abort', onAbort)
+      page.setDefaultTimeout(25_000)
+      let status = 0
+      try {
+        const response = await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: Math.max(opts.navigationTimeoutMs ?? timeoutMs, timeoutMs) }, signal)
+        status = Number(response?.status?.() ?? 0)
+      } catch (error) {
+        if (signal?.aborted) throw error
+        return finish(navigationFailure(error))
+      }
+      session.hint.status = status
+      await applyRuleSteps(page, session.rulePack)
+      if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
+      const deadlineAt = Math.max(started + timeoutMs, Date.now() + 2_500) + (opts.waitMs ?? 0)
+      const judge = new SearchJudge({ ...status ? { status } : {}, startedAt: Date.now(), deadlineAt })
+      const expression = signalsExpression(spec)
+      let verdict = judge.immediate()
+      let items: SearchItem[] = []
+      while (!verdict) {
+        if (signal?.aborted) throw new Error('browser platform search aborted')
+        if (page.isClosed?.()) { verdict = { state: 'empty_unconfirmed', detail: 'the page was closed before it settled' }; break }
+        let raw: unknown
+        try { raw = await page.evaluate(expression) } catch (error) {
+          // A navigation in flight destroys the execution context: read again. A selector the page cannot parse is the caller's mistake.
+          if (/not a valid selector|SyntaxError|is not a valid/i.test(String(error))) throw new Error('browser platform search selector is invalid: ' + String(error).slice(0, 200))
+        }
+        const sample = normalizeSample(raw)
+        verdict = judge.observe(sample, Date.now())
+        if (verdict?.state === 'ok') items = sample!.items
+        if (!verdict) await new Promise<void>(resolve => setTimeout(resolve, POLL_MS))
+      }
+      if (verdict.state === 'ok' && items.length < want) {
+        // Lazy lists load on scroll: one scroll, then read again and keep the longer list.
+        await page.mouse?.wheel(0, 2000).catch(() => {})
+        await page.waitForTimeout(800)
+        try {
+          const more = normalizeSample(await page.evaluate(expression))
+          if (more && more.items.length >= items.length) items = more.items
+        } catch { /* keep what was read before the scroll */ }
+      }
+      return finish(verdict, verdict.state === 'ok' ? items.slice(0, want) : [], status)
+    } catch (error) {
+      throw new Error('browser platform search failed for ' + url + ': ' + String(error).slice(0, 300))
+    } finally {
+      signal?.removeEventListener('abort', onAbort ?? (() => {}))
+      await this.persistAndClose(session)
+    }
+  }
+
   async searchResults(
     url: string,
     spec: PlatformSpec,
     opts: { signal?: AbortSignal; count?: number; waitMs?: number; cookies?: { name: string; value: string; domain: string; path: string }[]; authProfile?: string; rulePack?: string } = {},
   ): Promise<SearchItem[]> {
-    const session = await this.transientContext(url, opts)
-    const { context } = session
-    if (opts.cookies?.length) await context.addCookies(opts.cookies).catch(() => {})
-    const page = await context.newPage()
-    const signal = opts.signal
-    const onAbort = () => void page.close().catch(() => {})
-    if (signal?.aborted) onAbort()
-    else signal?.addEventListener('abort', onAbort)
-    try {
-      page.setDefaultTimeout(25_000)
-      await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
-      await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
-      await applyRuleSteps(page, session.rulePack)
-      if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
-      await page.mouse?.wheel(0, 2000).catch(() => {})
-      await page.waitForTimeout(800)
-      const data = await page.evaluate('(' + LIST_EXTRACTOR + ')(' + JSON.stringify(specArg(spec)) + ')')
-      const rows = Array.isArray(data) ? data : []
-      return rows.slice(0, Math.min(Math.max(opts.count ?? 8, 1), 20)).map((r: any) => ({
-        url: String(r.url ?? ''),
-        title: String(r.title ?? ''),
-        ...r.snippet ? { snippet: String(r.snippet) } : {},
-      }))
-    } catch (error) {
-      throw new Error('browser platform search failed for ' + url + ': ' + String(error).slice(0, 300))
-    } finally {
-      signal?.removeEventListener('abort', onAbort)
-      await this.persistAndClose(session)
-    }
+    // Same public behaviour as before the page states existed: the items (an empty list for any page that has none), and a throw when the page could not be loaded.
+    const found = await this.searchPage(url, spec, { ...opts, navigationTimeoutMs: 30_000 })
+    if (found.state === 'network' || found.state === 'timeout') throw new Error('browser platform search failed for ' + url + ': ' + (found.detail ?? found.state))
+    return found.items
   }
 
   // ── opencli (optional) ───────────────────────────────────────────────────────
@@ -1215,7 +1306,7 @@ export class BrowserService {
     const validation = validateUserscript(source, url)
     if (!validation.valid) throw new Error('userscript validation failed: ' + validation.errors.join('; '))
     const session = await this.transientContext(url, opts)
-    const page = await session.context.newPage()
+    const page = await this.openPage(session)
     const signal = opts.signal
     const onAbort = () => void page.close().catch(() => {})
     if (signal?.aborted) onAbort()
@@ -1223,7 +1314,8 @@ export class BrowserService {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       page.setDefaultTimeout(30_000)
-      await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
+      const response = await this.navigate(page, url, { waitUntil: 'domcontentloaded', timeout: 30_000 }, signal)
+      session.hint.status = Number(response?.status?.() ?? 0)
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
       await applyRuleSteps(page, session.rulePack)
       const finalValidation = validateUserscript(source, page.url())
@@ -2205,7 +2297,10 @@ export class BrowserService {
       systemBrowsers: this.systemBrowsers().map(({ channel, name, path: file }) => ({ channel, name, path: file })),
       usagePolicy: this.usageGovernor.policy,
       usageGovernor: this.usageGovernor.snapshot(),
-      authProfiles: this.authProfiles.list(),
+      authProfiles: this.authProfiles.list().map(profile => {
+        const last = this.lastWriteBack.get(profile.id)
+        return last ? { ...profile, writeBack: { outcome: last.outcome, ...'reason' in last ? { reason: last.reason } : {}, at: new Date(last.at).toISOString() } } : profile
+      }),
       rulePacks: Object.keys(this.config.rulePacks).sort(),
       builtinScripts: BUILTIN_SCRIPTS.map(script => script.id),
       externalUserscriptsRequireApproval: ['standard', 'autonomous'].includes(this.config.automationMode),

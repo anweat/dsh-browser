@@ -49,7 +49,7 @@ export default plugin
 
 export { Config }
 export type { Config as BrowserConfig } from './config.ts'
-export type { BrowserService, RenderRule, RenderResult, SnapshotResult, PlatformSpec, SearchItem, InteractiveState, RecipeServiceResult, ScriptRunResult, EvaluateResult, FileUploadResult } from './browser-service.ts'
+export type { BrowserService, RenderRule, RenderResult, SnapshotResult, PlatformSpec, SearchItem, SearchPageState, SearchPageResult, InteractiveState, RecipeServiceResult, ScriptRunResult, EvaluateResult, FileUploadResult } from './browser-service.ts'
 export type { AuthProfileConfig, ResolvedAuthProfile } from './auth-profiles.ts'
 export type { RulePackConfig, RuleStep, ResolvedRulePack } from './rule-packs.ts'
 export type { BrowserRecipeStep, RecipeStepResult, RecipeRunResult, RecipeExecutionStatus, RecipeValidationStatus, RecipeEffects, RecipeFailedStep, RecipeOutput } from './automation.ts'
