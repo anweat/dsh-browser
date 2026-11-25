@@ -23,7 +23,7 @@
 | **浏览器** | 系统 Google Chrome / Edge，或共享缓存（Windows `%LOCALAPPDATA%\ms-playwright`，其他系统见下）里的 Playwright Chromium（约 400MB） | **安装插件时不下载任何浏览器**。优先 Playwright Chromium，没有就用系统 Chrome / Edge；都没有时 `runtime.install` 一键补 |
 | **playwright 驱动**（JS 包） | `playwright` npm 依赖 | 插件本地 node_modules 优先，缺省回退全局 npm |
 | **patchright 驱动**（可选） | 与 Playwright 同版本的 Chromium 兼容驱动 | 插件内置；配置 `browserRuntime: patchright` 才启用 |
-| **opencli**（纯 Node CLI，可选） | `@jackwener/opencli`，**不是**本包依赖 | 不打包：它的安装脚本会让 pnpm 11 的 `dsh plugin add` 报失败。要用就 `npm i -g @jackwener/opencli`，插件在 `PATH`、全局 npm 目录和 profile 里找它 |
+| **opencli**（纯 Node CLI，可选） | `@jackwener/opencli`，**不是**本包依赖 | 不打包：它的安装脚本会让 pnpm 11 的 `dsh plugin add` 报失败。要用就 `npm i -g @jackwener/opencli@2`，插件在 `PATH`、全局 npm 目录和 profile 里找它 |
 
 ## 把共享浏览器缓存放到别的盘（可选）
 

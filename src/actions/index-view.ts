@@ -20,7 +20,7 @@ export interface IndexEnvironment {
   /** True when the `dsh-browser` skill is registered with the Host. */
   skillAvailable: boolean
   /** Runtime facts worth surfacing at the root (undefined when unknown). */
-  runtime?: { chromiumInstalled?: boolean; /** False when no browser can be launched at all (no Playwright Chromium, no system Chrome / Edge, no configured one). */ browserReady?: boolean; opencliInstalled?: boolean; opencliEnabled?: boolean }
+  runtime?: { chromiumInstalled?: boolean; /** False when no browser can be launched at all (no Playwright Chromium, no system Chrome / Edge, no configured one). */ browserReady?: boolean; opencliInstalled?: boolean; opencliEnabled?: boolean; /** Set (to the version) when the installed OpenCLI is one this plugin does not support. */ opencliVersion?: string }
   /** Deployment overrides of the text (`prompts` configuration); absent means the built-in text everywhere. */
   prompts?: ResolvedPrompts
   /** Per-action line about the defaults in force (target.open, target.download), shown in the action detail only. */
@@ -114,7 +114,8 @@ export function renderRoot(env: IndexEnvironment): string {
   if (env.runtime?.browserReady === false || (env.runtime?.browserReady === undefined && env.runtime?.chromiumInstalled === false)) {
     lines.push('Chromium is NOT installed and no system Chrome / Edge was found: install Google Chrome or Edge (used automatically), or run runtime.install (large download), before any page action.')
   }
-  if (env.runtime?.opencliEnabled && env.runtime.opencliInstalled === false) lines.push('OpenCLI is enabled but not installed (optional, only opencli.* needs it): npm i -g @jackwener/opencli, then restart.')
+  if (env.runtime?.opencliEnabled && env.runtime.opencliInstalled === false) lines.push('OpenCLI is enabled but not installed (optional, only opencli.* needs it): npm i -g @jackwener/opencli@2, then restart.')
+  if (env.runtime?.opencliEnabled && env.runtime.opencliVersion) lines.push(`OpenCLI ${env.runtime.opencliVersion} is installed but not supported yet (this plugin needs >=1.8.0 <3): npm i -g @jackwener/opencli@2, then restart. opencli.* actions refuse it.`)
   lines.push('Groups:')
   for (const group of ACTION_GROUPS) {
     const count = usable.filter(action => action.group === group).length

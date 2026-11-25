@@ -4,7 +4,7 @@
 
 ## Cookie 与文件落盘
 
-- `authProfile` 从配置的 `storageStatePath` 载入 Cookie、localStorage 等登录态。只有 `persistState: true` 才在 context 关闭时原子回写该文件；全局兼容路径默认不会被交互会话改写。
+- `authProfile` 从配置的 `storageStatePath` 载入 Cookie、localStorage 等登录态。只有 `persistState: true` 才在 context 关闭时回写该文件（合并增量，规则见 [登录态复用与 OpenCLI](login-and-opencli.md#persiststate-怎么回写)）；全局兼容路径默认不会被交互会话改写。
 - `script.evaluate` 可读取 `document.cookie`，因此能看到当前来源的非 HttpOnly Cookie；浏览器不会向页面 JavaScript 暴露 HttpOnly Cookie。除 `unrestricted` 外，每次执行都需要确认。
 - `act.upload` 只读取调用中列出的绝对路径并交给当前页面上传控件，不修改源文件，也不会遍历目录。除 `unrestricted` 外，即使在 `autonomous` 模式也需要确认。
 - `observe.screenshot` 和 `snapshot` 只向 `snapshotDir` 写入截图或 HTML；自定义截图名只允许普通文件名，拒绝绝对路径、目录分隔符和 `..`。持久登录态只写配置的状态文件。下载文件只写入 `downloadDir`，见下面的“下载落盘”。`script.evaluate` 触发的浏览器下载不由该动作保存或返回：那个下载事件虽然会被同一个监听器按下面的规则落盘并出现在 `inspect.downloads`，但 `script.evaluate` 的结果里不会带路径；需要文件时直接用 `target.download`。

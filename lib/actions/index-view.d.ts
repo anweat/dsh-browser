@@ -20,7 +20,8 @@ export interface IndexEnvironment {
         chromiumInstalled?: boolean; /** False when no browser can be launched at all (no Playwright Chromium, no system Chrome / Edge, no configured one). */
         browserReady?: boolean;
         opencliInstalled?: boolean;
-        opencliEnabled?: boolean;
+        opencliEnabled?: boolean; /** Set (to the version) when the installed OpenCLI is one this plugin does not support. */
+        opencliVersion?: string;
     };
     /** Deployment overrides of the text (`prompts` configuration); absent means the built-in text everywhere. */
     prompts?: ResolvedPrompts;

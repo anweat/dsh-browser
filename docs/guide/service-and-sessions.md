@@ -18,7 +18,7 @@ export function apply(ctx: Context) {
 }
 ```
 
-服务接口（结构性，无需共享类型包）见 `src/browser-service.ts` 里的 `BrowserService`；`render`、`snapshot`、`searchResults`、`opencli`、`close` 供其他插件调用，签名相对 0.1.x 没有变化。
+服务接口（结构性，无需共享类型包）见 `src/browser-service.ts` 里的 `BrowserService`；`render`、`snapshot`、`searchResults`、`opencli`、`close` 供其他插件调用，签名相对 0.1.x 没有变化；`searchPage` 是 `searchResults` 的带状态版本（见 [平台搜索页的结论](login-and-opencli.md#平台搜索页的结论searchpage)），类型 `SearchPageState` / `SearchPageResult` 从包入口导出。
 
 ## 跨 session 隔离
 
@@ -46,7 +46,7 @@ cookie 与 storage，跨 session 串号正是要防的事。
 | `inspect.policy` / `runtime.*_policy` / `runtime.set_auth_profile` | 策略覆盖层是全局的（所有 session 共用一份生效策略），不属于任何 session；审计里的 session id 只对产生它的 session 可见，别的 session 看到 `another session` |
 | `target.download` / `inspect.downloads` | 下载走调用方 session 的 context 与登录态；下载记录只在该 session 的内存里，互不可见 |
 | `runtime.status` 的 `activeUrl` | 仅报告调用方 session 的页面 |
-| `render` / `snapshot` / `searchResults` / `crawl` / OpenCLI | 每次调用自建临时 context，本就无共享状态 |
+| `render` / `snapshot` / `searchResults` / `searchPage` / `crawl` / OpenCLI | 每次调用自建临时 context，本就无共享状态；`persistState` profile 的这类短操作按状态文件排队，见 [登录态复用](login-and-opencli.md#persiststate-怎么回写) |
 
 `target.close` 关闭的是**调用方**的页面，不影响其他 session；插件卸载时
 `close()` 才整体拆掉所有 session 的 context 与进程。

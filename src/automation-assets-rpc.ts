@@ -146,7 +146,7 @@ export function registerAutomationAssetRpc(ctx: Context, store: AutomationAssetS
             const status = await service.status()
             value = {
               browser: status.browser, systemBrowsers: status.systemBrowsers, chromiumInstalled: status.chromiumInstalled,
-              opencli: { enabled: status.opencliEnabled, installed: status.opencliInstalled, ...status.opencliSource ? { source: status.opencliSource } : {}, ...status.opencliInstallHint ? { hint: status.opencliInstallHint } : {} },
+              opencli: { enabled: status.opencliEnabled, installed: status.opencliInstalled, ...status.opencliSource ? { source: status.opencliSource } : {}, ...status.opencliVersion ? { version: status.opencliVersion } : {}, ...status.opencliUnsupported ? { unsupported: status.opencliUnsupported } : {}, ...status.opencliInstallHint ? { hint: status.opencliInstallHint } : {} },
             }
             break
           }

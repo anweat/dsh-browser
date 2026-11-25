@@ -64,7 +64,7 @@ pnpm pack && dsh plugin --profile web add ./anweat-dsh-browser-0.2.3.tgz
    - 有 Chrome / Edge：自动使用，不下载任何东西。Playwright 的 Chromium 一旦下载过就改用它；填了 `executablePath`，或把 `channel` 设为 `chrome` / `msedge`，则固定用你指定的那个，找不到就报错。
    - 都没有：装 Chrome 或 Edge；或让模型调用 `runtime.install`（下载约 190 MB，会询问审批）；或在设置里填 `executablePath`。完整选项见 [内核与依赖](https://github.com/anweat/dsh-browser/blob/master/docs/guide/runtime-and-dependencies.md)。
 3. **可选依赖**：
-   - **OpenCLI**：只有 `opencli.*` 动作和 Web Search Pro 的 `browser-opencli` 后端用到。`npm i -g @jackwener/opencli`，重启后调用 `opencli.status`。不装不影响其他功能，也不会让 `dsh plugin add` 失败。查找顺序与排障见 [登录态复用与 OpenCLI](https://github.com/anweat/dsh-browser/blob/master/docs/guide/login-and-opencli.md)。
+   - **OpenCLI**：只有 `opencli.*` 动作和 Web Search Pro 的 `browser-opencli` 后端用到。`npm i -g @jackwener/opencli@2`，重启后调用 `opencli.status`。不装不影响其他功能，也不会让 `dsh plugin add` 失败。查找顺序与排障见 [登录态复用与 OpenCLI](https://github.com/anweat/dsh-browser/blob/master/docs/guide/login-and-opencli.md)。
    - **dsh-web-search-pro**：它在运行时读取本插件提供的 `browser` 服务来做页面快照、`playwright` 抓取和搜索页类平台，两者可独立安装；这些浏览器类能力需要本插件在场。
 
 ## 快速示例

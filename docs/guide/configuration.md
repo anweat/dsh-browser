@@ -17,7 +17,7 @@
         enabled: true            # 是否启用浏览器服务；false 时 agent 没有浏览器工具。默认 true
         automationMode: standard # 自动化模式：read-only 只读 | standard 写操作逐次询问（默认）| autonomous 页面交互直接执行 | unrestricted 全部免审批（风险最高：agent 还能自行放宽登录域名与限流）
         toolSurface: indexed     # 工具面：indexed（默认）= 只常驻 browser_index + browser_call，约 325 token | flat = 每个动作一个工具，常驻上下文大得多。改后需重启
-        opencliEnabled: true     # OpenCLI（站点 adapter 与 Chrome Browser Bridge）总开关。默认 true；OpenCLI 需要另外安装（npm i -g @jackwener/opencli），没装时只是 opencli.* 不可用
+        opencliEnabled: true     # OpenCLI（站点 adapter 与 Chrome Browser Bridge）总开关。默认 true；OpenCLI 需要另外安装（npm i -g @jackwener/opencli@2），没装时只是 opencli.* 不可用
 
         # ── 浏览器 ──────────────────────────────────────────────────────────
         browserRuntime: playwright # 驱动：playwright（默认）| patchright（仅 Chromium，对反爬检测更友好）
@@ -53,7 +53,7 @@
           forum:
             storageStatePath: 'D:/secrets/forum.json' # Playwright storageState JSON；含 cookie，不要提交到仓库
             allowedDomains: [example.com]             # 只有这些域名（含子域）能用它；至少一个
-            persistState: false  # 默认只读（文件须已存在）；true 才会在 context 关闭时原子回写刷新后的状态，文件可先不存在
+            persistState: false  # 默认只读（文件须已存在）；true 才会在 context 关闭时回写：只合并“这次改了什么”、同一文件的短操作排队、坏结果不写、先留 .bak，文件可先不存在（规则见 login-and-opencli.md）
         rulePacks:               # 域名限定、哈希固定的页面增强包；结构复杂，只在配置文件里编辑
           forum-enhanced:
             matches: [example.com]

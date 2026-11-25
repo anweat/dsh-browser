@@ -1,0 +1,23 @@
+{
+ "ok": true,
+ "data": {
+  "commands": [
+   {
+    "command": "zsxq topic",
+    "description": "获取单个话题详情和评论",
+    "access": "read"
+   },
+   {
+    "command": "zsxq topics",
+    "description": "获取当前星球的话题列表",
+    "access": "read"
+   },
+   {
+    "command": "zsxq whoami",
+    "description": "Show the current logged-in zsxq account",
+    "access": "read"
+   }
+  ],
+  "total": 1291
+ }
+}
