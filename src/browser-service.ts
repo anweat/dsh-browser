@@ -327,6 +327,18 @@ function storageStateOptions(statePath: string | undefined, label: string, allow
   return { storageState: statePath }
 }
 
+/** `promise`, or a rejection as soon as `signal` aborts; the work behind the promise goes on for its other waiters. */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  const aborted = () => new Error('dsh-browser: aborted while waiting for the OpenCLI catalog')
+  if (signal.aborted) return Promise.reject(aborted())
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(aborted())
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+}
+
 function boundedString(value: string | undefined, label: string, max: number): string {
   if (!value || value.length > max) throw new Error(`${label} must contain 1 to ${max} characters`)
   return value
@@ -1192,6 +1204,17 @@ export class BrowserService {
   }
 
   opencli(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
+    // OpenCLI adapters can issue real site traffic outside Playwright, so they
+    // share the same approval-independent concurrency and burst buffer.
+    return this.runOpencliChecked(args, opts, run => this.usageGovernor.run('https://opencli.local/', run, opts.signal))
+  }
+
+  /** `list` and `--help`: local metadata, no site traffic, so they do not queue behind (or use up) the site pacing. */
+  private opencliLocal(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
+    return this.runOpencliChecked(args, opts, run => run())
+  }
+
+  private runOpencliChecked(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal }, schedule: (run: () => Promise<CliResult>) => Promise<CliResult>): Promise<CliResult> {
     if (!this.config.enabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: browser service is disabled', timedOut: false })
     if (!this.config.opencliEnabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI is disabled', timedOut: false })
     if (!this.opencliAvailable()) {
@@ -1201,13 +1224,7 @@ export class BrowserService {
     if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
       return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
     }
-    // OpenCLI adapters can issue real site traffic outside Playwright, so they
-    // share the same approval-independent concurrency and burst buffer.
-    return this.usageGovernor.run(
-      'https://opencli.local/',
-      () => runOpencli(args, { ...opts, signal: opts.signal }),
-      opts.signal,
-    )
+    return schedule(() => runOpencli(args, { ...opts, signal: opts.signal }))
   }
 
   opencliDoctor(signal?: AbortSignal): Promise<CliResult> {
@@ -1215,9 +1232,9 @@ export class BrowserService {
   }
 
   /** Every adapter OpenCLI lists, once: 1.8 as one array, 2.x page by page (25 is the default page, 100 the most). A failing or malformed page is an error, never a short catalog. */
-  private async loadOpencliCatalog(version: string | undefined, signal?: AbortSignal): Promise<OpencliCatalogItem[]> {
+  private async loadOpencliCatalog(version: string | undefined): Promise<OpencliCatalogItem[]> {
     if ((opencliMajor(version) ?? 1) < 2) {
-      const result = await this.opencli(['list', '-f', 'json'], { timeoutMs: 60_000, signal })
+      const result = await this.opencliLocal(['list', '-f', 'json'], { timeoutMs: 60_000 })
       if (result.code !== 0 || result.timedOut) throw new Error('OpenCLI catalog failed: ' + (result.stderr || result.stdout).slice(0, 500))
       this.opencliNeedsHelp = new Set()
       return parseOpencliCatalog(result.stdout)
@@ -1228,7 +1245,7 @@ export class BrowserService {
     let offset = 0
     let total: number | undefined
     for (let page = 0; page < MAX_PAGES; page++) {
-      const result = await this.opencli(['list', '-f', 'json', '--limit', String(PAGE), '--offset', String(offset)], { timeoutMs: 60_000, signal })
+      const result = await this.opencliLocal(['list', '-f', 'json', '--limit', String(PAGE), '--offset', String(offset)], { timeoutMs: 60_000 })
       if (result.timedOut) throw new Error(`OpenCLI catalog failed: page at offset ${offset} timed out`)
       if (result.code !== 0) {
         const failure = parseOpencliFailure(result.stdout)
@@ -1254,7 +1271,7 @@ export class BrowserService {
     if (!help) {
       try {
         const words = [item.site, ...item.name.split(/\s+/)].filter(Boolean)
-        const result = await this.opencli([...words, '--help', '-f', 'json'], { timeoutMs: 20_000, signal })
+        const result = await this.opencliLocal([...words, '--help', '-f', 'json'], { timeoutMs: 20_000, signal })
         const parsed = result.code === 0 && !result.timedOut ? parseOpencliHelp(result.stdout) : undefined
         if (parsed) { help = parsed; this.opencliHelpCache.set(item.command, parsed) }
       } catch { /* this item stays without arguments */ }
@@ -1267,10 +1284,14 @@ export class BrowserService {
     const support = opencliSupport()
     if (support.state === 'unsupported') throw new Error('dsh-browser: ' + support.message)
     if (!this.opencliCatalogCache) {
-      const loading = this.opencliCatalogLoading ?? (this.opencliCatalogLoading = this.loadOpencliCatalog(support.state === 'ok' ? support.version : undefined, signal).finally(() => { this.opencliCatalogLoading = undefined }))
-      this.opencliCatalogCache = await loading
+      // One load is shared by every caller, so no caller's signal may end it: each caller only stops its own waiting.
+      const loading = this.opencliCatalogLoading ?? (this.opencliCatalogLoading = this.loadOpencliCatalog(support.state === 'ok' ? support.version : undefined)
+        .then(items => (this.opencliCatalogCache = items))
+        .finally(() => { this.opencliCatalogLoading = undefined }))
+      loading.catch(() => {})
+      await abortable(loading, signal)
     }
-    const found = filterOpencliCatalog(this.opencliCatalogCache, filter)
+    const found = filterOpencliCatalog(this.opencliCatalogCache ?? [], filter)
     // 2.x rows carry no arguments and the model needs them: for a short answer they come from the command's own help, three at a time.
     if (found.length === 0 || found.length > 10 || !found.some(item => this.opencliNeedsHelp.has(item.command))) return found
     const filled: OpencliCatalogItem[] = []

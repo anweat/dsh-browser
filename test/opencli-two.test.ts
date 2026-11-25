@@ -195,6 +195,28 @@ test('2.x catalog: a failing, malformed, stuck or short page is an error, never 
   })
 })
 
+test('catalog: the first caller giving up does not fail the others, and local metadata does not wait behind the site pacing', async () => {
+  await withFake(2, '', async (fake, service) => {
+    const ac = new AbortController()
+    const first = service.opencliCatalog({ site: 'zhihu' }, ac.signal)
+    const second = service.opencliCatalog({ site: 'zhihu' })
+    setTimeout(() => ac.abort(), 20)
+    await assert.rejects(first, /aborted while waiting for the OpenCLI catalog/)
+    assert.equal((await second).length, 3)
+    assert.equal(fake.calls().filter(call => call[0] === 'list').length, 3, 'one shared load')
+    await assert.rejects(service.opencliCatalog({}, AbortSignal.abort()).then(() => { throw new Error('cached: no wait') }), /cached: no wait/)
+  })
+  const fake = fakeOpencli(2)
+  const previous = process.env.DSH_BROWSER_OPENCLI
+  process.env.DSH_BROWSER_OPENCLI = fake.dir
+  try {
+    // one start per 60 s: three pages through the pacing would take minutes
+    const paced = new BrowserService(resolveConfig({ enabled: true, opencliEnabled: true, autoInstall: false, usagePolicy: { minDelayMs: 60_000, burst: 1 } } as never))
+    assert.equal((await paced.opencliCatalog({ site: 'zhihu' })).length, 3)
+    assert.equal(fake.calls().filter(call => call[0] === 'list').length, 3)
+  } finally { if (previous === undefined) delete process.env.DSH_BROWSER_OPENCLI; else process.env.DSH_BROWSER_OPENCLI = previous }
+})
+
 test('1.8 catalog: one array call, arguments already there, no help calls', async () => {
   await withFake(1, '', async (fake, service) => {
     const items = await service.opencliCatalog({ site: 'zhihu' })

@@ -527,6 +527,9 @@ export declare class BrowserService {
         timeoutMs?: number;
         signal?: AbortSignal;
     }): Promise<CliResult>;
+    /** `list` and `--help`: local metadata, no site traffic, so they do not queue behind (or use up) the site pacing. */
+    private opencliLocal;
+    private runOpencliChecked;
     opencliDoctor(signal?: AbortSignal): Promise<CliResult>;
     /** Every adapter OpenCLI lists, once: 1.8 as one array, 2.x page by page (25 is the default page, 100 the most). A failing or malformed page is an error, never a short catalog. */
     private loadOpencliCatalog;
