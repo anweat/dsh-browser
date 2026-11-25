@@ -103,6 +103,7 @@ async function startSite() {
         case 'chromephrases': return html('<header><a href="/signin">请先登录</a></header><main><p>Welcome back.</p></main><footer><p>没有找到相关结果 · 安全验证 · 请先登录</p></footer>')
         case 'divdrift': return html(NAV + '<main><div>' + Array.from({ length: 7 }, (_, i) => `<div class="c${i}x"><h3><a href="/item/${i}">A plain div result title ${i}</a></h3></div>`).join('') + '</div></main><footer><a href="/terms/of/use">Terms of use</a></footer>')
         case 'emptyrecs': return html(NAV + '<main><p>没有找到相关结果</p><section><h4>猜你喜欢</h4>' + Array.from({ length: 6 }, (_, i) => `<div><a href="/rec/${i}">Recommended read number ${i}</a></div>`).join('') + '</section></main>')
+        case 'cfscriptempty': return html(NAV + '<main><p>没有找到相关结果</p><script src="/cdn-cgi/challenge-platform/h/b/scripts/jsd/main.js"></script></main>')
         case 'hang': return // never answers
         default: return html('?')
       }
@@ -247,6 +248,7 @@ describe('login state and searchPage in a real browser', { skip: detection.ok ? 
       { kind: 'chromephrases', state: 'empty_unconfirmed', opts: { timeoutMs: 3500 }, why: 'phrases in a header link or a footer line decide nothing' },
       { kind: 'divdrift', state: 'contract_drift', minMs: 3900, maxMs: 6000, why: 'a plain div list with a nav and a footer around it' },
       { kind: 'emptyrecs', state: 'empty', maxMs: 4000, why: 'an explicit empty followed by a recommendations list' },
+      { kind: 'cfscriptempty', state: 'empty', maxMs: 4000, why: 'the Cloudflare script is injected into ordinary pages' },
       { kind: 'login', state: 'needs_login', maxMs: 4500, why: 'a login wall' },
       { kind: 'loginredirect', state: 'needs_login', maxMs: 4500, why: 'a redirect to a sign-in page' },
       { kind: 'captcha', state: 'captcha', maxMs: 4500, why: 'a verification page' },

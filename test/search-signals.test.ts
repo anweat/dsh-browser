@@ -116,7 +116,7 @@ test('normalizeSample reads what a page returned and refuses garbage', () => {
 test('the phrase patterns read login, captcha and empty walls and ignore a bare 登录 in a header', () => {
   for (const text of ['请先登录后继续', '登录后查看更多结果', '扫码登录', 'Please sign in', 'Log in to continue']) assert.ok(LOGIN_TEXT.test(text), text)
   for (const text of ['首页 登录 注册', 'Login', 'Sign in', '登录']) assert.equal(LOGIN_TEXT.test(text), false, text)
-  for (const text of ['请完成安全验证', '人机验证', 'Please verify you are human', 'Please complete the captcha']) assert.ok(CAPTCHA_TEXT.test(text), text)
+  for (const text of ['请完成安全验证', '人机验证', 'Please verify you are human', 'Please complete the captcha', '请确认您是真人', '正在验证您是否是真人']) assert.ok(CAPTCHA_TEXT.test(text), text)
   assert.equal(CAPTCHA_TEXT.test('验证 结果 列表'), false)
   for (const text of ['没有找到相关结果', '暂无结果', 'No results found', '0 results for x']) assert.ok(EMPTY_TEXT.test(text), text)
   assert.equal(EMPTY_TEXT.test('找到 3 条结果'), false)
