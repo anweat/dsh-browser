@@ -37,6 +37,8 @@ export declare class UsageGovernor {
     private releaseGlobal;
     private acquireHost;
     run<T>(url: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T>;
+    /** How long the next navigation to this host will be held because of an earlier 429 / 502 / 503 / 504 (read-only; 0 when it is not). */
+    cooldownRemainingMs(url: string): number;
     /** Record server pressure. Returns the applied host cooldown in milliseconds. */
     noteResponse(url: string, status: number, retryAfterMs?: number): number;
     snapshot(): {

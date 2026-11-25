@@ -501,7 +501,8 @@ export declare class BrowserService {
         authProfile?: string;
         rulePack?: string;
         timeoutMs?: number; /** Navigation limit when it should be longer than `timeoutMs` (searchResults keeps its 30 s). */
-        navigationTimeoutMs?: number;
+        navigationTimeoutMs?: number; /** Answer `rate_limited` at once, instead of waiting, when the usage governor holds this host longer than `timeoutMs` because of an earlier error. searchResults turns this off. */
+        failFastOnCooldown?: boolean;
     }): Promise<SearchPageResult>;
     searchResults(url: string, spec: PlatformSpec, opts?: {
         signal?: AbortSignal;
