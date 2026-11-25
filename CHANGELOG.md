@@ -17,6 +17,12 @@ DSH Desktop 上的升级方式见 [README 的 Desktop 安装](README.md#安装)�
 
 ## 未发布
 
+**修复（登录态回写）**：`persistState: true` 的回写不再用 context 的全量状态覆盖状态文件。此前一个文件存两个站点（文档允许）、profile 只授权其中一个时，一次搜索就会删光另一个站点的 cookie；站点偶尔答一次“请登录”并清 cookie 时，这个空状态会被写回，把有效登录弄丢；并发搜索又会从同一个一次性 refresh token 起步，吊销整个登录（本地实验：3 并发 × 3 轮只成功 1/9）。现在：关闭时只算“相对创建时基线改了什么”，合并进**此刻的**文件，域名之外的 cookie 和 origin 原样保留；render / snapshot / 搜索 / 脚本这类短操作对同一个状态文件独占（含取消与 60 秒上限，先于限流槽位取锁，所有出错路径都释放，交互会话不占锁）；平台搜索判为需要登录、验证码、被拦、限流、站点错误、网络错误或超时，render / snapshot 遇到 401 / 403 / 429 / 5xx、或登录页还删掉了 cookie，以及任何会删光基线全部 cookie 的短操作，都不写回；内容有变化时先留 `<文件>.bak`（0600，一代），没变化不写，文件损坏时不覆盖并报错；用 `storageState({ indexedDB: true })` 保存 IndexedDB（失败或超过 5 MiB 时退回，保留文件里已有的）。`runtime.status` 的 `authProfiles[].writeBack` 显示最近一次回写结果（`written` / `unchanged` / `skipped` 与原因 / `failed`，不含 cookie 名、值和路径）。规则见 [docs/guide/login-and-opencli.md](docs/guide/login-and-opencli.md#persiststate-怎么回写)。
+
+**新增（`searchPage`）**：`browser.searchPage(url, spec, opts)` 返回平台搜索页的**状态**（`ok` / `empty` / `empty_unconfirmed` / `needs_login` / `captcha` / `blocked` / `rate_limited` / `site_error` / `network` / `timeout` / `contract_drift`），而不是一个说不清原因的空数组。判决是信号竞争而非固定睡眠：有结果且数量稳定就立刻 `ok`（轮询一直有请求的页面不再拖到 9 秒），结果永远优先，验证码 / 登录 / 明确的空要连续 1.2 秒才算数，导航和页脚的链接不当成列表，隐藏的密码框和页头里的“登录”二字不是登录信号。`PlatformSpec` 新增可选的 `emptySelector` / `loginSelector` / `captchaSelector`；`SearchPageState` / `SearchPageResult` 从包入口导出。`searchResults` 改为建在 `searchPage` 之上，公开行为不变（旧版 web-search-pro 照常使用）：规则包步骤、`opts.waitMs`、`opts.cookies`、20 条上限、条数不足时滚动一次都保留；3 秒后才渲染的列表现在能取到（此前被当成“空 / 需要登录”）。没有 `searchPage` 的旧版本服务上，调用方退回 `searchResults`。
+
+**修复（OpenCLI 2.x）**：已装的是 OpenCLI 2.x 时，`opencli.status` / `opencli.catalog` / `opencli.run` 明确说“OpenCLI 2.x.y is installed, but dsh-browser supports OpenCLI >=1.8.0 <2 only”并给出 `npm i -g @jackwener/opencli@1.8.8`，不再是笼统的“must be an array”；`opencliAvailable()` 与它一致（读定位到的入口旁的 `package.json`，不启动进程）。`runtime.status` 新增 `opencliVersion` / `opencliUnsupported`。**没有适配 2.x**：它的结果信封和分页 `list` 仍不支持。
+
 ## 0.2.3（2026-11-09）
 
 **摘要**：0.2.3 让插件能在 DSH 0.2.2-rc.1（cordis 4.1）上完整使用，并补上 0.2.1-rc.5 的支持：peer 范围加了 0.2.2 线，设置卡片的 RPC 通道在 cordis 4.1 宿主上能正常挂载（此前卡片能渲染，但所有数据请求返回 405）。另有此前未发布的文档整理。**谁应该升级**：所有在 DSH 0.2.2-rc.1 上的用户，包括 Desktop（已发布的 `0.2.2` 的 peer 范围不含 0.2.2-rc.1，会被拒绝安装）；0.2.0 / 0.2.1 线宿主上功能不变，可按需升级。感谢 [#48](https://github.com/anweat/dsh-browser/pull/48)（@snailium）和 [#49](https://github.com/anweat/dsh-browser/issues/49)（@shuaigekda）。**已知限制**：0.2.2 正式版靠 rc.1 的验证放行，没有在真实宿主上跑过；没有在 Electron Desktop 上实测，也没有和模型会话一起测过。

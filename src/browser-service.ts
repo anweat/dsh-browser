@@ -1080,7 +1080,7 @@ export class BrowserService {
   }
 
   /**
-   * A platform search page with a state instead of a guess (docs/session-p0-contract.md). Waiting is a race between
+   * A platform search page with a state instead of a guess (the P0 contract with web-search-pro). Waiting is a race between
    * signals, not a fixed sleep: the first decisive reading ends it. Cancellation and configuration errors (unknown
    * profile, domain not allowed) throw; everything a site or the network does comes back as `state`.
    */

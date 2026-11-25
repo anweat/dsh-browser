@@ -53,7 +53,7 @@
           forum:
             storageStatePath: 'D:/secrets/forum.json' # Playwright storageState JSON；含 cookie，不要提交到仓库
             allowedDomains: [example.com]             # 只有这些域名（含子域）能用它；至少一个
-            persistState: false  # 默认只读（文件须已存在）；true 才会在 context 关闭时原子回写刷新后的状态，文件可先不存在
+            persistState: false  # 默认只读（文件须已存在）；true 才会在 context 关闭时回写：只合并“这次改了什么”、同一文件的短操作排队、坏结果不写、先留 .bak，文件可先不存在（规则见 login-and-opencli.md）
         rulePacks:               # 域名限定、哈希固定的页面增强包；结构复杂，只在配置文件里编辑
           forum-enhanced:
             matches: [example.com]

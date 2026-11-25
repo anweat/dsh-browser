@@ -1,6 +1,6 @@
 /**
  * What a platform search page tells the caller: the in-page signal reader, and the pure judge that turns a series of
- * readings into one {@link SearchPageState}. The rules are the ones of docs/session-p0-contract.md: waiting is a race
+ * readings into one {@link SearchPageState}. The rules are those of the P0 `searchPage` contract between dsh-browser and web-search-pro: waiting is a race
  * between signals, not a fixed sleep; results beat everything; a negative signal (captcha, login, an error status, an
  * explicit "no results") has to stay for {@link HOLD_MS} before it is believed; `contract_drift` needs a settled page.
  * @module dsh-browser/search-signals
