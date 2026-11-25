@@ -25,7 +25,7 @@ DSH Desktop 上的升级方式见 [README 的 Desktop 安装](README.md#安装)�
 
 **新增（OpenCLI 1.8 和 2.x 都支持）**：支持范围 `>=1.8.0 <3`（optional peer 同），安装提示改为 `npm i -g @jackwener/opencli@2`；3.x 及以后仍拒绝，`opencli.status` / `opencli.catalog` / `opencli.run` 写明版本和这条命令，`opencliAvailable()` 读定位到的入口旁的 `package.json` 判断、不启动进程，`runtime.status` 有 `opencliVersion` / `opencliUnsupported`。`opencli.catalog` 能读 2.x 的分页信封 `{ok,data:{commands,total,nextOffset}}`：一页 100 条读完全部并缓存，某页失败、格式不对、翻页不前进或少于 `total` 都是错误而不是残缺目录；2.x 的条目没有参数，过滤后不超过 10 条时用 `<site> <name> --help -f json` 补上参数、`domain` 和 `example`（最多并发 3，按命令缓存，单条失败只是那一条没有参数）。2.x 把失败打成 stdout 上一行 JSON、退出码非零：`opencli.run` / `opencli.status` 现在在 `output` 之外给出 `error: {code, message, hint}`，成功信封原样透传。`opencli browser` 的会话写法分版本（1.8 位置参数，2.x `--session`），指南示例、`opencli.run` 的说明和 skill 参考都按 `opencliVersion` 区分，插件不改写参数。升级顺序、扩展 1.0.27 通用、不要混用两份 OpenCLI（1.8.8 的 CLI 会停掉别的版本的 daemon）见 [docs/guide/login-and-opencli.md](docs/guide/login-and-opencli.md#opencli-的安装与查找)。测试用两代真实输出裁剪成的夹具和两代假的 OpenCLI 包，没有运行任何站点命令。
 
-- **安装提示固定版本**：所有提示和文档里的 `npm i -g @jackwener/opencli` 改为 `npm i -g @jackwener/opencli@1.8.8`（不带版本会装到还不支持的 2.x）。
+**验证**：单元、端到端测试见 CI；隔离的 DSH `0.2.2-rc.4` 宿主里与 Web Search Pro 一起以 tgz 安装，opencli 1.8.8 与 2.0.3 各跑一次（不碰真实站点）。真实的 2.0.3 目录 1,291 条读全。2.0.3 的 daemon 与扩展 1.0.27 在真实 Chrome 上连通过（2026-11-25，直接跑 opencli）。没有验证：patchright 的 IndexedDB、Windows、多个 DSH 进程共用一个状态文件（锁只在进程内）。
 
 ## 0.2.3（2026-11-09）
 
