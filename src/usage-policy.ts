@@ -170,6 +170,11 @@ export class UsageGovernor {
     }
   }
 
+  /** How long the next navigation to this host will be held because of an earlier 429 / 502 / 503 / 504 (read-only; 0 when it is not). */
+  cooldownRemainingMs(url: string): number {
+    try { return Math.max(0, this.host(url).state.blockedUntil - Date.now()) } catch { return 0 }
+  }
+
   /** Record server pressure. Returns the applied host cooldown in milliseconds. */
   noteResponse(url: string, status: number, retryAfterMs?: number): number {
     const { state } = this.host(url)

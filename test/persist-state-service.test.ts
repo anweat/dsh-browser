@@ -15,7 +15,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-persist-svc-'))
 const cookie = (name: string, domain: string, value = 'v') => ({ name, value, domain, path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' })
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-interface FakeOptions { status?: number; holdMs?: number; failNewContext?: number; crashOnState?: boolean; mutate?: (state: any) => any }
+interface FakeOptions { items?: unknown[]; status?: number; holdMs?: number; failNewContext?: number; crashOnState?: boolean; mutate?: (state: any) => any }
 
 /** A browser whose contexts keep the state they were created with, let a test change it, and log what happened. */
 function fakeBrowser(opts: FakeOptions = {}) {
@@ -42,7 +42,7 @@ function fakeBrowser(opts: FakeOptions = {}) {
             on() {}, isClosed: () => entry.closed, async close() {}, mainFrame: () => ({}), url: () => 'https://a.example.com/', setDefaultTimeout() {},
             async goto() { return { status: () => opts.status ?? 200, headers: () => ({}) } },
             async waitForLoadState() {}, async waitForTimeout() {},
-            async evaluate() { if (opts.holdMs) await sleep(opts.holdMs); return { title: 't', text: 'x'.repeat(50), html: '', items: [], captcha: false, login: false, empty: false, listLike: 0, nodes: 3 } },
+            async evaluate() { if (opts.holdMs) await sleep(opts.holdMs); return { title: 't', text: 'x'.repeat(50), html: '', items: opts.items ?? [], captcha: false, login: false, empty: false, listLike: 0, nodes: 3 } },
           }
         },
         async storageState(args: unknown) {
@@ -190,4 +190,42 @@ test('IndexedDB is captured with the state (the call asks for it)', async () => 
   const { svc, created } = setup()
   await render(svc, 'https://a.example.com/1', 'pa')
   assert.deepEqual(created[0].storageStateArgs[0], { indexedDB: true })
+})
+
+test('a corrupt state file at the start is a plain message without the path, and releases the lock', async () => {
+  const { svc, fileA } = setup()
+  fs.writeFileSync(fileA, '{"cookies": [broken')
+  await assert.rejects(() => render(svc, 'https://a.example.com/1', 'pa'), (error: Error) => error.message === 'dsh-browser: auth profile pa login state file is not valid JSON and was left untouched')
+  fs.writeFileSync(fileA, JSON.stringify({ cookies: [], origins: [] }))
+  await Promise.race([render(svc, 'https://a.example.com/2', 'pa'), sleep(3_000).then(() => { throw new Error('lock leaked') })])
+})
+
+const SPEC = { item: '.i', title: '.t', link: 'a' }
+
+test('searchPage: the judge budget starts after navigation, so a wait the usage governor imposed is not charged to it', async () => {
+  const { svc } = setup()
+  ;(svc as any).usageGovernor.noteResponse('https://a.example.com/x', 503, 1000)
+  const started = Date.now()
+  const answer = await svc.searchPage('https://a.example.com/x', SPEC, { timeoutMs: 1500 })
+  assert.equal(answer.state, 'empty_unconfirmed')
+  const took = Date.now() - started
+  assert.ok(took >= 2400 && took < 3200, 'held ~1 s by the governor, then its own 1.5 s: ' + took)
+  const ok = setup({ items: [{ url: 'https://a.example.com/1', title: 'one' }] })
+  ;(ok.svc as any).usageGovernor.noteResponse('https://a.example.com/x', 503, 800)
+  assert.equal((await ok.svc.searchPage('https://a.example.com/x', SPEC, { timeoutMs: 1500 })).state, 'ok')
+})
+
+test('searchPage answers rate_limited at once when the governor holds the host longer than its limit; searchResults keeps waiting', async () => {
+  const { svc } = setup()
+  ;(svc as any).usageGovernor.noteResponse('https://a.example.com/x', 429, 25_000)
+  const started = Date.now()
+  const answer = await svc.searchPage('https://a.example.com/x', SPEC, { timeoutMs: 3000 })
+  assert.equal(answer.state, 'rate_limited')
+  assert.match(answer.detail!, /cooldown/)
+  assert.match(answer.detail!, /2\d s/)
+  assert.ok(Date.now() - started < 500)
+  assert.equal((svc as any).usageGovernor.cooldownRemainingMs('https://other.example.com/') , 0)
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), 300)
+  await assert.rejects(() => svc.searchResults('https://a.example.com/x', SPEC, { signal: controller.signal }), /aborted|failed/)
 })

@@ -21,6 +21,8 @@ DSH Desktop 上的升级方式见 [README 的 Desktop 安装](README.md#安装)�
 
 **新增（`searchPage`）**：`browser.searchPage(url, spec, opts)` 返回平台搜索页的**状态**（`ok` / `empty` / `empty_unconfirmed` / `needs_login` / `captcha` / `blocked` / `rate_limited` / `site_error` / `network` / `timeout` / `contract_drift`），而不是一个说不清原因的空数组。判决是信号竞争而非固定睡眠：有结果且数量稳定就立刻 `ok`（轮询一直有请求的页面不再拖到 9 秒），结果永远优先，验证码 / 登录 / 明确的空要连续 1.2 秒才算数，导航和页脚的链接不当成列表，隐藏的密码框和页头里的“登录”二字不是登录信号。`PlatformSpec` 新增可选的 `emptySelector` / `loginSelector` / `captchaSelector`；`SearchPageState` / `SearchPageResult` 从包入口导出。`searchResults` 改为建在 `searchPage` 之上，公开行为不变（旧版 web-search-pro 照常使用）：规则包步骤、`opts.waitMs`、`opts.cookies`、20 条上限、条数不足时滚动一次都保留；3 秒后才渲染的列表现在能取到（此前被当成“空 / 需要登录”）。没有 `searchPage` 的旧版本服务上，调用方退回 `searchResults`。
 
+**修复（`searchPage` 复核）**：判决的总时限从导航结束后起算，用量限流器的冷却等待不再吃掉它（此前一次 5xx 之后，下一次正常页面会等满 31 秒再被判 `empty_unconfirmed`）；冷却比时限更久时 `searchPage` 立即返回 `rate_limited` 并写明冷却（`searchResults` 仍照旧等待）。Cloudflare 挑战页（403、“Just a moment...”、“Verifying you are human”、`#challenge-*`、`cdn-cgi/challenge-platform`）判 `captcha` 而不是 `blocked`；“验证码登录 / 获取验证码 / 请输入验证码”和名字里带 captcha 的输入框、按钮属于短信登录，判 `needs_login`；“共找到 0 条结果”这类计数判 `empty`（不误中“共 10 条”“100 条”）；404、410 等其余 ≥ 400 状态判 `site_error`；文字信号只读正文，不读页头页脚；状态文件损坏时报 `dsh-browser: auth profile <id> login state file is not valid JSON and was left untouched`（不含路径），而不是 JSON 解析器的原始消息。
+
 **修复（OpenCLI 2.x）**：已装的是 OpenCLI 2.x 时，`opencli.status` / `opencli.catalog` / `opencli.run` 明确说“OpenCLI 2.x.y is installed, but dsh-browser supports OpenCLI >=1.8.0 <2 only”并给出 `npm i -g @jackwener/opencli@1.8.8`，不再是笼统的“must be an array”；`opencliAvailable()` 与它一致（读定位到的入口旁的 `package.json`，不启动进程）。`runtime.status` 新增 `opencliVersion` / `opencliUnsupported`。**没有适配 2.x**：它的结果信封和分页 `list` 仍不支持。
 
 ## 0.2.3（2026-11-09）

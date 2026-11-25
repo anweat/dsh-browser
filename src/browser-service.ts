@@ -910,7 +910,12 @@ export class BrowserService {
         : (!opts.anonymous ? storageStateOptions(this.config.storageStatePath, 'global') : {})
       let scopedState: StorageState | undefined
       if (profile && stateOptions.storageState) {
-        scopedState = scopeState(JSON.parse(fs.readFileSync(stateOptions.storageState, 'utf8')), profile.allowedDomains)
+        let parsed: StorageState
+        try { parsed = JSON.parse(fs.readFileSync(stateOptions.storageState, 'utf8')) } catch (error) {
+          if (error instanceof SyntaxError) throw new Error(`dsh-browser: auth profile ${profile.id} login state file is not valid JSON and was left untouched`)
+          throw error
+        }
+        scopedState = scopeState(parsed, profile.allowedDomains)
       }
       const applied = opts.context ?? this.config.contextDefaults
       const contextOptions = { ...stateOptions, ...(scopedState ? { storageState: scopedState } : {}), ...this.contextCreationOptions(applied, opts.interactive === true) }
@@ -1087,11 +1092,17 @@ export class BrowserService {
   async searchPage(
     url: string,
     spec: PlatformSpec,
-    opts: { signal?: AbortSignal; count?: number; waitMs?: number; cookies?: { name: string; value: string; domain: string; path: string }[]; authProfile?: string; rulePack?: string; timeoutMs?: number; /** Navigation limit when it should be longer than `timeoutMs` (searchResults keeps its 30 s). */ navigationTimeoutMs?: number } = {},
+    opts: { signal?: AbortSignal; count?: number; waitMs?: number; cookies?: { name: string; value: string; domain: string; path: string }[]; authProfile?: string; rulePack?: string; timeoutMs?: number; /** Navigation limit when it should be longer than `timeoutMs` (searchResults keeps its 30 s). */ navigationTimeoutMs?: number; /** Answer `rate_limited` at once, instead of waiting, when the usage governor holds this host longer than `timeoutMs` because of an earlier error. searchResults turns this off. */ failFastOnCooldown?: boolean } = {},
   ): Promise<SearchPageResult> {
     const started = Date.now()
     const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, 1_000), 120_000)
     const want = Math.min(Math.max(opts.count ?? 8, 1), MAX_RESULTS)
+    if (opts.failFastOnCooldown !== false) {
+      const held = this.usageGovernor.cooldownRemainingMs(url)
+      if (held > timeoutMs) {
+        return { state: 'rate_limited', items: [], tookMs: Date.now() - started, detail: `the usage governor holds this host for another ${Math.ceil(held / 1000)} s after an earlier error (cooldown), longer than the ${Math.round(timeoutMs / 1000)} s limit`, ...opts.authProfile ? { authProfile: opts.authProfile } : {} }
+      }
+    }
     const session = await this.transientContext(url, opts)
     const { context } = session
     const signal = opts.signal
@@ -1120,7 +1131,8 @@ export class BrowserService {
       session.hint.status = status
       await applyRuleSteps(page, session.rulePack)
       if (opts.waitMs) await page.waitForTimeout(opts.waitMs)
-      const deadlineAt = Math.max(started + timeoutMs, Date.now() + 2_500) + (opts.waitMs ?? 0)
+      // The judge's budget starts here, when navigation (and any wait the governor imposed on it) is over.
+      const deadlineAt = Date.now() + timeoutMs
       const judge = new SearchJudge({ ...status ? { status } : {}, startedAt: Date.now(), deadlineAt })
       const expression = signalsExpression(spec)
       let verdict = judge.immediate()
@@ -1162,7 +1174,7 @@ export class BrowserService {
     opts: { signal?: AbortSignal; count?: number; waitMs?: number; cookies?: { name: string; value: string; domain: string; path: string }[]; authProfile?: string; rulePack?: string } = {},
   ): Promise<SearchItem[]> {
     // Same public behaviour as before the page states existed: the items (an empty list for any page that has none), and a throw when the page could not be loaded.
-    const found = await this.searchPage(url, spec, { ...opts, navigationTimeoutMs: 30_000 })
+    const found = await this.searchPage(url, spec, { ...opts, navigationTimeoutMs: 30_000, failFastOnCooldown: false })
     if (found.state === 'network' || found.state === 'timeout') throw new Error('browser platform search failed for ' + url + ': ' + (found.detail ?? found.state))
     return found.items
   }

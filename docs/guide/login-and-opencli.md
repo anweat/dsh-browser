@@ -40,6 +40,8 @@ web-search-pro 之类的调用方可用 `browser.searchPage(url, spec, opts)`，
 
 判决是几个信号之间的**竞争**，不是固定睡眠：约每 150 ms 读一次页面；有结果且连续两次数量相同就是 `ok`，结果永远优先（哪怕同时有登录框）；验证码、登录、明确的“没有结果”要连续出现 1.2 秒才算数；`contract_drift` 至少 4 秒后、DOM 节点数 1 秒没变才判，导航、页脚、侧栏里的链接不算列表；到总时限（默认 12 秒，`opts.timeoutMs`）仍无信号就是 `empty_unconfirmed`。页面信号只看**可见**元素（隐藏的密码框不是登录信号），页头里的“登录”二字也不是。`PlatformSpec` 可选带 `emptySelector` / `loginSelector` / `captchaSelector`，站点自己的标记优先于通用判断。`detail` 是一句英文依据，不含 cookie、token 或页面正文；`finalUrl` 去掉了 query 和 hash。
 
+补充规则：总时限（`opts.timeoutMs`）从**导航结束后**起算，用量限流器让导航等待的时间不计入；导航本身另有上限。限流器因更早的 429 / 5xx 要把这个主机再压住比 `timeoutMs` 更久时，`searchPage` 立即返回 `rate_limited`（`detail` 写明剩余冷却），不去睡；`searchResults` 仍然等待。除 401 / 403 / 429 外，主文档状态 ≥ 400（404、410……）一律按 `site_error` 处理，排在“没有结果”之前。“人机验证”只认真正的验证措辞（滑块、拼图、“Verifying you are human”、Cloudflare 挑战页）；“验证码登录 / 获取验证码 / 请输入验证码”是短信登录，判 `needs_login`，名字里带 captcha 的输入框和按钮也不算验证码。“共找到 0 条结果”这类计数算 `empty`。文字信号只读页面自己的正文（去掉 header / nav / footer / aside），页头链接或页脚一行字不会决定结论。
+
 取消（`signal`）和配置错误（未知 profile、域名不允许）照旧抛出，站点与网络造成的失败一律是状态。`searchResults` 现在建在 `searchPage` 之上，公开行为不变：返回条目（没有就是空数组），`network` / `timeout` 仍抛 `browser platform search failed for …`；规则包步骤、`opts.waitMs`、`opts.cookies`、20 条上限、条数不足时滚动一次都保留。
 
 ## OpenCLI 的安装与查找

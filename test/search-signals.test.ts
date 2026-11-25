@@ -116,7 +116,7 @@ test('normalizeSample reads what a page returned and refuses garbage', () => {
 test('the phrase patterns read login, captcha and empty walls and ignore a bare 登录 in a header', () => {
   for (const text of ['请先登录后继续', '登录后查看更多结果', '扫码登录', 'Please sign in', 'Log in to continue']) assert.ok(LOGIN_TEXT.test(text), text)
   for (const text of ['首页 登录 注册', 'Login', 'Sign in', '登录']) assert.equal(LOGIN_TEXT.test(text), false, text)
-  for (const text of ['请完成安全验证', '人机验证', 'Please verify you are human', 'captcha']) assert.ok(CAPTCHA_TEXT.test(text), text)
+  for (const text of ['请完成安全验证', '人机验证', 'Please verify you are human', 'Please complete the captcha']) assert.ok(CAPTCHA_TEXT.test(text), text)
   assert.equal(CAPTCHA_TEXT.test('验证 结果 列表'), false)
   for (const text of ['没有找到相关结果', '暂无结果', 'No results found', '0 results for x']) assert.ok(EMPTY_TEXT.test(text), text)
   assert.equal(EMPTY_TEXT.test('找到 3 条结果'), false)
@@ -142,4 +142,32 @@ test('stripUrl drops query and hash; navigationFailure tells timeouts from netwo
   assert.equal(net.state, 'network')
   assert.equal(net.detail.includes('127.0.0.1'), false)
   assert.deepEqual([...NO_WRITE_BACK_STATES].sort(), ['blocked', 'captcha', 'needs_login', 'network', 'rate_limited', 'site_error', 'timeout'])
+})
+
+test('Cloudflare-style challenge text, title and wording read as a captcha, not a block', () => {
+  for (const text of ['Just a moment...', 'Verifying you are human. This may take a few seconds.', 'Checking your browser before accessing', 'Attention Required! | Cloudflare', '请完成安全验证', '请拖动滑块完成验证', '点选图中的文字完成验证']) assert.ok(CAPTCHA_TEXT.test(text), text)
+})
+
+test('the Chinese login wall wording is a login, never a captcha: the bare 验证码 is not a human-verification phrase', () => {
+  for (const text of ['验证码登录', '获取验证码', '请输入验证码', '短信验证码', '请输入短信验证码 登录', '手机号登录']) {
+    assert.equal(CAPTCHA_TEXT.test(text), false, text)
+    assert.ok(LOGIN_TEXT.test(text), text)
+  }
+})
+
+test('zero-result counts are empty, and 10 or 100 are not', () => {
+  for (const text of ['共找到 0 条结果', '0 条相关结果', '找到0个结果', '共 0 条', '搜到0条']) assert.ok(EMPTY_TEXT.test(text), text)
+  for (const text of ['共找到 10 条结果', '共 10 条', '100 条相关结果', '共 100 条', '找到 20 个结果', '10.0 条结果']) assert.equal(EMPTY_TEXT.test(text), false, text)
+})
+
+test('any other 4xx main document (404, 410, ...) is a site_error ahead of an explicit empty; 401, 403 and 429 keep their own rules', () => {
+  for (const status of [404, 410, 400, 451]) {
+    const { verdict, at } = run(() => sample({ empty: true }), { status })
+    assert.equal(verdict?.state, 'site_error', String(status))
+    assert.match(verdict!.detail, new RegExp('HTTP ' + status))
+    assert.ok(at >= HOLD_MS)
+  }
+  assert.equal(run(() => sample({ empty: true }), { status: 403 }).verdict?.state, 'blocked')
+  assert.equal(run(() => sample({ empty: true }), { status: 404 }).verdict?.state, 'site_error')
+  assert.equal(run(() => sample({ items: [item(1)] }), { status: 404 }).verdict?.state, 'ok', 'results still win')
 })

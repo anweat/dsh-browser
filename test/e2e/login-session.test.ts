@@ -92,6 +92,17 @@ async function startSite() {
         case '403': return html('<p>forbidden</p>', { status: 403 })
         case '429': return html('too many requests', { status: 429, headers: { 'retry-after': '0' } })
         case '500': return html('<p>oops</p>', { status: 500 })
+        case 'cloudflare': res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' }); return res.end('<!doctype html><html><head><title>Just a moment...</title></head><body><div id="challenge-stage"><div class="spinner" style="width:80px;height:80px">&nbsp;</div></div><h1>Verifying you are human. This may take a few seconds.</h1><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script></body></html>')
+        case 'cloudflaretext': res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' }); return res.end('<!doctype html><title>Just a moment...</title><p>Verifying you are human. This may take a few seconds.</p>')
+        case 'zerocount': return html(NAV + '<main><p>共找到 0 条结果</p></main>')
+        case 'smslogin': return html('<main><h2>验证码登录</h2><div class="captcha-row"><input type=tel placeholder="手机号"><input id="captcha-code" class="captcha-input" placeholder="请输入验证码"><button class="captcha-btn">获取验证码</button></div><button>登录</button></main>')
+        case 'pwsms': return html('<main><div class=captcha-row><input type=password><input class="captcha-input" placeholder="短信验证码"><button class="captcha-btn">获取验证码</button></div></main>')
+        case 'slider': return html('<header><a href="/signin">登录</a></header><main><div class="captcha-box"><iframe src="/ping" title="slider" width=300 height=80></iframe></div></main>')
+        case '404': return html('<main><p>页面未找到</p><p>没有找到相关结果</p></main>', { status: 404 })
+        case '410': return html('<main><p>Gone</p></main>', { status: 410 })
+        case 'chromephrases': return html('<header><a href="/signin">请先登录</a></header><main><p>Welcome back.</p></main><footer><p>没有找到相关结果 · 安全验证 · 请先登录</p></footer>')
+        case 'divdrift': return html(NAV + '<main><div>' + Array.from({ length: 7 }, (_, i) => `<div class="c${i}x"><h3><a href="/item/${i}">A plain div result title ${i}</a></h3></div>`).join('') + '</div></main><footer><a href="/terms/of/use">Terms of use</a></footer>')
+        case 'emptyrecs': return html(NAV + '<main><p>没有找到相关结果</p><section><h4>猜你喜欢</h4>' + Array.from({ length: 6 }, (_, i) => `<div><a href="/rec/${i}">Recommended read number ${i}</a></div>`).join('') + '</section></main>')
         case 'hang': return // never answers
         default: return html('?')
       }
@@ -225,6 +236,17 @@ describe('login state and searchPage in a real browser', { skip: detection.ok ? 
       { kind: 'navonly', state: 'empty_unconfirmed', opts: { timeoutMs: 5200 }, why: 'only navigation and footer links are no list' },
       { kind: 'hiddenpw', state: 'empty_unconfirmed', opts: { timeoutMs: 3500 }, why: 'a hidden password input is no login signal' },
       { kind: 'headerlogin', state: 'empty_unconfirmed', opts: { timeoutMs: 3500 }, why: 'the word 登录 in a header is no login signal' },
+      { kind: 'cloudflare', state: 'captcha', maxMs: 4500, why: 'a Cloudflare challenge (HTTP 403, markup, title and wording)' },
+      { kind: 'cloudflaretext', state: 'captcha', maxMs: 4500, why: 'a 403 whose only sign is "Verifying you are human"' },
+      { kind: 'zerocount', state: 'empty', maxMs: 4000, why: '共找到 0 条结果' },
+      { kind: 'smslogin', state: 'needs_login', maxMs: 4500, why: 'an SMS-code login with captcha-named inputs is a login, not a captcha' },
+      { kind: 'pwsms', state: 'needs_login', maxMs: 4500, why: 'a password form with SMS-code wording' },
+      { kind: 'slider', state: 'captcha', maxMs: 4500, why: 'a real iframe captcha beside a login link' },
+      { kind: '404', state: 'site_error', maxMs: 4500, why: 'a 404 that says 页面未找到 is not an empty result' },
+      { kind: '410', state: 'site_error', maxMs: 4500, why: 'HTTP 410' },
+      { kind: 'chromephrases', state: 'empty_unconfirmed', opts: { timeoutMs: 3500 }, why: 'phrases in a header link or a footer line decide nothing' },
+      { kind: 'divdrift', state: 'contract_drift', minMs: 3900, maxMs: 6000, why: 'a plain div list with a nav and a footer around it' },
+      { kind: 'emptyrecs', state: 'empty', maxMs: 4000, why: 'an explicit empty followed by a recommendations list' },
       { kind: 'login', state: 'needs_login', maxMs: 4500, why: 'a login wall' },
       { kind: 'loginredirect', state: 'needs_login', maxMs: 4500, why: 'a redirect to a sign-in page' },
       { kind: 'captcha', state: 'captcha', maxMs: 4500, why: 'a verification page' },
