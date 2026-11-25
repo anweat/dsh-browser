@@ -66,11 +66,15 @@ export interface OpencliSearchEnv {
 export declare function locateOpencli(search: OpencliSearchEnv): OpencliLocation | undefined;
 /** Find OpenCLI on this machine. A hit is remembered while its files exist; a miss is looked up again (the user may install it while DSH runs). */
 export declare function opencliLocation(): OpencliLocation | undefined;
-/** The OpenCLI range this plugin works with (`peerDependencies`): 2.x changed the JSON of `list` and of every result and is not adapted to yet. */
-export declare const OPENCLI_SUPPORTED_RANGE = ">=1.8.0 <2";
+/** The OpenCLI range this plugin works with (`peerDependencies`): 1.8.x and 2.x (see src/opencli-catalog.ts for the differences); 3.x and later are refused until they are checked. */
+export declare const OPENCLI_SUPPORTED_RANGE = ">=1.8.0 <3";
+/** First major this plugin has not been checked against. */
+export declare const OPENCLI_FIRST_UNSUPPORTED_MAJOR = 3;
 /** `version` of the OpenCLI package at `packageDir`, read from its package.json (no process is started). */
 export declare function opencliVersionOf(packageDir: string): string | undefined;
-/** True for a version whose major is 2 or more. A version that cannot be read is not judged. */
+/** Major number of a version string; undefined when it cannot be read. */
+export declare function opencliMajor(version: string | undefined): number | undefined;
+/** True for a version whose major is {@link OPENCLI_FIRST_UNSUPPORTED_MAJOR} or more. A version that cannot be read is not judged. */
 export declare function opencliVersionUnsupported(version: string | undefined): boolean;
 /** What to tell the user whose OpenCLI is too new. Names the version and the install that works. */
 export declare function opencliUnsupportedMessage(version: string): string;

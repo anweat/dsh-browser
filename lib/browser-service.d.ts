@@ -330,6 +330,11 @@ export declare class BrowserService {
     /** The managed policy overlay merged over the configured authProfiles and usagePolicy (see policy-overlay.ts). */
     private readonly policyStore;
     private opencliCatalogCache?;
+    private opencliCatalogLoading?;
+    /** Commands whose rows came without arguments (OpenCLI 2.x): their `--help -f json` fills them in on demand. */
+    private opencliNeedsHelp;
+    /** Per command: what `--help -f json` said (or null when it failed this time is not cached). */
+    private readonly opencliHelpCache;
     /** One transient operation at a time per `persistState` state file, from reading it to the end of its write-back (see src/auth-state.ts). */
     private readonly stateUse;
     /** The short read-merge-write of a state file, for transient and interactive write-backs alike. */
@@ -523,6 +528,10 @@ export declare class BrowserService {
         signal?: AbortSignal;
     }): Promise<CliResult>;
     opencliDoctor(signal?: AbortSignal): Promise<CliResult>;
+    /** Every adapter OpenCLI lists, once: 1.8 as one array, 2.x page by page (25 is the default page, 100 the most). A failing or malformed page is an error, never a short catalog. */
+    private loadOpencliCatalog;
+    /** Arguments, domain and example of one command from `<site> <name> --help -f json` (same fields in 1.8 and 2.x). A failure leaves the item as it is. */
+    private fillOpencliHelp;
     opencliCatalog(filter?: OpencliCatalogFilter, signal?: AbortSignal): Promise<OpencliCatalogItem[]>;
     crawl(startUrls: readonly string[], opts?: {
         maxPages?: number;
