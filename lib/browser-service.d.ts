@@ -29,6 +29,7 @@ import { type UserscriptValidation } from './scripts.ts';
 import { type AutomationMode } from './freedom.ts';
 import { type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts';
 import { UsageGovernor } from './usage-policy.ts';
+import { type PlatformSpec, type SearchItem, type SearchPageResult } from './search-signals.ts';
 import { type AuditEntry, type ChangeMeta, type Direction, type PolicyChange, type PolicyDiff } from './policy-overlay.ts';
 import { type BrowserTarget } from './locator.ts';
 import { SessionJournal } from './journal.ts';
@@ -53,18 +54,7 @@ export interface SnapshotResult {
     htmlPath: string;
     usedRule?: string;
 }
-/** Structural platform-search spec (matches web-search-pro's PlatformSearchSpec). */
-export interface PlatformSpec {
-    item: string;
-    title: string;
-    link: string;
-    text?: string;
-}
-export interface SearchItem {
-    url: string;
-    title: string;
-    snippet?: string;
-}
+export type { PlatformSpec, SearchItem, SearchPageState, SearchPageResult } from './search-signals.ts';
 export interface InteractiveState {
     url: string;
     title: string;
@@ -188,6 +178,10 @@ export interface BrowserStatus {
     headless: boolean;
     opencliEnabled: boolean;
     opencliInstalled: boolean;
+    /** Version read from the installed OpenCLI's package.json. */
+    opencliVersion?: string;
+    /** Set when the installed OpenCLI is a version this plugin does not support (2.x): every opencli.* action refuses it with this text. */
+    opencliUnsupported?: string;
     opencliEntryPath?: string;
     /** Where OpenCLI was found (`plugin`, `path`, `global-npm`, ...). Absent when it is not installed. */
     opencliSource?: OpencliSource;
@@ -231,10 +225,16 @@ export interface BrowserStatus {
     }[];
     usagePolicy: ResolvedConfig['usagePolicy'];
     usageGovernor: ReturnType<UsageGovernor['snapshot']>;
+    /** `writeBack` is the last write-back of a `persistState` profile in this process: what happened and why, never cookie names, values or paths. */
     authProfiles: {
         id: string;
         allowedDomains: string[];
         persistState: boolean;
+        writeBack?: {
+            outcome: 'written' | 'unchanged' | 'skipped' | 'failed';
+            reason?: string;
+            at: string;
+        };
     }[];
     rulePacks: string[];
     builtinScripts: string[];
@@ -243,23 +243,6 @@ export interface BrowserStatus {
     activeUrl?: string;
     activeAuthProfile?: string;
 }
-/**
- * The interactive page state owned by ONE session.
- *
- * A single `BrowserService` instance is provided to every consumer, so before
- * this existed two concurrent sessions shared one `activePage`: whichever
- * session called `target.open` last owned the page, and the other session's
- * `observe.read` / `script.evaluate` / `inspect.console` then operated on a
- * page it never opened — including the other session's cookies and DOM.
- *
- * State is therefore keyed by session. The browser PROCESS stays shared on
- * purpose: launching N Chromium processes costs hundreds of MB each, while one
- * process with N `BrowserContext`s is what Chromium itself does for N profiles
- * and is properly isolated (separate cookies, storage, cache, permissions).
- * "Different tabs" would not be enough — pages in the SAME context share
- * cookies and storage, so each session gets its own context, not just its own
- * page.
- */
 interface SessionState {
     context?: any;
     /** The ACTIVE page: the one every action targets. Always one of `pages` while set. */
@@ -347,6 +330,14 @@ export declare class BrowserService {
     /** The managed policy overlay merged over the configured authProfiles and usagePolicy (see policy-overlay.ts). */
     private readonly policyStore;
     private opencliCatalogCache?;
+    /** One transient operation at a time per `persistState` state file, from reading it to the end of its write-back (see src/auth-state.ts). */
+    private readonly stateUse;
+    /** The short read-merge-write of a state file, for transient and interactive write-backs alike. */
+    private readonly stateWrite;
+    /** What a `persistState` context was given and must write back; released when the context is closed. */
+    private readonly writeBacks;
+    /** The last write-back outcome per auth profile id (no cookie names, values or paths). */
+    private readonly lastWriteBack;
     /** Per-session exploration journals (see src/journal.ts). Released with the session, never written to disk. */
     private readonly journals;
     /** How many sessions may hold a context+page at once before LRU eviction. */
@@ -465,6 +456,13 @@ export declare class BrowserService {
      */
     private contextCreationOptions;
     private transientContext;
+    /**
+     * Write the login state of a closing `persistState` context back, then close it.
+     *
+     * The write is the context's DELTA (what it changed against what it was given) merged into the file as it is now,
+     * never the context's whole state over the file; see src/auth-state.ts for the rules and for when nothing is written.
+     * Failed persistence still throws, so it is never reported as success. The per-file lock is released here.
+     */
     private persistAndClose;
     render(url: string, rules: readonly RenderRule[], opts?: {
         signal?: AbortSignal;
@@ -481,6 +479,30 @@ export declare class BrowserService {
         rulePack?: string;
         screenshot?: boolean;
     }): Promise<SnapshotResult>;
+    /** A page in a transient session's context. If it cannot be opened the session is closed (and its login-state lock released) before the error goes on. */
+    private openPage;
+    /** Whether the page looks like a login or captcha wall; only read for `persistState` profiles (it feeds the write-back guard). Best effort. */
+    private loginSignal;
+    /**
+     * A platform search page with a state instead of a guess (the P0 contract with web-search-pro). Waiting is a race between
+     * signals, not a fixed sleep: the first decisive reading ends it. Cancellation and configuration errors (unknown
+     * profile, domain not allowed) throw; everything a site or the network does comes back as `state`.
+     */
+    searchPage(url: string, spec: PlatformSpec, opts?: {
+        signal?: AbortSignal;
+        count?: number;
+        waitMs?: number;
+        cookies?: {
+            name: string;
+            value: string;
+            domain: string;
+            path: string;
+        }[];
+        authProfile?: string;
+        rulePack?: string;
+        timeoutMs?: number; /** Navigation limit when it should be longer than `timeoutMs` (searchResults keeps its 30 s). */
+        navigationTimeoutMs?: number;
+    }): Promise<SearchPageResult>;
     searchResults(url: string, spec: PlatformSpec, opts?: {
         signal?: AbortSignal;
         count?: number;

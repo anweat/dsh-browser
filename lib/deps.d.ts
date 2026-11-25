@@ -66,6 +66,28 @@ export interface OpencliSearchEnv {
 export declare function locateOpencli(search: OpencliSearchEnv): OpencliLocation | undefined;
 /** Find OpenCLI on this machine. A hit is remembered while its files exist; a miss is looked up again (the user may install it while DSH runs). */
 export declare function opencliLocation(): OpencliLocation | undefined;
+/** The OpenCLI range this plugin works with (`peerDependencies`): 2.x changed the JSON of `list` and of every result and is not adapted to yet. */
+export declare const OPENCLI_SUPPORTED_RANGE = ">=1.8.0 <2";
+/** `version` of the OpenCLI package at `packageDir`, read from its package.json (no process is started). */
+export declare function opencliVersionOf(packageDir: string): string | undefined;
+/** True for a version whose major is 2 or more. A version that cannot be read is not judged. */
+export declare function opencliVersionUnsupported(version: string | undefined): boolean;
+/** What to tell the user whose OpenCLI is too new. Names the version and the install that works. */
+export declare function opencliUnsupportedMessage(version: string): string;
+export type OpencliSupport = {
+    state: 'missing';
+} | {
+    state: 'ok';
+    location: OpencliLocation;
+    version?: string;
+} | {
+    state: 'unsupported';
+    location: OpencliLocation;
+    version: string;
+    message: string;
+};
+/** Where OpenCLI is and whether its version is one this plugin supports, decided from its package.json next to the located entry. */
+export declare function opencliSupport(): OpencliSupport;
 /** What to tell the user when OpenCLI was not found: names a wrong `DSH_BROWSER_OPENCLI` first, since that one is theirs to fix. */
 export declare function opencliMissingMessage(): string;
 /** Entry JS of OpenCLI (its bin/main). Throws the install hint when OpenCLI is not installed. */
