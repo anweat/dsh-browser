@@ -149,7 +149,7 @@ export interface OpencliLocation {
  * `opencli.*` actions do. It is NOT a dependency of this package, because its install scripts make pnpm 11 fail
  * `dsh plugin add` (ERR_PNPM_IGNORED_BUILDS) on a profile that has not approved them.
  */
-export const OPENCLI_INSTALL_HINT = 'OpenCLI is not installed (it is optional: only the opencli.* actions need it). Install it with `npm i -g @jackwener/opencli` and restart DSH. '
+export const OPENCLI_INSTALL_HINT = 'OpenCLI is not installed (it is optional: only the opencli.* actions need it). Install it with `npm i -g @jackwener/opencli@1.8.8` and restart DSH. '
   + 'If DSH cannot see your PATH (desktop app), set DSH_BROWSER_OPENCLI to the path of its main.js.'
 
 /** Everything `locateOpencli` reads from the machine, so a test can describe a machine instead of owning one. */

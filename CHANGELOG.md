@@ -25,6 +25,8 @@ DSH Desktop 上的升级方式见 [README 的 Desktop 安装](README.md#安装)�
 
 **修复（OpenCLI 2.x）**：已装的是 OpenCLI 2.x 时，`opencli.status` / `opencli.catalog` / `opencli.run` 明确说“OpenCLI 2.x.y is installed, but dsh-browser supports OpenCLI >=1.8.0 <2 only”并给出 `npm i -g @jackwener/opencli@1.8.8`，不再是笼统的“must be an array”；`opencliAvailable()` 与它一致（读定位到的入口旁的 `package.json`，不启动进程）。`runtime.status` 新增 `opencliVersion` / `opencliUnsupported`。**没有适配 2.x**：它的结果信封和分页 `list` 仍不支持。
 
+- **安装提示固定版本**：所有提示和文档里的 `npm i -g @jackwener/opencli` 改为 `npm i -g @jackwener/opencli@1.8.8`（不带版本会装到还不支持的 2.x）。
+
 ## 0.2.3（2026-11-09）
 
 **摘要**：0.2.3 让插件能在 DSH 0.2.2-rc.1（cordis 4.1）上完整使用，并补上 0.2.1-rc.5 的支持：peer 范围加了 0.2.2 线，设置卡片的 RPC 通道在 cordis 4.1 宿主上能正常挂载（此前卡片能渲染，但所有数据请求返回 405）。另有此前未发布的文档整理。**谁应该升级**：所有在 DSH 0.2.2-rc.1 上的用户，包括 Desktop（已发布的 `0.2.2` 的 peer 范围不含 0.2.2-rc.1，会被拒绝安装）；0.2.0 / 0.2.1 线宿主上功能不变，可按需升级。感谢 [#48](https://github.com/anweat/dsh-browser/pull/48)（@snailium）和 [#49](https://github.com/anweat/dsh-browser/issues/49)（@shuaigekda）。**已知限制**：0.2.2 正式版靠 rc.1 的验证放行，没有在真实宿主上跑过；没有在 Electron Desktop 上实测，也没有和模型会话一起测过。

@@ -346,7 +346,7 @@ describe('the settings card in a real browser', { skip: detection.ok ? false : (
     assert.match(await none.page.locator('[data-dsb-runtime-warning]').innerText(), /install Google Chrome or Microsoft Edge[\s\S]*runtime\.install/)
     assert.deepEqual(none.errors, [])
 
-    const quiet = await openCard({ value: { opencliEnabled: true }, runtime: { ...RUNTIME_OK, browser: { ready: true, source: 'system-browser', note: 'Playwright Chromium is not installed, so Google Chrome is used (nothing to download).' }, chromiumInstalled: false, opencli: { enabled: true, installed: false, hint: 'OpenCLI is not installed (optional). Install it with `npm i -g @jackwener/opencli`.' } } })
+    const quiet = await openCard({ value: { opencliEnabled: true }, runtime: { ...RUNTIME_OK, browser: { ready: true, source: 'system-browser', note: 'Playwright Chromium is not installed, so Google Chrome is used (nothing to download).' }, chromiumInstalled: false, opencli: { enabled: true, installed: false, hint: 'OpenCLI is not installed (optional). Install it with `npm i -g @jackwener/opencli@1.8.8`.' } } })
     await quiet.page.locator('[data-dsb-summary]').getByText('OpenCLI not installed').waitFor()
     assert.equal(await quiet.page.locator('[data-dsb-warnings-count]').getAttribute('data-dsb-warnings-count'), '0')
     await quiet.page.locator('[data-dsb-summary]').getByText('Browser: system Chrome / Edge').waitFor()

@@ -176,9 +176,9 @@ test('rpc: convert makes a NEW v2 draft from a v1 asset, reports the steps still
 })
 
 test('rpc: runtime reports which browser would launch and whether OpenCLI is installed, without launching anything', async () => {
-  const status = { browser: { ready: true, source: 'system-browser', path: '/Applications/Google Chrome.app/x', note: 'n' }, systemBrowsers: [{ channel: 'chrome', name: 'Google Chrome', path: '/Applications/Google Chrome.app/x' }], chromiumInstalled: false, opencliEnabled: true, opencliInstalled: false, opencliInstallHint: 'npm i -g @jackwener/opencli' }
+  const status = { browser: { ready: true, source: 'system-browser', path: '/Applications/Google Chrome.app/x', note: 'n' }, systemBrowsers: [{ channel: 'chrome', name: 'Google Chrome', path: '/Applications/Google Chrome.app/x' }], chromiumInstalled: false, opencliEnabled: true, opencliInstalled: false, opencliInstallHint: 'npm i -g @jackwener/opencli@1.8.8' }
   const { call } = rpcFixture(() => ({}), undefined, status)
   const result = await call('runtime')
   assert.equal(result.ok, true)
-  assert.deepEqual(result.value, { browser: status.browser, systemBrowsers: status.systemBrowsers, chromiumInstalled: false, opencli: { enabled: true, installed: false, hint: 'npm i -g @jackwener/opencli' } })
+  assert.deepEqual(result.value, { browser: status.browser, systemBrowsers: status.systemBrowsers, chromiumInstalled: false, opencli: { enabled: true, installed: false, hint: 'npm i -g @jackwener/opencli@1.8.8' } })
 })

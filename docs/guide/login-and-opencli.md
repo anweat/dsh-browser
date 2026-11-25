@@ -46,18 +46,18 @@ web-search-pro 之类的调用方可用 `browser.searchPage(url, spec, opts)`，
 
 ## OpenCLI 的安装与查找
 
-要用站点 adapter（`opencli.*`）或 Web Search Pro 的 `browser-opencli` 后端时：`npm i -g @jackwener/opencli`，装完重启 DSH，再调用 `opencli.status`。插件按这个顺序找它：环境变量 `DSH_BROWSER_OPENCLI`（`main.js`、`opencli` 启动器或包目录）→ profile 里自己装的 → `PATH` 上的 `opencli` → `npm root -g` → 常见全局目录（Homebrew、`~/.npm-global`、nvm / fnm / Volta 的各个 Node 版本）。从程序坞启动的桌面版没有 shell 的 `PATH`，所以最后两步专门兜这种情况；找不到时设 `DSH_BROWSER_OPENCLI`。`DSH_BROWSER_OPENCLI` 一旦设置就只认它：路径写错时不会悄悄改用别处的 OpenCLI，而是在 `opencli.status` 里点名报错。
+要用站点 adapter（`opencli.*`）或 Web Search Pro 的 `browser-opencli` 后端时：`npm i -g @jackwener/opencli@1.8.8`，装完重启 DSH，再调用 `opencli.status`。插件按这个顺序找它：环境变量 `DSH_BROWSER_OPENCLI`（`main.js`、`opencli` 启动器或包目录）→ profile 里自己装的 → `PATH` 上的 `opencli` → `npm root -g` → 常见全局目录（Homebrew、`~/.npm-global`、nvm / fnm / Volta 的各个 Node 版本）。从程序坞启动的桌面版没有 shell 的 `PATH`，所以最后两步专门兜这种情况；找不到时设 `DSH_BROWSER_OPENCLI`。`DSH_BROWSER_OPENCLI` 一旦设置就只认它：路径写错时不会悄悄改用别处的 OpenCLI，而是在 `opencli.status` 里点名报错。
 
 **版本**：插件支持 OpenCLI `>=1.8.0 <2`。2.x 把结果默认包成 `{ok,data}` 信封、`list` 改成分页对象，目前**没有适配**。已装的是 2.x 时，`opencli.status`、`opencli.catalog`、`opencli.run` 会直接说明“OpenCLI 2.x.y is installed, but dsh-browser supports OpenCLI >=1.8.0 <2 only”并给出 `npm i -g @jackwener/opencli@1.8.8`，不再报笼统的“must be an array”。版本从定位到的入口旁的 `package.json` 读出，判断时不启动 OpenCLI 进程；`runtime.status` 里 `opencliVersion` 是版本，`opencliUnsupported` 是这句话，同时进 `runtimeWarnings`。
 
-想把 OpenCLI 装进 profile 里（而不是全局）：先在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: { '@jackwener/opencli': false }`（它的安装脚本只做 shell 补全和清理测试文件，不运行也不影响功能），再 `dsh plugin --profile <name> add @jackwener/opencli`。
+想把 OpenCLI 装进 profile 里（而不是全局）：先在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: { '@jackwener/opencli': false }`（它的安装脚本只做 shell 补全和清理测试文件，不运行也不影响功能），再 `dsh plugin --profile <name> add @jackwener/opencli@1.8.8`。
 
 ## OpenCLI 连接检查
 
 OpenCLI 是可选组件，不随插件安装（见上一节）。先全局安装它，再用同一个 CLI 在终端排查 Browser Bridge：
 
 ```bash
-npm i -g @jackwener/opencli
+npm i -g @jackwener/opencli@1.8.8
 opencli daemon status
 opencli doctor
 ```
