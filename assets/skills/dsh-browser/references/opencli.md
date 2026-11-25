@@ -17,6 +17,14 @@ OpenCLI ships adapters for many platforms (for example Reddit, Xiaohongshu) that
 {"action":"opencli.run","args":{"args":["reddit","search","dsh","-f","json"]}}
 ```
 
+## Versions
+
+`runtime.status` shows `opencliVersion`. The plugin supports OpenCLI 1.8.x and 2.x; results are the same shape for you except:
+
+- `opencli.catalog` on 2.x has no strategy, and a result of up to 10 commands carries its arguments (from the command's own help). Commands are written `site name` on 2.x and `site/name` on 1.8; pass them to `opencli.run` as separate words (`["reddit","search",...]`).
+- A failed 2.x command returns `error: {code, message, hint}` next to `output`; 1.8 returns its text.
+- `opencli browser` names its session by version. 1.8: positional (`["browser","research","open",URL]`). 2.x: `--session` (`["browser","--session","research","open",URL]`). Pick by `opencliVersion`; arguments are never rewritten for you.
+
 ## Notes
 
 - `access` in the catalog is the adapter's own declaration, not a guarantee. Treat `write` commands (post, delete) as irreversible and expect an approval prompt.

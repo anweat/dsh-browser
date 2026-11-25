@@ -46,9 +46,17 @@ web-search-pro 之类的调用方可用 `browser.searchPage(url, spec, opts)`，
 
 ## OpenCLI 的安装与查找
 
-要用站点 adapter（`opencli.*`）或 Web Search Pro 的 `browser-opencli` 后端时：`npm i -g @jackwener/opencli@1.8.8`，装完重启 DSH，再调用 `opencli.status`。插件按这个顺序找它：环境变量 `DSH_BROWSER_OPENCLI`（`main.js`、`opencli` 启动器或包目录）→ profile 里自己装的 → `PATH` 上的 `opencli` → `npm root -g` → 常见全局目录（Homebrew、`~/.npm-global`、nvm / fnm / Volta 的各个 Node 版本）。从程序坞启动的桌面版没有 shell 的 `PATH`，所以最后两步专门兜这种情况；找不到时设 `DSH_BROWSER_OPENCLI`。`DSH_BROWSER_OPENCLI` 一旦设置就只认它：路径写错时不会悄悄改用别处的 OpenCLI，而是在 `opencli.status` 里点名报错。
+要用站点 adapter（`opencli.*`）或 Web Search Pro 的 `browser-opencli` 后端时：`npm i -g @jackwener/opencli@2`，装完重启 DSH，再调用 `opencli.status`。插件按这个顺序找它：环境变量 `DSH_BROWSER_OPENCLI`（`main.js`、`opencli` 启动器或包目录）→ profile 里自己装的 → `PATH` 上的 `opencli` → `npm root -g` → 常见全局目录（Homebrew、`~/.npm-global`、nvm / fnm / Volta 的各个 Node 版本）。从程序坞启动的桌面版没有 shell 的 `PATH`，所以最后两步专门兜这种情况；找不到时设 `DSH_BROWSER_OPENCLI`。`DSH_BROWSER_OPENCLI` 一旦设置就只认它：路径写错时不会悄悄改用别处的 OpenCLI，而是在 `opencli.status` 里点名报错。
 
-**版本**：插件支持 OpenCLI `>=1.8.0 <2`。2.x 把结果默认包成 `{ok,data}` 信封、`list` 改成分页对象，目前**没有适配**。已装的是 2.x 时，`opencli.status`、`opencli.catalog`、`opencli.run` 会直接说明“OpenCLI 2.x.y is installed, but dsh-browser supports OpenCLI >=1.8.0 <2 only”并给出 `npm i -g @jackwener/opencli@1.8.8`，不再报笼统的“must be an array”。版本从定位到的入口旁的 `package.json` 读出，判断时不启动 OpenCLI 进程；`runtime.status` 里 `opencliVersion` 是版本，`opencliUnsupported` 是这句话，同时进 `runtimeWarnings`。
+**版本**：插件支持 OpenCLI `>=1.8.0 <3`（optional peer 同此范围），1.8.x 和 2.x 都可用；3.x 及以后在核实之前仍然拒绝：`opencli.status`、`opencli.catalog`、`opencli.run` 会说明“OpenCLI 3.x.y is installed, but dsh-browser supports OpenCLI >=1.8.0 <3 only”并给出 `npm i -g @jackwener/opencli@2`。版本从定位到的入口旁的 `package.json` 读出，判断时不启动 OpenCLI 进程；`runtime.status` 里 `opencliVersion` 是版本，`opencliUnsupported` 是拒绝的那句话（同时进 `runtimeWarnings`）。
+
+两代的差别，插件已经处理：
+
+- **目录**：1.8 的 `list -f json` 是一个数组，每项带 strategy 和参数；2.x 是分页信封 `{ok,data:{commands,total,nextOffset}}`，每项只有 `command`（`zhihu search`，空格分隔）、description、access。`opencli.catalog` 第一次调用时一页 100 条读完 2.x 的全部页并缓存；某一页失败、格式不对、翻页不前进或条数少于 `total` 都是错误，不会给出一个残缺的目录。2.x 的条目没有 strategy 和参数，所以**过滤后不超过 10 条时**，插件用 `<site> <name> --help -f json` 补上参数、`domain` 和 `example`（两版字段相同；同时最多 3 个；按命令缓存；某一条失败只是那一条没有参数）。
+- **失败**：2.x 把失败打成 stdout 上的一行 JSON、退出码非零；`opencli.run` / `opencli.status` 除了原样的 `output`，还给 `error: {code, message, hint}`。成功信封（`{ok:true,data}`）原样透传，1.8 的文本失败（stderr）也不变。
+- **`opencli browser` 的会话**：1.8 用位置参数（`["browser","research","open",URL]`），2.x 用 `--session`（`["browser","--session","research","open",URL]`）。模型按 `runtime.status` 的 `opencliVersion` 选写法，**插件不改写参数**。
+
+**升级顺序**：先升级插件，再升级 OpenCLI（`npm i -g @jackwener/opencli@2`），重启 DSH。浏览器扩展 1.0.27 两个版本都能用，不用换。**不要混用两份 OpenCLI**：1.8.8 的 CLI 要求 daemon 版本与自己完全相同，否则把它停掉，所以终端里的 1.8 和 DSH 用的 2.x 会互相杀对方的 daemon；桌面版 DSH 和终端必须用同一份（`DSH_BROWSER_OPENCLI` 可以指定）。
 
 想把 OpenCLI 装进 profile 里（而不是全局）：先在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: { '@jackwener/opencli': false }`（它的安装脚本只做 shell 补全和清理测试文件，不运行也不影响功能），再 `dsh plugin --profile <name> add @jackwener/opencli@1.8.8`。
 
@@ -57,7 +65,7 @@ web-search-pro 之类的调用方可用 `browser.searchPage(url, spec, opts)`，
 OpenCLI 是可选组件，不随插件安装（见上一节）。先全局安装它，再用同一个 CLI 在终端排查 Browser Bridge：
 
 ```bash
-npm i -g @jackwener/opencli@1.8.8
+npm i -g @jackwener/opencli@2
 opencli daemon status
 opencli doctor
 ```
@@ -85,14 +93,22 @@ opencli doctor
 `opencli.catalog` 从 `opencli list -f json` 读取并缓存目录，只暴露过滤后的最多 100 条；它不执行站点命令，也不读取站点登录数据。
 
 优先级建议：已有站点 adapter（`opencli <site> <command>`）→ `opencli web read` / `extract` →
-`browser network` → DOM state/find/action → 最后才是只读 `eval`。`opencli browser` 必须包含显式 session：
+`browser network` → DOM state/find/action → 最后才是只读 `eval`。`opencli browser` 必须包含显式 session，写法按版本（看 `runtime.status` 的 `opencliVersion`）：1.8 是位置参数，2.x 是 `--session`。
 
 ```text
+1.8.x
 ["browser", "research", "open", "https://example.com"]
 ["browser", "research", "state"]
 ["browser", "research", "network", "--filter", "title,url"]
 ["browser", "research", "extract", "--selector", "main"]
 ["browser", "research", "close"]
+
+2.x
+["browser", "--session", "research", "open", "https://example.com"]
+["browser", "--session", "research", "state"]
+["browser", "--session", "research", "network", "--filter", "title,url"]
+["browser", "--session", "research", "extract", "--selector", "main"]
+["browser", "--session", "research", "close"]
 ```
 
 `opencli.run` 是通用高级入口，可能调用发布、删除、发帖等 adapter，因此无论命令看起来是否只读，

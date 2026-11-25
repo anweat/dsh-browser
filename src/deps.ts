@@ -149,7 +149,7 @@ export interface OpencliLocation {
  * `opencli.*` actions do. It is NOT a dependency of this package, because its install scripts make pnpm 11 fail
  * `dsh plugin add` (ERR_PNPM_IGNORED_BUILDS) on a profile that has not approved them.
  */
-export const OPENCLI_INSTALL_HINT = 'OpenCLI is not installed (it is optional: only the opencli.* actions need it). Install it with `npm i -g @jackwener/opencli@1.8.8` and restart DSH. '
+export const OPENCLI_INSTALL_HINT = 'OpenCLI is not installed (it is optional: only the opencli.* actions need it). Install it with `npm i -g @jackwener/opencli@2` and restart DSH. '
   + 'If DSH cannot see your PATH (desktop app), set DSH_BROWSER_OPENCLI to the path of its main.js.'
 
 /** Everything `locateOpencli` reads from the machine, so a test can describe a machine instead of owning one. */
@@ -322,8 +322,10 @@ export function opencliLocation(): OpencliLocation | undefined {
   return location
 }
 
-/** The OpenCLI range this plugin works with (`peerDependencies`): 2.x changed the JSON of `list` and of every result and is not adapted to yet. */
-export const OPENCLI_SUPPORTED_RANGE = '>=1.8.0 <2'
+/** The OpenCLI range this plugin works with (`peerDependencies`): 1.8.x and 2.x (see src/opencli-catalog.ts for the differences); 3.x and later are refused until they are checked. */
+export const OPENCLI_SUPPORTED_RANGE = '>=1.8.0 <3'
+/** First major this plugin has not been checked against. */
+export const OPENCLI_FIRST_UNSUPPORTED_MAJOR = 3
 
 /** `version` of the OpenCLI package at `packageDir`, read from its package.json (no process is started). */
 export function opencliVersionOf(packageDir: string): string | undefined {
@@ -333,16 +335,22 @@ export function opencliVersionOf(packageDir: string): string | undefined {
   } catch { return undefined }
 }
 
-/** True for a version whose major is 2 or more. A version that cannot be read is not judged. */
-export function opencliVersionUnsupported(version: string | undefined): boolean {
+/** Major number of a version string; undefined when it cannot be read. */
+export function opencliMajor(version: string | undefined): number | undefined {
   const major = /^v?(\d+)\./.exec(version ?? '')?.[1]
-  return major !== undefined && Number(major) >= 2
+  return major === undefined ? undefined : Number(major)
+}
+
+/** True for a version whose major is {@link OPENCLI_FIRST_UNSUPPORTED_MAJOR} or more. A version that cannot be read is not judged. */
+export function opencliVersionUnsupported(version: string | undefined): boolean {
+  const major = opencliMajor(version)
+  return major !== undefined && major >= OPENCLI_FIRST_UNSUPPORTED_MAJOR
 }
 
 /** What to tell the user whose OpenCLI is too new. Names the version and the install that works. */
 export function opencliUnsupportedMessage(version: string): string {
-  return `OpenCLI ${version} is installed, but dsh-browser supports OpenCLI ${OPENCLI_SUPPORTED_RANGE} only (2.x changed the JSON of its results and of \`list\`; it is not supported yet). `
-    + 'Install the supported version with `npm i -g @jackwener/opencli@1.8.8` and restart DSH. No OpenCLI command was run.'
+  return `OpenCLI ${version} is installed, but dsh-browser supports OpenCLI ${OPENCLI_SUPPORTED_RANGE} only (it has not been checked against this version yet). `
+    + 'Install a supported version with `npm i -g @jackwener/opencli@2` and restart DSH. No OpenCLI command was run.'
 }
 
 export type OpencliSupport =

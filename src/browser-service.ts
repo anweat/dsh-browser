@@ -22,7 +22,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { browserRuntimeCliPath, loadBrowserRuntime, opencliLocation, opencliMissingMessage, opencliSupport, runOpencli, runNode, type CliResult, type OpencliSource } from './deps.ts'
+import { browserRuntimeCliPath, loadBrowserRuntime, opencliLocation, opencliMajor, opencliMissingMessage, opencliSupport, runOpencli, runNode, type CliResult, type OpencliSource } from './deps.ts'
 import { browserInstallAdvice, detectSystemBrowsers, planBrowser, type BrowserPlan, type SystemBrowser } from './system-browser.ts'
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-profiles.ts'
@@ -31,7 +31,7 @@ import { runRecipe, type AnyRecipeStep, type BrowserRecipeStep, type RecipeRunRe
 import type { OutputSpec, Postcondition } from './automation-v2.ts'
 import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, type UserscriptValidation } from './scripts.ts'
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
-import { filterOpencliCatalog, parseOpencliCatalog, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
+import { describeOpencliError, filterOpencliCatalog, parseOpencliCatalog, parseOpencliCatalogPage, parseOpencliFailure, parseOpencliHelp, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
 import { KeyedMutex, captureStorageState, computeDelta, mergeIntoFile, scopeState, stateFileKey, writeBackSkipReason, type StorageState, type WriteBackHint, type WriteBackOutcome } from './auth-state.ts'
 import { DEFAULT_SEARCH_TIMEOUT_MS, MAX_RESULTS, NO_WRITE_BACK_STATES, POLL_MS, SearchJudge, navigationFailure, normalizeSample, signalsExpression, stripUrl, type PlatformSpec, type SearchItem, type SearchPageResult, type Verdict } from './search-signals.ts'
@@ -497,6 +497,11 @@ export class BrowserService {
   /** The managed policy overlay merged over the configured authProfiles and usagePolicy (see policy-overlay.ts). */
   private readonly policyStore: PolicyOverlayStore
   private opencliCatalogCache?: OpencliCatalogItem[]
+  private opencliCatalogLoading?: Promise<OpencliCatalogItem[]>
+  /** Commands whose rows came without arguments (OpenCLI 2.x): their `--help -f json` fills them in on demand. */
+  private opencliNeedsHelp = new Set<string>()
+  /** Per command: what `--help -f json` said (or null when it failed this time is not cached). */
+  private readonly opencliHelpCache = new Map<string, { args: unknown[]; domain?: string; example?: string }>()
   /** One transient operation at a time per `persistState` state file, from reading it to the end of its write-back (see src/auth-state.ts). */
   private readonly stateUse = new KeyedMutex()
   /** The short read-merge-write of a state file, for transient and interactive write-backs alike. */
@@ -1209,16 +1214,70 @@ export class BrowserService {
     return this.opencli(['doctor'], { timeoutMs: 30_000, signal })
   }
 
+  /** Every adapter OpenCLI lists, once: 1.8 as one array, 2.x page by page (25 is the default page, 100 the most). A failing or malformed page is an error, never a short catalog. */
+  private async loadOpencliCatalog(version: string | undefined, signal?: AbortSignal): Promise<OpencliCatalogItem[]> {
+    if ((opencliMajor(version) ?? 1) < 2) {
+      const result = await this.opencli(['list', '-f', 'json'], { timeoutMs: 60_000, signal })
+      if (result.code !== 0 || result.timedOut) throw new Error('OpenCLI catalog failed: ' + (result.stderr || result.stdout).slice(0, 500))
+      this.opencliNeedsHelp = new Set()
+      return parseOpencliCatalog(result.stdout)
+    }
+    const PAGE = 100
+    const MAX_PAGES = 60
+    const items: OpencliCatalogItem[] = []
+    let offset = 0
+    let total: number | undefined
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const result = await this.opencli(['list', '-f', 'json', '--limit', String(PAGE), '--offset', String(offset)], { timeoutMs: 60_000, signal })
+      if (result.timedOut) throw new Error(`OpenCLI catalog failed: page at offset ${offset} timed out`)
+      if (result.code !== 0) {
+        const failure = parseOpencliFailure(result.stdout)
+        throw new Error('OpenCLI catalog failed: ' + (failure ? describeOpencliError(failure) : (result.stderr || result.stdout).slice(0, 500)))
+      }
+      const parsed = parseOpencliCatalogPage(result.stdout)
+      items.push(...parsed.items)
+      total = parsed.total ?? total
+      if (parsed.nextOffset === undefined) {
+        if (total !== undefined && items.length < total) throw new Error(`OpenCLI catalog ended early: ${items.length} of ${total} commands`)
+        this.opencliNeedsHelp = new Set(items.map(item => item.command))
+        return items.slice(0, 10_000)
+      }
+      if (parsed.nextOffset <= offset || parsed.items.length === 0) throw new Error(`OpenCLI catalog paging did not advance at offset ${offset}`)
+      offset = parsed.nextOffset
+    }
+    throw new Error(`OpenCLI catalog has more than ${MAX_PAGES * PAGE} commands; stopped`)
+  }
+
+  /** Arguments, domain and example of one command from `<site> <name> --help -f json` (same fields in 1.8 and 2.x). A failure leaves the item as it is. */
+  private async fillOpencliHelp(item: OpencliCatalogItem, signal?: AbortSignal): Promise<OpencliCatalogItem> {
+    let help = this.opencliHelpCache.get(item.command)
+    if (!help) {
+      try {
+        const words = [item.site, ...item.name.split(/\s+/)].filter(Boolean)
+        const result = await this.opencli([...words, '--help', '-f', 'json'], { timeoutMs: 20_000, signal })
+        const parsed = result.code === 0 && !result.timedOut ? parseOpencliHelp(result.stdout) : undefined
+        if (parsed) { help = parsed; this.opencliHelpCache.set(item.command, parsed) }
+      } catch { /* this item stays without arguments */ }
+    }
+    return help ? { ...item, args: help.args, ...help.domain ? { domain: help.domain } : {}, ...help.example ? { example: help.example } : {} } : item
+  }
+
   async opencliCatalog(filter: OpencliCatalogFilter = {}, signal?: AbortSignal): Promise<OpencliCatalogItem[]> {
     if (!this.config.opencliEnabled) throw new Error('dsh-browser: OpenCLI is disabled')
     const support = opencliSupport()
     if (support.state === 'unsupported') throw new Error('dsh-browser: ' + support.message)
     if (!this.opencliCatalogCache) {
-      const result = await this.opencli(['list', '-f', 'json'], { timeoutMs: 60_000, signal })
-      if (result.code !== 0 || result.timedOut) throw new Error('OpenCLI catalog failed: ' + (result.stderr || result.stdout).slice(0, 500))
-      this.opencliCatalogCache = parseOpencliCatalog(result.stdout)
+      const loading = this.opencliCatalogLoading ?? (this.opencliCatalogLoading = this.loadOpencliCatalog(support.state === 'ok' ? support.version : undefined, signal).finally(() => { this.opencliCatalogLoading = undefined }))
+      this.opencliCatalogCache = await loading
     }
-    return filterOpencliCatalog(this.opencliCatalogCache, filter)
+    const found = filterOpencliCatalog(this.opencliCatalogCache, filter)
+    // 2.x rows carry no arguments and the model needs them: for a short answer they come from the command's own help, three at a time.
+    if (found.length === 0 || found.length > 10 || !found.some(item => this.opencliNeedsHelp.has(item.command))) return found
+    const filled: OpencliCatalogItem[] = []
+    for (let start = 0; start < found.length; start += 3) {
+      filled.push(...await Promise.all(found.slice(start, start + 3).map(item => this.opencliNeedsHelp.has(item.command) ? this.fillOpencliHelp(item, signal) : item)))
+    }
+    return filled
   }
 
   async crawl(startUrls: readonly string[], opts: { maxPages?: number; maxDepth?: number; sameOrigin?: boolean; maxCharsPerPage?: number; signal?: AbortSignal } = {}): Promise<CrawlResult> {

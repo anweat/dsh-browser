@@ -1,0 +1,29 @@
+{
+ "ok": true,
+ "data": {
+  "commands": [
+   {
+    "command": "12306 login",
+    "description": "Open 12306 login and wait until the browser session is authenticated",
+    "access": "write"
+   },
+   {
+    "command": "12306 me",
+    "description": "Show the logged-in 12306 account summary. Sensitive fields (real name, email, mobile, birth date) are masked by default; pass --include-sensitive to opt in.",
+    "access": "read"
+   },
+   {
+    "command": "12306 orders",
+    "description": "List in-progress 12306 orders (not yet ridden, refunded, or completed) for the logged-in user",
+    "access": "read"
+   },
+   {
+    "command": "12306 passengers",
+    "description": "List the logged-in user's saved 12306 passengers. Sensitive fields are masked by default; pass --include-sensitive to opt in.",
+    "access": "read"
+   }
+  ],
+  "total": 1291,
+  "nextOffset": 100
+ }
+}

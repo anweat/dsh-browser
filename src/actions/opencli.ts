@@ -1,6 +1,13 @@
 /** `opencli` group: OpenCLI adapters (OpenCLI is optional and installed separately). @module dsh-browser/actions/opencli */
 
 import type { ActionDef } from './types.ts'
+import { parseOpencliFailure } from '../opencli-catalog.ts'
+
+/** What an opencli run returns: the output as before, plus OpenCLI 2.x's own failure (one JSON line on stdout, nonzero exit) as `error`. */
+function runOutput(result: { code: number; timedOut: boolean; stdout?: string; stderr?: string }, max: number) {
+  const failure = result.code !== 0 ? parseOpencliFailure(result.stdout ?? '') : undefined
+  return { code: result.code, timedOut: result.timedOut, output: (result.stdout || result.stderr || '').slice(0, max), ...failure ? { error: failure } : {} }
+}
 
 export const OPENCLI_ACTIONS: ActionDef[] = [
   {
@@ -12,14 +19,14 @@ export const OPENCLI_ACTIONS: ActionDef[] = [
     examples: [{ args: {} }],
     async execute(_args, ctx) {
       const result = await ctx.service.opencliDoctor(ctx.signal)
-      return { code: result.code, timedOut: result.timedOut, output: (result.stdout || result.stderr).slice(0, 20_000) }
+      return runOutput(result, 20_000)
     },
   },
   {
     name: 'opencli.catalog',
     group: 'opencli',
     summary: 'Discover OpenCLI adapters through a filtered, capped catalog (command, access class, strategy, args).',
-    notes: 'Use before opencli.run to find exact command names.',
+    notes: 'Use before opencli.run to find exact command names. Up to 10 matches come with their arguments; narrow with site or query to get them.',
     params: {
       query: { type: 'string' }, site: { type: 'string' },
       access: { type: 'string', enum: ['read', 'write'] },
@@ -36,7 +43,7 @@ export const OPENCLI_ACTIONS: ActionDef[] = [
     name: 'opencli.run',
     group: 'opencli',
     summary: 'Run any OpenCLI adapter or browser-session command with verbatim argv.',
-    notes: 'Commands may reuse logged-in Chrome state or perform writes, so approval is skipped only in unrestricted mode. Prefer existing read-only actions when available.',
+    notes: 'Commands may reuse logged-in Chrome state or perform writes, so approval is skipped only in unrestricted mode. Prefer existing read-only actions when available. `opencli browser` names its session by version: positional on 1.8 (`browser research open URL`), `--session research` on 2.x; read opencliVersion in runtime.status (references/opencli.md).',
     params: {
       args: { type: 'array', required: true, items: { type: 'string' }, description: 'Arguments after opencli, e.g. ["reddit","search","dsh","-f","json"].' },
       profile: { type: 'string', description: 'Optional OpenCLI profile alias, passed as --profile.' },
@@ -47,7 +54,7 @@ export const OPENCLI_ACTIONS: ActionDef[] = [
     async execute(args, ctx) {
       const argv = [...args.profile ? ['--profile', args.profile] : [], ...args.args]
       const result = await ctx.service.opencli(argv, { timeoutMs: Math.min(Math.max(args.timeoutMs ?? 60_000, 1_000), 120_000), signal: ctx.signal })
-      return { code: result.code, timedOut: result.timedOut, output: (result.stdout || result.stderr).slice(0, 100_000) }
+      return runOutput(result, 100_000)
     },
   },
 ]

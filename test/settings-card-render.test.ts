@@ -272,7 +272,7 @@ test('the status summary says when no browser can launch (a warning), when a sys
   assert.match(system, /data-dsb-warnings-count="0"/)
   assert.match(system, />Browser: system Chrome \/ Edge</)
 
-  const noOpencli = renderCard!({ fieldTexts: { opencliEnabled: 'true' }, runtime: { ...found, opencli: { enabled: true, installed: false, hint: 'OpenCLI is not installed (it is optional). Install it with `npm i -g @jackwener/opencli@1.8.8`' } } }).html
+  const noOpencli = renderCard!({ fieldTexts: { opencliEnabled: 'true' }, runtime: { ...found, opencli: { enabled: true, installed: false, hint: 'OpenCLI is not installed (it is optional). Install it with `npm i -g @jackwener/opencli@2`' } } }).html
   assert.match(noOpencli, /data-dsb-warnings-count="0"/)
   assert.match(noOpencli, />OpenCLI not installed</)
   // Switched off in the settings: the badge says off, not "not installed".
