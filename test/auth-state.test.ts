@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  KeyedMutex, StateLockError, applyDelta, captureStorageState, computeDelta, cookieKey, deletesAllCookies, mergeIntoFile, scopeState, stateFileKey, writeBackSkipReason,
+  KeyedMutex, StateLockError, applyDelta, captureStorageState, computeDelta, cookieKey, deletesAllCookies, mergeIntoFile, scopeState, StateWriteError, stateFileKey, writeBackSkipReason,
   type StorageCookie, type StorageState,
 } from '../src/auth-state.ts'
 
@@ -95,62 +95,64 @@ test('skip rules: interactive writes anything; transient refuses a bad answer, a
   assert.match(writeBackSkipReason(true, {}, all)!, /all its cookies/)
 })
 
-test('mergeIntoFile: writes the merge, keeps one .bak generation, writes nothing when nothing changed, 0600 files in a 0700 directory', () => {
+test('mergeIntoFile: writes the merge, keeps one .bak generation, writes nothing when nothing changed, 0600 files in a 0700 directory', async () => {
   const dir = path.join(tmp(), 'auth')
   const file = path.join(dir, 'state.json')
   const baseline: StorageState = { cookies: [], origins: [] }
   const first = computeDelta(baseline, { cookies: [cookie('s', 'a.example.com', 'one')], origins: [] }, A)
-  assert.equal(mergeIntoFile(file, first), 'written')
+  assert.equal(await mergeIntoFile(file, first), 'written')
   assert.equal(fs.existsSync(file + '.bak'), false, 'there was no previous file to keep')
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600)
-  assert.equal(fs.statSync(dir).mode & 0o777, 0o700)
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+    assert.equal(fs.statSync(dir).mode & 0o777, 0o700)
+  }
   const mtime = fs.statSync(file).mtimeMs
-  assert.equal(mergeIntoFile(file, first), 'unchanged')
+  assert.equal(await mergeIntoFile(file, first), 'unchanged')
   assert.equal(fs.statSync(file).mtimeMs, mtime)
   const second = computeDelta({ cookies: [cookie('s', 'a.example.com', 'one')], origins: [] }, { cookies: [cookie('s', 'a.example.com', 'two')], origins: [] }, A)
-  assert.equal(mergeIntoFile(file, second), 'written')
+  assert.equal(await mergeIntoFile(file, second), 'written')
   assert.equal(JSON.parse(fs.readFileSync(file + '.bak', 'utf8')).cookies[0].value, 'one')
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).cookies[0].value, 'two')
-  assert.equal(fs.statSync(file + '.bak').mode & 0o777, 0o600)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file + '.bak').mode & 0o777, 0o600)
   const third = computeDelta({ cookies: [cookie('s', 'a.example.com', 'two')], origins: [] }, { cookies: [cookie('s', 'a.example.com', 'three')], origins: [] }, A)
-  mergeIntoFile(file, third)
+  await mergeIntoFile(file, third)
   assert.equal(JSON.parse(fs.readFileSync(file + '.bak', 'utf8')).cookies[0].value, 'two', 'one generation only')
   assert.deepEqual(fs.readdirSync(dir).sort(), ['state.json', 'state.json.bak'], 'no temporary files are left')
 })
 
-test('mergeIntoFile bootstraps a missing file (even empty), and a file without arrays is not rewritten for nothing', () => {
+test('mergeIntoFile bootstraps a missing file (even empty), and a file without arrays is not rewritten for nothing', async () => {
   const dir = tmp()
   const file = path.join(dir, 'new.json')
-  assert.equal(mergeIntoFile(file, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), 'written')
+  assert.equal(await mergeIntoFile(file, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), 'written')
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { cookies: [], origins: [] })
   assert.equal(fs.existsSync(file + '.bak'), false)
   const bare = path.join(dir, 'bare.json')
   fs.writeFileSync(bare, '{"cookies":[]}')
-  assert.equal(mergeIntoFile(bare, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), 'unchanged')
+  assert.equal(await mergeIntoFile(bare, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), 'unchanged')
   assert.equal(fs.readFileSync(bare, 'utf8'), '{"cookies":[]}')
 })
 
-test('a corrupt or foreign current file is never overwritten', () => {
+test('a corrupt or foreign current file is never overwritten', async () => {
   const dir = tmp()
   const file = path.join(dir, 'state.json')
   const delta = computeDelta({ cookies: [], origins: [] }, { cookies: [cookie('s', 'a.example.com')], origins: [] }, A)
   fs.writeFileSync(file, '{"cookies": [')
-  assert.throws(() => mergeIntoFile(file, delta), /left untouched/)
+  await assert.rejects(mergeIntoFile(file, delta), /left untouched/)
   assert.equal(fs.readFileSync(file, 'utf8'), '{"cookies": [')
   fs.writeFileSync(file, '[1,2]')
-  assert.throws(() => mergeIntoFile(file, delta), /left untouched/)
+  await assert.rejects(mergeIntoFile(file, delta), /left untouched/)
   assert.equal(fs.readFileSync(file, 'utf8'), '[1,2]')
   assert.equal(fs.existsSync(file + '.bak'), false)
 })
 
-test('two profiles sharing one file, and two sites in one file, do not lose each other (merge into the CURRENT content)', () => {
+test('two profiles sharing one file, and two sites in one file, do not lose each other (merge into the CURRENT content)', async () => {
   const dir = tmp()
   const file = path.join(dir, 'shared.json')
   fs.writeFileSync(file, JSON.stringify({ cookies: [cookie('sa', 'a.example.com', '1'), cookie('sb', 'b.example.com', '1')], origins: [{ origin: 'https://b.example.com', localStorage: [{ name: 'k', value: 'b' }] }] }))
   const baselineA = scopeState(JSON.parse(fs.readFileSync(file, 'utf8')), ['a.example.com'])
   const baselineB = scopeState(JSON.parse(fs.readFileSync(file, 'utf8')), ['b.example.com'])
-  assert.equal(mergeIntoFile(file, computeDelta(baselineA, { cookies: [cookie('sa', 'a.example.com', '2')], origins: [] }, ['a.example.com'])), 'written')
-  assert.equal(mergeIntoFile(file, computeDelta(baselineB, { cookies: [cookie('sb', 'b.example.com', '2')], origins: [{ origin: 'https://b.example.com', localStorage: [{ name: 'k', value: 'b2' }] }] }, ['b.example.com'])), 'written')
+  assert.equal(await mergeIntoFile(file, computeDelta(baselineA, { cookies: [cookie('sa', 'a.example.com', '2')], origins: [] }, ['a.example.com'])), 'written')
+  assert.equal(await mergeIntoFile(file, computeDelta(baselineB, { cookies: [cookie('sb', 'b.example.com', '2')], origins: [{ origin: 'https://b.example.com', localStorage: [{ name: 'k', value: 'b2' }] }] }, ['b.example.com'])), 'written')
   const state = JSON.parse(fs.readFileSync(file, 'utf8')) as StorageState
   assert.deepEqual(state.cookies!.map(entry => entry.name + '=' + entry.value).sort(), ['sa=2', 'sb=2'])
   assert.equal(state.origins![0]!.localStorage![0]!.value, 'b2')
@@ -209,5 +211,103 @@ test('the state file key is the real path: a symlink and a relative spelling sha
   fs.symlinkSync(file, link)
   assert.equal(stateFileKey(link), stateFileKey(file))
   assert.equal(stateFileKey(path.join(dir, 'sub', '..', 'state.json')), stateFileKey(file))
-  assert.equal(stateFileKey(path.join(dir, 'later.json')), path.join(dir, 'later.json'))
+  const later = path.join(fs.realpathSync.native(dir), 'later.json')
+  assert.equal(stateFileKey(path.join(dir, 'later.json')), process.platform === 'win32' ? later.toLowerCase() : later)
+  fs.writeFileSync(later, '{}')
+  const before = stateFileKey(path.join(dir, 'later.json'))
+  assert.equal(before, process.platform === 'win32' ? later.toLowerCase() : later, 'the key does not change when the file appears')
+})
+
+// ── write retries and lock keys ─────────────────────────────────────────────
+
+const seed = (dir: string): { file: string; delta: (name: string, value: string) => ReturnType<typeof computeDelta> } => {
+  const file = path.join(dir, 'state.json')
+  fs.writeFileSync(file, JSON.stringify({ cookies: [cookie('s', 'a.example.com', 'old')], origins: [] }))
+  return { file, delta: (name, value) => computeDelta({ cookies: [], origins: [] }, { cookies: [cookie(name, 'a.example.com', value)], origins: [] }, A) }
+}
+const eperm = (code = 'EPERM') => Object.assign(new Error(code + ': operation not permitted'), { code })
+const failing = (times: number, code = 'EPERM') => {
+  const calls = { rename: 0, sleeps: [] as number[] }
+  return { calls, io: {
+    platform: 'win32' as const,
+    rename: (from: string, to: string) => { if (calls.rename++ < times) throw eperm(code); fs.renameSync(from, to) },
+    sleep: async (ms: number) => { calls.sleeps.push(ms) },
+  } }
+}
+
+test('a rename that Windows refuses (EPERM, EBUSY, EACCES) is retried and then succeeds; the .bak goes through the same path', async () => {
+  for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+    const dir = tmp()
+    const { file, delta } = seed(dir)
+    const { io, calls } = failing(3, code)
+    assert.equal(await mergeIntoFile(file, delta('n', '1'), io), 'written')
+    assert.equal(calls.sleeps.length, 3, code)
+    assert.ok(calls.sleeps.every((ms, index) => index === 0 || ms >= calls.sleeps[index - 1]!), 'backoff does not shrink')
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).cookies.map((c: StorageCookie) => c.name).sort(), ['n', 's'])
+    assert.equal(JSON.parse(fs.readFileSync(file + '.bak', 'utf8')).cookies[0].value, 'old')
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['state.json', 'state.json.bak'])
+  }
+})
+
+test('a rename that never succeeds fails within the budget with a readable reason, leaves the old file and its .bak intact and no temporary file', async () => {
+  const dir = tmp()
+  const { file, delta } = seed(dir)
+  fs.writeFileSync(file + '.bak', 'older')
+  const before = fs.readFileSync(file, 'utf8')
+  const started = Date.now()
+  const error = await mergeIntoFile(file, delta('n', '1'), { platform: 'win32', rename: () => { throw eperm() }, budgetMs: 150 }).then(() => undefined, (e: unknown) => e)
+  assert.ok(error instanceof StateWriteError)
+  assert.equal(error.code, 'EPERM')
+  assert.match(error.message, /open in another program/)
+  assert.match(error.message, /refreshed login was not saved/)
+  assert.ok(!error.message.includes(dir), 'no path in the message')
+  assert.ok(Date.now() - started < 1500, 'bounded')
+  assert.equal(fs.readFileSync(file, 'utf8'), before)
+  assert.equal(fs.readFileSync(file + '.bak', 'utf8'), 'older', 'the .bak is intact: the main file is not touched when the .bak cannot be written')
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['state.json', 'state.json.bak'])
+})
+
+test('another error code (ENOSPC) is not retried, and neither is EPERM off Windows', async () => {
+  const dir = tmp()
+  const { file, delta } = seed(dir)
+  const { io, calls } = failing(5, 'ENOSPC')
+  await assert.rejects(mergeIntoFile(file, delta('n', '1'), io), (error: unknown) => error instanceof StateWriteError && error.code === 'ENOSPC' && /could not be written/.test(error.message))
+  assert.equal(calls.rename, 1)
+  assert.equal(calls.sleeps.length, 0)
+  const other = failing(5)
+  await assert.rejects(mergeIntoFile(file, delta('n', '1'), { ...other.io, platform: 'linux' }), StateWriteError)
+  assert.equal(other.calls.rename, 1)
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['state.json'])
+})
+
+test('two write-backs under the per-file lock while the first is retrying: both deltas end up in the file', async () => {
+  const dir = tmp()
+  const { file, delta } = seed(dir)
+  const mutex = new KeyedMutex()
+  const key = stateFileKey(file)
+  let attempts = 0
+  const slow = { platform: 'win32' as const, rename: (from: string, to: string) => { if (attempts++ < 3) throw eperm(); fs.renameSync(from, to) }, sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms * 5)) }
+  const writeBack = async (name: string, io: typeof slow | {}) => { const unlock = await mutex.acquire(key); try { return await mergeIntoFile(file, delta(name, name), io) } finally { unlock() } }
+  const first = writeBack('first', slow)
+  const second = writeBack('second', {})
+  assert.deepEqual(await Promise.all([first, second]), ['written', 'written'])
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).cookies.map((c: StorageCookie) => c.name).sort(), ['first', 's', 'second'])
+})
+
+test('lock keys: case variants of a missing file share a key on win32 only', () => {
+  const dir = fs.realpathSync(tmp())
+  const upper = path.join(dir, 'Later.json')
+  const lower = path.join(dir, 'later.json')
+  assert.equal(stateFileKey(upper, 'win32'), stateFileKey(lower, 'win32'))
+  assert.equal(stateFileKey(upper, 'darwin') === stateFileKey(lower, 'darwin'), false, 'no folding where the volume may be case-sensitive')
+})
+
+test('lock keys: spellings of an existing file share one key through the native realpath (shown for real when the volume is case-insensitive)', t => {
+  const dir = fs.realpathSync.native(tmp())
+  const file = path.join(dir, 'State.json')
+  fs.writeFileSync(file, '{}')
+  const swapped = path.join(dir, 'state.json')
+  if (!fs.existsSync(swapped)) return t.skip('this volume is case-sensitive: case variants are different files here')
+  assert.equal(stateFileKey(swapped), stateFileKey(file))
+  assert.equal(stateFileKey(path.join(dir.toUpperCase(), 'STATE.JSON')), stateFileKey(file))
 })

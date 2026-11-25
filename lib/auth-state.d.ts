@@ -92,8 +92,14 @@ export type WriteBackOutcome = {
     reason: string;
     at: number;
 };
-/** Key of a state file: its real path (the directory's, when the file does not exist yet), so two spellings of one file share a lock. */
-export declare function stateFileKey(file: string): string;
+/**
+ * Key of a state file: its canonical real path (the directory's, when the file does not exist yet), so two spellings of one
+ * file share a lock. `realpathSync.native` is used because the JS `realpathSync` keeps the spelling it was given on Windows
+ * (case, 8.3 short names) and on case-insensitive macOS volumes. On Windows the key is also case-folded (the file system is
+ * case-insensitive, and a file that does not exist yet has only its given spelling); elsewhere it is not (a volume may be
+ * case-sensitive).
+ */
+export declare function stateFileKey(file: string, platform?: NodeJS.Platform): string;
 export declare class StateLockError extends Error {
     constructor(message: string);
 }
@@ -117,9 +123,25 @@ export declare function captureStorageState(context: {
         indexedDB?: boolean;
     }) => Promise<StorageState>;
 }): Promise<StorageState>;
+/** A state file could not be written. `message` says what the user can do and what was lost; it holds no path. */
+export declare class StateWriteError extends Error {
+    readonly code: string;
+    constructor(code: string, message: string, cause?: unknown);
+}
+/** Seams for the write (tests inject them); the defaults are the real file system and clock. */
+export interface WriteIo {
+    rename?: (from: string, to: string) => void | Promise<void>;
+    sleep?: (ms: number) => Promise<void>;
+    platform?: NodeJS.Platform;
+    /** Total time the rename is retried for, in ms (default {@link RENAME_RETRY_BUDGET_MS}). */
+    budgetMs?: number;
+}
+export declare const RENAME_RETRY_BUDGET_MS = 2000;
 /**
  * Merge a delta into the file as it is NOW (a profile whose file does not exist yet gets it, even empty: that is how a
  * `persistState` profile is bootstrapped) and write it, keeping the previous content as `<file>.bak` (one generation).
  * Nothing is written when the merge changes nothing. A current file that cannot be parsed is never overwritten.
+ * Async only because a rename that Windows refuses is retried for up to {@link RENAME_RETRY_BUDGET_MS}; the caller holds
+ * the per-file lock for the whole time. Failure throws {@link StateWriteError}; no temporary file is left.
  */
-export declare function mergeIntoFile(file: string, delta: StateDelta): 'written' | 'unchanged';
+export declare function mergeIntoFile(file: string, delta: StateDelta, io?: WriteIo): Promise<'written' | 'unchanged'>;

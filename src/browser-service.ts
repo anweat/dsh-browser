@@ -33,7 +33,7 @@ import { BUILTIN_SCRIPTS, builtinScript, executeUserscript, validateUserscript, 
 import { configuredBrowserActions, configuredBrowserTools, type AutomationMode } from './freedom.ts'
 import { describeOpencliError, filterOpencliCatalog, parseOpencliCatalog, parseOpencliCatalogPage, parseOpencliFailure, parseOpencliHelp, type OpencliCatalogFilter, type OpencliCatalogItem } from './opencli-catalog.ts'
 import { UsageGovernor } from './usage-policy.ts'
-import { KeyedMutex, captureStorageState, computeDelta, mergeIntoFile, scopeState, stateFileKey, writeBackSkipReason, type StorageState, type WriteBackHint, type WriteBackOutcome } from './auth-state.ts'
+import { KeyedMutex, captureStorageState, computeDelta, mergeIntoFile, scopeState, StateWriteError, stateFileKey, writeBackSkipReason, type StorageState, type WriteBackHint, type WriteBackOutcome } from './auth-state.ts'
 import { DEFAULT_SEARCH_TIMEOUT_MS, MAX_RESULTS, NO_WRITE_BACK_STATES, POLL_MS, SearchJudge, navigationFailure, normalizeSample, signalsExpression, stripUrl, type PlatformSpec, type SearchItem, type SearchPageResult, type Verdict } from './search-signals.ts'
 import { PolicyOverlayStore, domainBase, type AuditEntry, type ChangeMeta, type Direction, type PolicyChange, type PolicyDiff } from './policy-overlay.ts'
 import { installDialogGuard } from './dialogs.ts'
@@ -518,6 +518,8 @@ export class BrowserService {
   private readonly stateUse = new KeyedMutex()
   /** The short read-merge-write of a state file, for transient and interactive write-backs alike. */
   private readonly stateWrite = new KeyedMutex()
+  /** Write-backs in flight (including the fire-and-forget one of a page that closed itself); `close()` waits for them. */
+  private readonly pendingWriteBacks = new Set<Promise<void>>()
   /** What a `persistState` context was given and must write back; released when the context is closed. */
   private readonly writeBacks = new WeakMap<object, WriteBackHandle>()
   /** The last write-back outcome per auth profile id (no cookie names, values or paths). */
@@ -970,7 +972,15 @@ export class BrowserService {
    * never the context's whole state over the file; see src/auth-state.ts for the rules and for when nothing is written.
    * Failed persistence still throws, so it is never reported as success. The per-file lock is released here.
    */
-  private async persistAndClose(session: { context: any; profile?: ResolvedAuthProfile }): Promise<void> {
+  private persistAndClose(session: { context: any; profile?: ResolvedAuthProfile }): Promise<void> {
+    const run = this.persistAndCloseNow(session)
+    this.pendingWriteBacks.add(run)
+    const forget = () => { this.pendingWriteBacks.delete(run) }
+    run.then(forget, forget)
+    return run
+  }
+
+  private async persistAndCloseNow(session: { context: any; profile?: ResolvedAuthProfile }): Promise<void> {
     const handle = this.writeBacks.get(session.context)
     this.writeBacks.delete(session.context)
     try {
@@ -995,9 +1005,9 @@ export class BrowserService {
         if (skip) { this.lastWriteBack.set(profile.id, { outcome: 'skipped', reason: skip, at }); return }
         const unlock = await this.stateWrite.acquire(stateFileKey(profile.storageStatePath), { label: 'login state of auth profile ' + profile.id })
         try {
-          this.lastWriteBack.set(profile.id, { outcome: mergeIntoFile(profile.storageStatePath, delta), at })
+          this.lastWriteBack.set(profile.id, { outcome: await mergeIntoFile(profile.storageStatePath, delta), at })
         } catch (error) {
-          this.lastWriteBack.set(profile.id, { outcome: 'failed', reason: String((error as NodeJS.ErrnoException)?.code ?? 'error'), at })
+          this.lastWriteBack.set(profile.id, { outcome: 'failed', reason: error instanceof StateWriteError ? error.message : String((error as NodeJS.ErrnoException)?.code ?? 'error'), at })
           throw error
         } finally { unlock() }
       }
@@ -2431,6 +2441,8 @@ export class BrowserService {
     for (const state of [...this.sessions.values()]) await this.closePage(state)
     this.sessions.clear()
     this.journals.clear()
+    // A write-back that is retrying a rename is bounded by RENAME_RETRY_BUDGET_MS, so this cannot hang.
+    await Promise.allSettled([...this.pendingWriteBacks])
     const b = this.browser
     this.browser = undefined
     this.launching = undefined

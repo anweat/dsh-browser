@@ -21,7 +21,7 @@
 - **不拿坏结果覆盖好登录**：短操作遇到下面的情况**不写回**：平台搜索的结论是 `needs_login` / `captcha` / `blocked` / `rate_limited` / `site_error` / `network` / `timeout`；render / snapshot / 脚本的主文档状态是 401 / 403 / 429 / 5xx，或页面有登录 / 验证码信号且这次删掉了基线里的 cookie；任何短操作的增量会删掉基线里**全部**cookie。交互会话照写，因为用户可能是有意登出。
 - **备份与保护**：内容有变化时，先把原文件留成 `<文件>.bak`（0600，只留一代，原子写），再原子替换；没有变化就不写。目录 0700、文件 0600。当前文件解析不了（损坏）时**不覆盖**，直接报错，不假装成功。
 - **IndexedDB**：关闭时用 `storageState({ indexedDB: true })` 取状态，所以 IndexedDB 里的登录信息能活到下次。取失败或结果超过 5 MiB 时退回不含 IndexedDB 的状态，文件里已有的 IndexedDB 原样保留。
-- **看结果**：`runtime.status` 的 `authProfiles[].writeBack` 给出该 profile 最近一次回写的结果：`written` / `unchanged` / `skipped`（带一句原因，如 `search page state needs_login`）/ `failed`（带错误码）和时间；没有 cookie 名、值或路径。只反映本进程内的最近一次。
+- **看结果**：`runtime.status` 的 `authProfiles[].writeBack` 给出该 profile 最近一次回写的结果：`written` / `unchanged` / `skipped`（带一句原因，如 `search page state needs_login`）/ `failed`（带原因：Windows 上状态文件被别的程序打开时写明“刷新后的登录没有保存”，其他情况带错误码）和时间；没有 cookie 名、值或路径。只反映本进程内的最近一次。
 
 **不保证的事**：多个 DSH 进程同时用一个状态文件时，锁只在进程内；增量合并仍保证不丢别人的数据，但两个进程可能从同一个一次性 token 起步。站点端的设备绑定、IP 变化、行为风控不在这里的范围。
 

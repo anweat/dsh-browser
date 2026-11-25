@@ -167,7 +167,7 @@ describe('login state and searchPage in a real browser', { skip: detection.ok ? 
     assert.deepEqual(both.map(items => items.length), [5, 5, 5, 5], 'two profiles on one file, concurrently')
     assert.equal(site.site('sa').revoked + site.site('sb').revoked, 0)
     assert.ok(fs.existsSync(files('shared') + '.bak'), 'the previous generation is kept')
-    assert.equal(fs.statSync(files('shared')).mode & 0o777, 0o600)
+    if (process.platform !== 'win32') assert.equal(fs.statSync(files('shared')).mode & 0o777, 0o600)
   })
 
   it('a transient "please log in" answer that clears the cookies is reported as needs_login and does not cost the login', async () => {

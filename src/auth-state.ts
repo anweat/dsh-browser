@@ -157,11 +157,18 @@ export type WriteBackOutcome =
 
 // ── locks ───────────────────────────────────────────────────────────────────
 
-/** Key of a state file: its real path (the directory's, when the file does not exist yet), so two spellings of one file share a lock. */
-export function stateFileKey(file: string): string {
-  try { return fs.realpathSync(file) } catch { /* not there yet */ }
+/**
+ * Key of a state file: its canonical real path (the directory's, when the file does not exist yet), so two spellings of one
+ * file share a lock. `realpathSync.native` is used because the JS `realpathSync` keeps the spelling it was given on Windows
+ * (case, 8.3 short names) and on case-insensitive macOS volumes. On Windows the key is also case-folded (the file system is
+ * case-insensitive, and a file that does not exist yet has only its given spelling); elsewhere it is not (a volume may be
+ * case-sensitive).
+ */
+export function stateFileKey(file: string, platform: NodeJS.Platform = process.platform): string {
+  const fold = (key: string) => platform === 'win32' ? key.toLowerCase() : key
+  try { return fold(fs.realpathSync.native(file)) } catch { /* not there yet */ }
   const resolved = path.resolve(file)
-  try { return path.join(fs.realpathSync(path.dirname(resolved)), path.basename(resolved)) } catch { return resolved }
+  try { return fold(path.join(fs.realpathSync.native(path.dirname(resolved)), path.basename(resolved))) } catch { return fold(resolved) }
 }
 
 export class StateLockError extends Error {
@@ -230,14 +237,55 @@ function readCurrent(file: string): StorageState | undefined {
   return parsed as StorageState
 }
 
-function atomicWrite(file: string, content: string): void {
+/** A state file could not be written. `message` says what the user can do and what was lost; it holds no path. */
+export class StateWriteError extends Error {
+  readonly code: string
+  constructor(code: string, message: string, cause?: unknown) { super(message, { cause }); this.name = 'StateWriteError'; this.code = code }
+}
+
+/** Seams for the write (tests inject them); the defaults are the real file system and clock. */
+export interface WriteIo {
+  rename?: (from: string, to: string) => void | Promise<void>
+  sleep?: (ms: number) => Promise<void>
+  platform?: NodeJS.Platform
+  /** Total time the rename is retried for, in ms (default {@link RENAME_RETRY_BUDGET_MS}). */
+  budgetMs?: number
+}
+
+/** On Windows a rename onto a file that any other process has open fails with these codes until it is closed. */
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+export const RENAME_RETRY_BUDGET_MS = 2000
+
+async function renameWithRetry(from: string, to: string, io: WriteIo): Promise<void> {
+  const rename = io.rename ?? fs.renameSync
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
+  const retry = (io.platform ?? process.platform) === 'win32'
+  const budget = io.budgetMs ?? RENAME_RETRY_BUDGET_MS
+  const started = Date.now()
+  let delay = 10
+  for (;;) {
+    try { await rename(from, to); return } catch (error) {
+      const code = String((error as NodeJS.ErrnoException)?.code ?? 'error')
+      if (!retry || !RENAME_RETRY_CODES.has(code)) throw error
+      const left = budget - (Date.now() - started)
+      if (left <= 0) throw error
+      await sleep(Math.min(delay, left))
+      delay = Math.min(delay * 2, 250)
+    }
+  }
+}
+
+async function atomicWrite(file: string, content: string, io: WriteIo): Promise<void> {
   const temporary = file + '.tmp-' + crypto.randomUUID().slice(0, 8)
   try {
     fs.writeFileSync(temporary, content, { encoding: 'utf8', mode: 0o600 })
-    fs.renameSync(temporary, file)
+    await renameWithRetry(temporary, file, io)
   } catch (error) {
     try { fs.rmSync(temporary, { force: true }) } catch { /* best effort */ }
-    throw error
+    const code = String((error as NodeJS.ErrnoException)?.code ?? 'error')
+    throw new StateWriteError(code, RENAME_RETRY_CODES.has(code)
+      ? `the login state file is open in another program (${code}), so the refreshed login was not saved; the previous file is unchanged. Close the program that has it open (antivirus, sync or indexing tools can too) and log in again if the login stops working`
+      : `the login state file could not be written (${code}), so the refreshed login was not saved; the previous file is unchanged`, error)
   }
 }
 
@@ -245,14 +293,16 @@ function atomicWrite(file: string, content: string): void {
  * Merge a delta into the file as it is NOW (a profile whose file does not exist yet gets it, even empty: that is how a
  * `persistState` profile is bootstrapped) and write it, keeping the previous content as `<file>.bak` (one generation).
  * Nothing is written when the merge changes nothing. A current file that cannot be parsed is never overwritten.
+ * Async only because a rename that Windows refuses is retried for up to {@link RENAME_RETRY_BUDGET_MS}; the caller holds
+ * the per-file lock for the whole time. Failure throws {@link StateWriteError}; no temporary file is left.
  */
-export function mergeIntoFile(file: string, delta: StateDelta): 'written' | 'unchanged' {
+export async function mergeIntoFile(file: string, delta: StateDelta, io: WriteIo = {}): Promise<'written' | 'unchanged'> {
   const current = readCurrent(file)
   const merged = applyDelta(current, delta)
   const exists = current !== undefined
   if (exists && same(applyDelta(current, { cookieUpserts: [], cookieDeletes: [], origins: [], baselineCookies: 0 }), merged)) return 'unchanged'
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
-  if (exists) atomicWrite(file + '.bak', fs.readFileSync(file, 'utf8'))
-  atomicWrite(file, JSON.stringify(merged, null, 2))
+  if (exists) await atomicWrite(file + '.bak', fs.readFileSync(file, 'utf8'), io)
+  await atomicWrite(file, JSON.stringify(merged, null, 2), io)
   return 'written'
 }

@@ -339,6 +339,8 @@ export declare class BrowserService {
     private readonly stateUse;
     /** The short read-merge-write of a state file, for transient and interactive write-backs alike. */
     private readonly stateWrite;
+    /** Write-backs in flight (including the fire-and-forget one of a page that closed itself); `close()` waits for them. */
+    private readonly pendingWriteBacks;
     /** What a `persistState` context was given and must write back; released when the context is closed. */
     private readonly writeBacks;
     /** The last write-back outcome per auth profile id (no cookie names, values or paths). */
@@ -469,6 +471,7 @@ export declare class BrowserService {
      * Failed persistence still throws, so it is never reported as success. The per-file lock is released here.
      */
     private persistAndClose;
+    private persistAndCloseNow;
     render(url: string, rules: readonly RenderRule[], opts?: {
         signal?: AbortSignal;
         maxChars?: number;
