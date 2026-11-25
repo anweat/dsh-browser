@@ -27,7 +27,7 @@ function stringField(value: unknown): string {
 export function parseOpencliCatalog(stdout: string): OpencliCatalogItem[] {
   let parsed: unknown
   try { parsed = JSON.parse(stdout) } catch { throw new Error('OpenCLI catalog did not return valid JSON') }
-  if (!Array.isArray(parsed)) throw new Error('OpenCLI catalog JSON must be an array')
+  if (!Array.isArray(parsed)) throw new Error('OpenCLI catalog JSON must be an array (OpenCLI 2.x answers with an object and is not supported yet: opencli.status names the installed version)')
   return parsed.flatMap((value): OpencliCatalogItem[] => {
     if (!value || typeof value !== 'object') return []
     const row = value as Record<string, unknown>

@@ -322,6 +322,43 @@ export function opencliLocation(): OpencliLocation | undefined {
   return location
 }
 
+/** The OpenCLI range this plugin works with (`peerDependencies`): 2.x changed the JSON of `list` and of every result and is not adapted to yet. */
+export const OPENCLI_SUPPORTED_RANGE = '>=1.8.0 <2'
+
+/** `version` of the OpenCLI package at `packageDir`, read from its package.json (no process is started). */
+export function opencliVersionOf(packageDir: string): string | undefined {
+  try {
+    const version = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'))?.version
+    return typeof version === 'string' && version.trim() ? version.trim() : undefined
+  } catch { return undefined }
+}
+
+/** True for a version whose major is 2 or more. A version that cannot be read is not judged. */
+export function opencliVersionUnsupported(version: string | undefined): boolean {
+  const major = /^v?(\d+)\./.exec(version ?? '')?.[1]
+  return major !== undefined && Number(major) >= 2
+}
+
+/** What to tell the user whose OpenCLI is too new. Names the version and the install that works. */
+export function opencliUnsupportedMessage(version: string): string {
+  return `OpenCLI ${version} is installed, but dsh-browser supports OpenCLI ${OPENCLI_SUPPORTED_RANGE} only (2.x changed the JSON of its results and of \`list\`; it is not supported yet). `
+    + 'Install the supported version with `npm i -g @jackwener/opencli@1.8.8` and restart DSH. No OpenCLI command was run.'
+}
+
+export type OpencliSupport =
+  | { state: 'missing' }
+  | { state: 'ok'; location: OpencliLocation; version?: string }
+  | { state: 'unsupported'; location: OpencliLocation; version: string; message: string }
+
+/** Where OpenCLI is and whether its version is one this plugin supports, decided from its package.json next to the located entry. */
+export function opencliSupport(): OpencliSupport {
+  const location = opencliLocation()
+  if (!location) return { state: 'missing' }
+  const version = opencliVersionOf(location.packageDir)
+  if (version && opencliVersionUnsupported(version)) return { state: 'unsupported', location, version, message: opencliUnsupportedMessage(version) }
+  return { state: 'ok', location, ...version ? { version } : {} }
+}
+
 /** What to tell the user when OpenCLI was not found: names a wrong `DSH_BROWSER_OPENCLI` first, since that one is theirs to fix. */
 export function opencliMissingMessage(): string {
   const override = process.env.DSH_BROWSER_OPENCLI?.trim()

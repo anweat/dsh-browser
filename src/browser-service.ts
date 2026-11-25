@@ -22,7 +22,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { browserRuntimeCliPath, loadBrowserRuntime, opencliLocation, opencliMissingMessage, runOpencli, runNode, type CliResult, type OpencliSource } from './deps.ts'
+import { browserRuntimeCliPath, loadBrowserRuntime, opencliLocation, opencliMissingMessage, opencliSupport, runOpencli, runNode, type CliResult, type OpencliSource } from './deps.ts'
 import { browserInstallAdvice, detectSystemBrowsers, planBrowser, type BrowserPlan, type SystemBrowser } from './system-browser.ts'
 import type { ResolvedConfig } from './config.ts'
 import { AuthProfileStore, hostAllowed, type ResolvedAuthProfile } from './auth-profiles.ts'
@@ -206,6 +206,10 @@ export interface BrowserStatus {
   headless: boolean
   opencliEnabled: boolean
   opencliInstalled: boolean
+  /** Version read from the installed OpenCLI's package.json. */
+  opencliVersion?: string
+  /** Set when the installed OpenCLI is a version this plugin does not support (2.x): every opencli.* action refuses it with this text. */
+  opencliUnsupported?: string
   opencliEntryPath?: string
   /** Where OpenCLI was found (`plugin`, `path`, `global-npm`, ...). Absent when it is not installed. */
   opencliSource?: OpencliSource
@@ -1167,13 +1171,16 @@ export class BrowserService {
 
   opencliAvailable(): boolean {
     if (!this.config.enabled || !this.config.opencliEnabled) return false
-    return opencliLocation() !== undefined
+    return opencliSupport().state === 'ok'
   }
 
   opencli(args: string[], opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CliResult> {
     if (!this.config.enabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: browser service is disabled', timedOut: false })
     if (!this.config.opencliEnabled) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI is disabled', timedOut: false })
-    if (!this.opencliAvailable()) return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: ' + opencliMissingMessage(), timedOut: false })
+    if (!this.opencliAvailable()) {
+      const support = opencliSupport()
+      return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: ' + (support.state === 'unsupported' ? support.message : opencliMissingMessage()), timedOut: false })
+    }
     if (args.length < 1 || args.length > 40 || args.some(arg => typeof arg !== 'string' || arg.length > 2_000)) {
       return Promise.resolve({ code: -1, stdout: '', stderr: 'dsh-browser: OpenCLI requires 1 to 40 arguments, each at most 2000 characters', timedOut: false })
     }
@@ -1192,6 +1199,8 @@ export class BrowserService {
 
   async opencliCatalog(filter: OpencliCatalogFilter = {}, signal?: AbortSignal): Promise<OpencliCatalogItem[]> {
     if (!this.config.opencliEnabled) throw new Error('dsh-browser: OpenCLI is disabled')
+    const support = opencliSupport()
+    if (support.state === 'unsupported') throw new Error('dsh-browser: ' + support.message)
     if (!this.opencliCatalogCache) {
       const result = await this.opencli(['list', '-f', 'json'], { timeoutMs: 60_000, signal })
       if (result.code !== 0 || result.timedOut) throw new Error('OpenCLI catalog failed: ' + (result.stderr || result.stdout).slice(0, 500))
@@ -2241,7 +2250,8 @@ export class BrowserService {
         chromiumInstalled = fs.existsSync(chromiumExecutablePath)
       }
     } catch { chromiumInstalled = false }
-    const opencli = opencliLocation()
+    const support = opencliSupport()
+    const opencli = support.state === 'missing' ? undefined : support.location
     const opencliInstalled = opencli !== undefined
     const resolvedOpencliEntryPath = opencli ? path.resolve(opencli.entry) : undefined
     const runtimeWarnings = this.config.browserRuntime === 'patchright'
@@ -2258,6 +2268,8 @@ export class BrowserService {
       runtimeWarnings.push(`Expected Chromium executable is missing: ${chromiumExecutablePath ?? '(unknown)'}. ${this.launchFailure(plan)}`)
     }
     // OpenCLI is optional (it is not a dependency of this package), so its absence is reported as a hint, not a warning.
+    // A version this plugin does not support is a warning: it is installed and enabled, and every opencli.* action refuses it.
+    if (this.config.opencliEnabled && support.state === 'unsupported') runtimeWarnings.push(support.message)
     runtimeWarnings.push(...this.config.configWarnings)
     this.refreshPolicy()
     if (this.policyStore.warning) runtimeWarnings.push(this.policyStore.warning)
@@ -2271,6 +2283,8 @@ export class BrowserService {
       opencliInstalled,
       ...resolvedOpencliEntryPath ? { opencliEntryPath: resolvedOpencliEntryPath } : {},
       ...opencli ? { opencliSource: opencli.source } : {},
+      ...support.state !== 'missing' && support.version ? { opencliVersion: support.version } : {},
+      ...support.state === 'unsupported' ? { opencliUnsupported: support.message } : {},
       ...this.config.opencliEnabled && !opencliInstalled ? { opencliInstallHint: opencliMissingMessage() } : {},
       automationMode: this.config.automationMode,
       exposedTools: configuredBrowserTools(this.config.automationMode, this.config.automationAssets, this.config.enabled, this.config.toolSurface),
